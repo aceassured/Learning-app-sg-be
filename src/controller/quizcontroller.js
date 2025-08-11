@@ -1,0 +1,195 @@
+// src/controller/quizcontroller.js
+import pool from "../../database.js";
+
+// helper: get today's quiz status
+export const getHomeData = async (req, res) => {
+  const userId = req.userId;
+  try {
+    // 1) check today's session
+    const todayRes = await pool.query(
+      `SELECT s.*, COUNT(a.*) AS answered_count
+       FROM user_quiz_sessions s
+       LEFT JOIN user_answers a ON a.session_id = s.id
+       WHERE s.user_id = $1 AND s.started_at::date = current_date
+       GROUP BY s.id
+       ORDER BY s.started_at DESC
+       LIMIT 1`, [userId]
+    );
+    const todaySession = todayRes.rows[0] || null;
+
+    // 2) week progress (7 days starting monday? we'll use current_date - 6 .. today)
+    const weekDatesRes = await pool.query(
+      `SELECT activity_date, correct_count, incorrect_count FROM user_activity
+       WHERE user_id = $1 AND activity_date >= (current_date - INTERVAL '6 days')
+       ORDER BY activity_date`, [userId]
+    );
+
+    const weekMap = {};
+    weekDatesRes.rows.forEach(r => {
+      weekMap[r.activity_date.toISOString().slice(0,10)] = r;
+    });
+
+    // compute streak: consecutive days in the current 7-day window that are completed
+    // completed means any quiz completed (we consider correct+incorrect > 0)
+    let streak = 0;
+    let consecutive = 0;
+    // check last 7 days from 6 days ago to today
+    for (let i = 6; i >=0; i--) {
+      const date = new Date();
+      date.setDate(date.getDate() - i);
+      const dayKey = date.toISOString().slice(0,10);
+      const entry = weekMap[dayKey];
+      if (entry && (entry.correct_count + entry.incorrect_count) > 0) {
+        consecutive++;
+      } else {
+        consecutive = 0;
+      }
+    }
+    // if all 7 are completed, we show 7 else show 0 for full-week flag
+    const all7 = Object.keys(weekMap).length === 7 && Object.values(weekMap).every(e => e.correct_count + e.incorrect_count > 0);
+
+    // monthly target: sum activity of this month
+    const monthRes = await pool.query(
+      `SELECT SUM(correct_count) as correct, SUM(incorrect_count) as incorrect
+       FROM user_activity WHERE user_id = $1 AND date_trunc('month', activity_date) = date_trunc('month', current_date)`, [userId]
+    );
+
+    const month = monthRes.rows[0] || {correct: 0, incorrect: 0};
+    const completedThisMonth = +(month.correct || 0) + +(month.incorrect || 0);
+
+    res.json({
+      ok:true,
+      todaySession,
+      week: weekDatesRes.rows,
+      all7: all7 ? 7 : 0,
+      consecutive,
+      monthly: { completed: completedThisMonth, target: 25 } // you may pull actual target from settings
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ ok:false, message:'Server error' });
+  }
+};
+
+
+// start quiz: create session, fetch N questions according to user settings
+export const startQuiz = async (req, res) => {
+  try {
+    const userId = req.userId;
+    // fetch user settings
+    const userRes = await pool.query('SELECT questions_per_day FROM users WHERE id=$1', [userId]);
+    const qpd = userRes.rows[0]?.questions_per_day || 10;
+    // pick questions from user's selected subjects or random
+    const qRes = await pool.query(`SELECT id, question_text, options FROM questions ORDER BY random() LIMIT $1`, [qpd]);
+    const questions = qRes.rows;
+
+    // create session
+    const sessionRes = await pool.query(
+      `INSERT INTO user_quiz_sessions (user_id, started_at, allowed_duration_seconds, total_questions)
+       VALUES ($1, now(), 300, $2) RETURNING *`,
+      [userId, questions.length]
+    );
+
+    const session = sessionRes.rows[0];
+
+    res.json({ ok:true, session, questions });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ ok:false, message:'Server error' });
+  }
+};
+
+// submit answers for a session (array of {question_id, selected_option_id})
+export const submitAnswers = async (req, res) => {
+  try {
+    const userId = req.userId;
+    const { session_id, answers } = req.body;
+
+    if (!session_id || !Array.isArray(answers)) {
+      return res.status(400).json({ ok: false, message: 'Invalid payload' });
+    }
+
+    // validate session
+    const sessionRes = await pool.query(
+      'SELECT * FROM user_quiz_sessions WHERE id=$1 AND user_id=$2',
+      [session_id, userId]
+    );
+    const session = sessionRes.rows[0];
+    if (!session) {
+      return res.status(404).json({ ok: false, message: 'Session not found' });
+    }
+
+    // insert answers and compute score
+    let correctCount = 0;
+    for (const ans of answers) {
+      const qRes = await pool.query(
+        'SELECT correct_option_id FROM questions WHERE id=$1',
+        [ans.question_id]
+      );
+      if (!qRes.rowCount) continue;
+
+      const correct = qRes.rows[0].correct_option_id;
+      const is_correct = (correct === ans.selected_option_id);
+      if (is_correct) correctCount++;
+
+      await pool.query(
+        `INSERT INTO user_answers (session_id, question_id, selected_option_id, is_correct, answered_at)
+         VALUES ($1, $2, $3, $4, now())
+         ON CONFLICT (session_id, question_id)
+         DO UPDATE SET 
+            selected_option_id = EXCLUDED.selected_option_id,
+            is_correct = EXCLUDED.is_correct,
+            answered_at = now()`,
+        [session_id, ans.question_id, ans.selected_option_id, is_correct]
+      );
+    }
+
+    // update session finish
+    await pool.query(
+      `UPDATE user_quiz_sessions 
+       SET finished_at = now(), score = $1 
+       WHERE id = $2`,
+      [correctCount, session_id]
+    );
+
+    // update user_activity table for the date
+    const incorrectCount = answers.length - correctCount;
+    await pool.query(
+      `INSERT INTO user_activity (user_id, activity_date, correct_count, incorrect_count)
+       VALUES ($1, current_date, $2, $3)
+       ON CONFLICT (user_id, activity_date)
+       DO UPDATE SET 
+          correct_count = user_activity.correct_count + $2, 
+          incorrect_count = user_activity.incorrect_count + $3`,
+      [userId, correctCount, incorrectCount]
+    );
+
+    res.json({ ok: true, score: correctCount, total: answers.length });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ ok: false, message: 'Server error' });
+  }
+};
+
+
+// quiz review: return questions + user answers for a session
+export const reviewSession = async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+    const userId = req.userId;
+    const sRes = await pool.query('SELECT * FROM user_quiz_sessions WHERE id=$1 AND user_id=$2', [sessionId, userId]);
+    if (!sRes.rowCount) return res.status(404).json({ ok:false, message:'Session not found' });
+
+    const qRes = await pool.query(
+      `SELECT a.*, q.question_text, q.options, q.correct_option_id
+       FROM user_answers a
+       JOIN questions q ON q.id = a.question_id
+       WHERE a.session_id = $1`, [sessionId]
+    );
+
+    res.json({ ok:true, answers: qRes.rows });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ ok:false, message:'Server error' });
+  }
+};
