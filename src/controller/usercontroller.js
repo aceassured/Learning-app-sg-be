@@ -30,21 +30,24 @@ export const login = async (req, res) => {
 
 export const register = async (req, res) => {
   try {
-    const { email, phone, name, grade_level, selected_subjects, daily_reminder_time, questions_per_day } = req.body;
+    const { email, phone, name, grade_level, selected_subjects, daily_reminder_time, questions_per_day, school_name } = req.body;
 
+    console.log(req.body)
     if (!grade_level || !selected_subjects || selected_subjects.length < 3 || !questions_per_day) {
       return res.status(400).json({ ok: false, message: 'Missing or invalid fields. Select minimum 3 subjects.' });
     }
 
     const user = await createUser({
-      email: email,
-      phone: phone,
+      email: email || null,
+      phone: phone || null,
       name: name,
       grade_level,
       selected_subjects,
       daily_reminder_time,
       questions_per_day,
-      profile_photo_url: null
+      profile_photo_url: null,
+      school_name
+      
     });
 
     const token = jwt.sign({ userId: user.id }, JWT_SECRET, { expiresIn: '7d' });

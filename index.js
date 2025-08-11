@@ -6,6 +6,7 @@ import pool from "./database.js"
 import userRouter from "./src/router/userrouter.js"
 import quizRouter from "./src/router/quizrouter.js"
 import forumRouter from "./src/router/forumrouter.js"
+import progressStates from "./src/router/progressRoutes.js"
 
 dotenv.config({ quiet: true })
 
@@ -20,6 +21,7 @@ app.use(helmet())
 
 const corsOptions = {
     origin: [
+        'https://learing-app-sg-fe.vercel.app',
         'http://localhost:5173', 
         'http://localhost:3000',
     ],
@@ -34,6 +36,7 @@ app.use(cors(corsOptions));
 app.use('/api/user', userRouter);
 app.use('/api/quiz', quizRouter);
 app.use('/api/forum', forumRouter);
+app.use('/api/progress', progressStates);
 
 
 app.get("/",async(req,res)=>{

@@ -31,18 +31,19 @@ export const createPost = async (req, res) => {
     );
     const post = postRes.rows[0];
 
-    // handle uploaded files in req.files (multer memory storage)
     if (req.files && req.files.length) {
       for (const f of req.files) {
-        // upload to Vercel Blob
         const url = await uploadBufferToVercel(f.buffer, f.originalname);
-        await pool.query(`INSERT INTO forum_files (post_id, url, filename) VALUES ($1,$2,$3)`, [post.id, url, f.originalname]);
+        await pool.query(
+          `INSERT INTO forum_files (post_id, url, filename) VALUES ($1,$2,$3)`,
+          [post.id, url, f.originalname]
+        );
       }
     }
 
-    res.json({ ok:true, post });
+    res.json({ ok: true, post });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ ok:false, message:'Server error' });
+    res.status(500).json({ ok: false, message: 'Server error' });
   }
 };

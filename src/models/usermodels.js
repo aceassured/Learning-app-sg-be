@@ -11,11 +11,11 @@ export const findUserByPhone = async (phone) => {
   return res.rows[0];
 };
 
-export const createUser = async ({ email, phone, name, grade_level, selected_subjects, daily_reminder_time, questions_per_day, profile_photo_url }) => {
+export const createUser = async ({ email, phone, name, grade_level, selected_subjects, daily_reminder_time, questions_per_day, profile_photo_url, school_name}) => {
   const res = await pool.query(
-    `INSERT INTO users (email, phone, name, grade_level, selected_subjects, daily_reminder_time, questions_per_day, profile_photo_url)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
-    [email, phone, name, grade_level, selected_subjects, daily_reminder_time, questions_per_day, profile_photo_url]
+    `INSERT INTO users (email, phone, name, grade_level, selected_subjects, daily_reminder_time, questions_per_day, profile_photo_url, school_name)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8, $9) RETURNING *`,
+    [email, phone, name, grade_level, selected_subjects, daily_reminder_time, questions_per_day, profile_photo_url, school_name]
   );
   return res.rows[0];
 };
