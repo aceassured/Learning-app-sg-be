@@ -33,7 +33,7 @@ export const getUserById = async (id) => {
   const res = await pool.query(
     `SELECT ud.*, us.*
      FROM users ud
-     INNER JOIN users_settings us ON us.user_id = ud.id
+     INNER JOIN user_settings us ON us.user_id = ud.id
      WHERE ud.id = $1`,
     [id]
   );

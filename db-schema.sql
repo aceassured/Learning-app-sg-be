@@ -4,6 +4,7 @@ CREATE TABLE users (
   email TEXT UNIQUE,
   phone TEXT UNIQUE,
   name TEXT,
+  school_name TEXT,
   grade_level INT,
   questions_per_day INT,
   daily_reminder_time TIME,
