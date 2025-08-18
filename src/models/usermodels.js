@@ -30,6 +30,12 @@ export const updateUser = async (id, fields) => {
 };
 
 export const getUserById = async (id) => {
-  const res = await pool.query('SELECT * FROM users WHERE id = $1', [id]);
+  const res = await pool.query(
+    `SELECT ud.*, us.*
+     FROM users ud
+     INNER JOIN users_settings us ON us.user_id = ud.id
+     WHERE ud.id = $1`,
+    [id]
+  );
   return res.rows[0];
 };
