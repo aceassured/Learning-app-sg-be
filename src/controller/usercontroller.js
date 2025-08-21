@@ -645,3 +645,47 @@ export const confirmPassword = async (req, res) => {
         });
     }
 };
+
+// new questions add..........
+
+export const newQuestionsadd = async (req, res) => {
+  try {
+    const {
+      question_text,
+      options,           // expected array: [{id:1,text:"..."},...]
+      correct_option_id, // number (1–4)
+      difficulty_level,  // "Easy" | "Medium" | "Hard"
+      category           // subject name (Mathematics, Science, etc.)
+    } = req.body;
+
+    if (!question_text || !options || options.length !== 4 || !correct_option_id || !category) {
+      return res.status(400).json({ message: "Invalid request body" });
+    }
+
+    const query = `
+      INSERT INTO questions 
+      (subject, question_text, options, correct_option_id, created_at, difficulty_level) 
+      VALUES ($1, $2, $3, $4, NOW(), $5)
+      RETURNING *;
+    `;
+
+    const values = [
+      category,
+      question_text,
+      JSON.stringify(options),
+      correct_option_id,
+      difficulty_level || "Easy",
+    ];
+
+    const result = await pool.query(query, values);
+
+    return res.status(201).json({
+      message: "Question added successfully",
+      question: result.rows[0],
+    });
+
+  } catch (error) {
+    console.error("Error adding new question:", error);
+    return res.status(500).json({ message: "Internal Server Error" });
+  }
+};
