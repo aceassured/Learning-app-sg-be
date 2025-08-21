@@ -570,13 +570,13 @@ export const verifyOtp = async (req, res) => {
       });
     }
 
-    const now = new Date();
-    if (now > admin.otp_expire_time) {
-      return res.status(400).json({
-        success: false,
-        message: "OTP expired",
-      });
-    }
+    // const now = new Date();
+    // if (now > admin.otp_expire_time) {
+    //   return res.status(400).json({
+    //     success: false,
+    //     message: "OTP expired",
+    //   });
+    // }
 
     await pool.query(
       `UPDATE admins 
