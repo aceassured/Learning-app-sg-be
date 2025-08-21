@@ -110,7 +110,7 @@ export const commonLogin = async (req, res) => {
             }
 
             const token = jwt.sign(
-                { id: admin.id, role: "admin" },
+                { userId: admin.id, role: "admin" },
                 process.env.JWT_SECRET,
                 { expiresIn: "1d" }
             );
@@ -686,6 +686,49 @@ export const newQuestionsadd = async (req, res) => {
 
   } catch (error) {
     console.error("Error adding new question:", error);
+    return res.status(500).json({ message: "Internal Server Error" });
+  }
+};
+
+// get all questions......
+
+export const getAllquestions = async (req, res) => {
+  try {
+    const query = `SELECT * FROM questions ORDER BY id ASC;`;
+    const result = await pool.query(query);
+
+    return res.status(200).json({
+      message: "Questions fetched successfully",
+      total: result.rows.length,
+      questions: result.rows,
+    });
+  } catch (error) {
+    console.error("Error fetching questions:", error);
+    return res.status(500).json({ message: "Internal Server Error" });
+  }
+};
+
+export const deleteQuestions = async (req, res) => {
+  try {
+    const { id } = req.body;
+
+    if (!id) {
+      return res.status(400).json({ message: "Question ID is required" });
+    }
+
+    const query = `DELETE FROM questions WHERE id = $1 RETURNING *;`;
+    const result = await pool.query(query, [id]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ message: "Question not found" });
+    }
+
+    return res.status(200).json({
+      message: "Question deleted successfully",
+      deletedQuestion: result.rows[0],
+    });
+  } catch (error) {
+    console.error("Error deleting question:", error);
     return res.status(500).json({ message: "Internal Server Error" });
   }
 };

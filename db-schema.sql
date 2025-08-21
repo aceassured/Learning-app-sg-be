@@ -48,9 +48,10 @@ CREATE TABLE user_answers (
 CREATE TABLE forum_posts (
   id SERIAL PRIMARY KEY,
   user_id INT REFERENCES users(id),
-  title TEXT,
+  grade_level TEXT,
   content TEXT,
   subject_tag TEXT,
+  type_of_upload TEXT,
   created_at TIMESTAMP DEFAULT now()
 );
 
