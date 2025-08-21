@@ -1,4 +1,3 @@
-// src/controller/usercontroller.js
 import { findUserByEmail, findUserByPhone, createUser, updateUser, getUserById } from "../models/usermodels.js"
 import dotenv from 'dotenv';
 import jwt from "jsonwebtoken"
@@ -20,12 +19,10 @@ export const login = async (req, res) => {
     if (!user && phone) user = await findUserByPhone(phone);
 
     if (user) {
-      // existing user: return token + user data
       const token = jwt.sign({ userId: user.id }, JWT_SECRET, { expiresIn: '7d' });
       return res.json({ ok: true, user, token, redirect: 'home' });
     }
 
-    // not found => redirect to register
     return res.json({ ok: false, message: 'Not found', redirect: 'register' });
   } catch (err) {
     console.error(err);
@@ -76,7 +73,6 @@ export const getProfile = async (req, res) => {
 export const editProfile = async (req, res) => {
   try {
     const updates = { ...req.body };
-    // handle file upload -> req.fileUrl if uploaded via router middleware
     if (req.fileUrl) updates.profile_photo_url = req.fileUrl;
     const updated = await updateUser(req.userId, updates);
     res.json({ ok: true, user: updated });
@@ -176,7 +172,7 @@ export const userRegister = async (req, res) => {
       });
     }
 
-    await pool.query("BEGIN"); // Start transaction
+    await pool.query("BEGIN"); 
 
     const { rows: existing } = await pool.query(
       `SELECT id, email, phone FROM users WHERE email = $1 OR phone = $2 LIMIT 1`,
@@ -402,7 +398,6 @@ export const userEdit = async (req, res) => {
       throw new Error("User not found");
     }
 
-    // ✅ Update users_settings table (insert if not exists → UPSERT)
     const settingsUpdateQuery = `
       INSERT INTO users_settings 
         (user_id, questions_per_day, quiz_time_seconds, daily_reminder_time, reminder_enabled, dark_mode, sound_enabled, updated_at)
@@ -524,7 +519,6 @@ export const adminEdit = async (req, res) => {
     console.log("adminId", adminId)
     const { name, email, phone } = req.body;
 
-    // Check if admin exists
     const { rows: existingAdmins } = await pool.query(
       `SELECT * FROM admins WHERE id = $1`,
       [adminId]
@@ -539,13 +533,11 @@ export const adminEdit = async (req, res) => {
 
     let profilePhotoUrl = existingAdmins[0].profile_photo_url;
 
-    // Handle profile photo upload
     if (req.file) {
       const file = req.file;
       profilePhotoUrl = await uploadBufferToVercel(file.buffer, file.originalname);
     }
 
-    // Update only allowed fields
     const { rows } = await pool.query(
       `UPDATE admins 
        SET name = COALESCE($1, name),
@@ -763,10 +755,10 @@ export const newQuestionsadd = async (req, res) => {
   try {
     const {
       question_text,
-      options,           // expected array: [{id:1,text:"..."},...]
-      correct_option_id, // number (1–4)
-      difficulty_level,  // "Easy" | "Medium" | "Hard"
-      category           // subject name (Mathematics, Science, etc.)
+      options,
+      correct_option_id, 
+      difficulty_level,  
+      category           
     } = req.body;
 
     if (!question_text || !options || options.length !== 4 || !correct_option_id || !category) {
@@ -849,7 +841,6 @@ export const deleteQuestions = async (req, res) => {
 
 export const homeApi = async (req, res) => {
   try {
-    // Query questions from last 48 hours
     const { rows: recentQuestions } = await pool.query(
       `SELECT * 
        FROM questions
@@ -857,7 +848,6 @@ export const homeApi = async (req, res) => {
        ORDER BY created_at DESC`
     );
 
-    // Query forum posts from last 48 hours
     const { rows: recentPosts } = await pool.query(
       `SELECT * 
        FROM forum_posts

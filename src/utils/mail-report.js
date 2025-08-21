@@ -14,7 +14,6 @@ const transporter = nodemailer.createTransport({
 });
 
 export const sendQuizPdfToEmail = async ({to, userName, sessionDetails, answers}) => {
-  // sessionDetails: {score, total, timeTaken, started_at, finished_at}
   const doc = new PDFDocument();
   const writableBuffer = new streamBuffers.WritableStreamBuffer();
 

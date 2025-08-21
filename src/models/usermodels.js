@@ -1,4 +1,3 @@
-// src/models/usermodels.js
 import pool from "../../database.js";
 
 export const findUserByEmail = async (email) => {
@@ -34,11 +33,6 @@ export const updateUser = async (id, fields) => {
   const res = await pool.query(`UPDATE users SET ${sets} WHERE id = $${keys.length + 1} RETURNING *`, [...values, id]);
   return res.rows[0];
 };
-
-// export const getUserById = async (id) => {
-//   const res = await pool.query('SELECT * FROM users WHERE id = $1', [id]);
-//   return res.rows[0];
-// };
 
 
 export const getUserById = async (id) => {

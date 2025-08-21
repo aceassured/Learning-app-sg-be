@@ -1,11 +1,11 @@
 import pool from "../../database.js";
 
 // Get progress stats for a user
+
 export const getProgressPageData = async (req, res) => {
   const userId = req.userId;
 
   try {
-    // 1️⃣ Total questions answered
     const totalRes = await pool.query(
       `SELECT COUNT(a.*)::int AS total_questions
        FROM user_answers a
@@ -14,7 +14,6 @@ export const getProgressPageData = async (req, res) => {
       [userId]
     );
 
-    // 2️⃣ Overall accuracy
     const accuracyRes = await pool.query(
       `SELECT ROUND(AVG(CASE WHEN a.is_correct THEN 1 ELSE 0 END) * 100, 1) AS accuracy
        FROM user_answers a
@@ -23,7 +22,6 @@ export const getProgressPageData = async (req, res) => {
       [userId]
     );
 
-    // 3️⃣ Score trend over last 30 days
     const trendRes = await pool.query(
       `WITH days AS (
          SELECT generate_series::date AS day
@@ -49,7 +47,6 @@ export const getProgressPageData = async (req, res) => {
        ORDER BY d.day`,
       [userId]
     );
-    // 4️⃣ Performance by subject
     const subjectPerfRes = await pool.query(
       `SELECT q.subject,
               ROUND(AVG(CASE WHEN a.is_correct THEN 1 ELSE 0 END) * 100, 1) AS accuracy
@@ -62,7 +59,6 @@ export const getProgressPageData = async (req, res) => {
       [userId]
     );
 
-    // 5️⃣ Recent activity
     const recentActivityRes = await pool.query(
       `SELECT s.id AS session_id,
               s.started_at,

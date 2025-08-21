@@ -1,11 +1,10 @@
-// src/controller/quizcontroller.js
 import pool from "../../database.js";
 
 // helper: get today's quiz status
+
 export const getHomeData = async (req, res) => {
   const userId = req.userId;
   try {
-    // 1) check today's session
     const todayRes = await pool.query(
       `SELECT s.*, COUNT(a.*) AS answered_count
        FROM user_quiz_sessions s
@@ -17,7 +16,6 @@ export const getHomeData = async (req, res) => {
     );
     const todaySession = todayRes.rows[0] || null;
 
-    // 2) week progress (7 days starting monday? we'll use current_date - 6 .. today)
     const weekDatesRes = await pool.query(
       `SELECT activity_date, correct_count, incorrect_count FROM user_activity
        WHERE user_id = $1 AND activity_date >= (current_date - INTERVAL '6 days')
@@ -29,11 +27,8 @@ export const getHomeData = async (req, res) => {
       weekMap[r.activity_date.toISOString().slice(0,10)] = r;
     });
 
-    // compute streak: consecutive days in the current 7-day window that are completed
-    // completed means any quiz completed (we consider correct+incorrect > 0)
     let streak = 0;
     let consecutive = 0;
-    // check last 7 days from 6 days ago to today
     for (let i = 6; i >=0; i--) {
       const date = new Date();
       date.setDate(date.getDate() - i);
@@ -45,10 +40,8 @@ export const getHomeData = async (req, res) => {
         consecutive = 0;
       }
     }
-    // if all 7 are completed, we show 7 else show 0 for full-week flag
     const all7 = Object.keys(weekMap).length === 7 && Object.values(weekMap).every(e => e.correct_count + e.incorrect_count > 0);
 
-    // monthly target: sum activity of this month
     const monthRes = await pool.query(
       `SELECT SUM(correct_count) as correct, SUM(incorrect_count) as incorrect
        FROM user_activity WHERE user_id = $1 AND date_trunc('month', activity_date) = date_trunc('month', current_date)`, [userId]
@@ -63,7 +56,7 @@ export const getHomeData = async (req, res) => {
       week: weekDatesRes.rows,
       all7: all7 ? 7 : 0,
       consecutive,
-      monthly: { completed: completedThisMonth, target: 25 } // you may pull actual target from settings
+      monthly: { completed: completedThisMonth, target: 25 } 
     });
   } catch (err) {
     console.error(err);
@@ -73,17 +66,15 @@ export const getHomeData = async (req, res) => {
 
 
 // start quiz: create session, fetch N questions according to user settings
+
 export const startQuiz = async (req, res) => {
   try {
     const userId = req.userId;
-    // fetch user settings
     const userRes = await pool.query('SELECT questions_per_day FROM users WHERE id=$1', [userId]);
     const qpd = userRes.rows[0]?.questions_per_day || 10;
-    // pick questions from user's selected subjects or random
     const qRes = await pool.query(`SELECT id, question_text, options FROM questions ORDER BY random() LIMIT $1`, [qpd]);
     const questions = qRes.rows;
 
-    // create session
     const sessionRes = await pool.query(
       `INSERT INTO user_quiz_sessions (user_id, started_at, allowed_duration_seconds, total_questions)
        VALUES ($1, now(), 300, $2) RETURNING *`,
@@ -100,6 +91,7 @@ export const startQuiz = async (req, res) => {
 };
 
 // submit answers for a session (array of {question_id, selected_option_id})
+
 export const submitAnswers = async (req, res) => {
   try {
     const userId = req.userId;
@@ -109,7 +101,6 @@ export const submitAnswers = async (req, res) => {
       return res.status(400).json({ ok: false, message: 'Invalid payload' });
     }
 
-    // validate session
     const sessionRes = await pool.query(
       'SELECT * FROM user_quiz_sessions WHERE id=$1 AND user_id=$2',
       [session_id, userId]
@@ -119,7 +110,6 @@ export const submitAnswers = async (req, res) => {
       return res.status(404).json({ ok: false, message: 'Session not found' });
     }
 
-    // insert answers and compute score
     let correctCount = 0;
     for (const ans of answers) {
       const qRes = await pool.query(
@@ -144,7 +134,6 @@ export const submitAnswers = async (req, res) => {
       );
     }
 
-    // update session finish
     await pool.query(
       `UPDATE user_quiz_sessions 
        SET finished_at = now(), score = $1 
@@ -152,7 +141,6 @@ export const submitAnswers = async (req, res) => {
       [correctCount, session_id]
     );
 
-    // update user_activity table for the date
     const incorrectCount = answers.length - correctCount;
     await pool.query(
       `INSERT INTO user_activity (user_id, activity_date, correct_count, incorrect_count)
@@ -173,6 +161,7 @@ export const submitAnswers = async (req, res) => {
 
 
 // quiz review: return questions + user answers for a session
+
 export const reviewSession = async (req, res) => {
   try {
     const { sessionId } = req.params;

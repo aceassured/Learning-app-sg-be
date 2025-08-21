@@ -85,19 +85,17 @@ export const listPosts = async (req, res) => {
 export const createPost = async (req, res) => {
   try {
     const { grade_level, content, subject_tag, type_of_upload, author_type } = req.body;
-    const authorId = req.userId; // This could be either user.id or admin.id
+    const authorId = req.userId;
 
     let postRes;
 
     if (author_type === "user") {
-      // Insert with user_id
       postRes = await pool.query(
         `INSERT INTO forum_posts (user_id, grade_level, content, subject_tag, type_of_upload) 
          VALUES ($1, $2, $3, $4, $5) RETURNING *`,
         [authorId, grade_level, content, subject_tag, type_of_upload]
       );
     } else if (author_type === "admin") {
-      // Insert with admin_id
       postRes = await pool.query(
         `INSERT INTO forum_posts (admin_id, grade_level, content, subject_tag, type_of_upload) 
          VALUES ($1, $2, $3, $4, $5) RETURNING *`,
@@ -109,7 +107,6 @@ export const createPost = async (req, res) => {
 
     const post = postRes.rows[0];
 
-    // Handle file uploads if present
     if (req.files && req.files.length) {
       for (const f of req.files) {
         const url = await uploadBufferToVercel(f.buffer, f.originalname);

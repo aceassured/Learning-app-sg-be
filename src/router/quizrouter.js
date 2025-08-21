@@ -1,4 +1,3 @@
-// src/router/quizrouter.js
 import express from 'express';
 import auth from '../middleware/auth.js';
 import { getHomeData, reviewSession, startQuiz, submitAnswers } from '../controller/quizcontroller.js';
