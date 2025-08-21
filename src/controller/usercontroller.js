@@ -819,6 +819,7 @@ export const getAllquestions = async (req, res) => {
   }
 };
 
+
 export const deleteQuestions = async (req, res) => {
   try {
     const { id } = req.body;
@@ -841,5 +842,38 @@ export const deleteQuestions = async (req, res) => {
   } catch (error) {
     console.error("Error deleting question:", error);
     return res.status(500).json({ message: "Internal Server Error" });
+  }
+};
+
+// home data.........
+
+export const homeApi = async (req, res) => {
+  try {
+    // Query questions from last 48 hours
+    const { rows: recentQuestions } = await pool.query(
+      `SELECT * 
+       FROM questions
+       WHERE created_at >= NOW() - INTERVAL '48 hours'
+       ORDER BY created_at DESC`
+    );
+
+    // Query forum posts from last 48 hours
+    const { rows: recentPosts } = await pool.query(
+      `SELECT * 
+       FROM forum_posts
+       WHERE created_at >= NOW() - INTERVAL '48 hours'
+       ORDER BY created_at DESC`
+    );
+
+    return res.json({
+      success: true,
+      data: {
+        questions: recentQuestions,
+        forum_posts: recentPosts,
+      },
+    });
+  } catch (error) {
+    console.error("❌ Home API error:", error);
+    return res.status(500).json({ success: false, message: "Internal server error" });
   }
 };
