@@ -3,7 +3,7 @@ import multer from 'multer';
 import auth from '../middleware/auth.js';
 import { uploadBufferToVercel } from '../utils/vercel-blob.js';
 import { adminEdit, adminRegister, adminResetPassword, commonLogin, confirmPassword, deleteQuestions, editProfile, getAdmindetails, getAllquestions, getProfile, getUserdetails, homeApi, login, newQuestionsadd, register, userEdit, userRegister, verifyOtp } from '../controller/usercontroller.js';
-import { deleteForum } from '../controller/forumcontroller.js';
+import { deleteForum, deleteUser } from '../controller/forumcontroller.js';
 
 const upload = multer({ storage: multer.memoryStorage() });
 const router = express.Router();
@@ -44,6 +44,7 @@ router.get("/allquestions", getAllquestions)
 router.get("/home", homeApi)
 router.delete("/deletequestion", deleteQuestions)
 router.delete("/deleteforum", deleteForum)
+router.delete("/deleteuser", deleteUser)
 
 
 

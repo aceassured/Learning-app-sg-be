@@ -150,3 +150,27 @@ export const deleteForum = async (req, res) => {
     res.status(500).json({ ok: false, message: "Internal server error" });
   }
 };
+
+
+// delete user...........
+
+export const deleteUser = async (req, res) => {
+  try {
+    const { id } = req.body;
+
+    if (!id) {
+      return res.status(400).json({ ok: false, message: "User ID is required" });
+    }
+
+    const result = await pool.query(`DELETE FROM users WHERE id = $1 RETURNING *`, [id]);
+
+    if (result.rowCount === 0) {
+      return res.status(404).json({ ok: false, message: "Users post not found" });
+    }
+
+    res.json({ ok: true, message: "User deleted successfully", deleted: result.rows[0] });
+  } catch (error) {
+    console.error("Error deleting Users post:", error);
+    res.status(500).json({ ok: false, message: "Internal server error" });
+  }
+};
