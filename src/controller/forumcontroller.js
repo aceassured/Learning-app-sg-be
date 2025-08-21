@@ -46,7 +46,7 @@ export const listPosts = async (req, res) => {
 
       FROM forum_posts p
       LEFT JOIN users u ON u.id = p.user_id
-      LEFT JOIN admins a ON a.id = p.user_id
+      LEFT JOIN admins a ON a.id = p.admin_id
       LEFT JOIN forum_files ff ON ff.post_id = p.id
     `;
 
