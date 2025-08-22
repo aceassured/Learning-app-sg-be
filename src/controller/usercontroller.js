@@ -726,6 +726,32 @@ export const deleteAdminUser = async (req, res) => {
 
 
 
+// ---Get all admin users
+
+export const getAllUsers = async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { rows } = await client.query(
+      `SELECT id, name, email, role, created_at 
+       FROM admins 
+       ORDER BY id ASC`
+    );
+
+    return res.status(200).json({
+      success: true,
+      data: rows,
+    });
+  } catch (error) {
+    console.error(" Get users error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error",
+    });
+  } finally {
+    client.release();
+  }
+};
+
 
 
 
