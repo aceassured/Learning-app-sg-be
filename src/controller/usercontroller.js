@@ -511,6 +511,224 @@ export const adminRegister = async (req, res) => {
 };
 
 
+
+
+// Add new user in admin
+
+
+const generatePassword = (name) => {
+  const base = name.substring(0, 4); // take first 4 chars of name
+  const upper = base.charAt(0).toUpperCase();
+  const randomNum = Math.floor(1000 + Math.random() * 9000); // 4-digit number
+  const specialChars = "!@#$%^&*";
+  const special = specialChars.charAt(Math.floor(Math.random() * specialChars.length));
+
+  // Example: John1234!
+  return `${upper}${base.slice(1)}${randomNum}${special}`.slice(0, 8);
+};
+
+
+export const addNewUser = async (req, res) => {
+  const client = await pool.connect();
+
+  try {
+    const { name, email, role } = req.body;
+
+    if (!name || !email || !role) {
+      return res.status(400).json({
+        success: false,
+        message: "Name, email, and role are required",
+      });
+    }
+
+    await client.query("BEGIN");
+
+    // Check if email already exists
+    const { rows: existing } = await client.query(
+      `SELECT id FROM admins WHERE email = $1`,
+      [email]
+    );
+
+    if (existing.length > 0) {
+      await client.query("ROLLBACK");
+      return res.status(409).json({
+        success: false,
+        message: "Email already registered",
+      });
+    }
+
+    // Generate password
+    const plainPassword = generatePassword(name);
+
+    // Hash password before storing
+    const hashedPassword = await bcrypt.hash(plainPassword, 10);
+
+    // Insert into admins table
+    const { rows } = await client.query(
+      `INSERT INTO admins (name, email, role, password, created_at)
+       VALUES ($1, $2, $3, $4, NOW())
+       RETURNING id, name, email, role, created_at`,
+      [name, email, role, hashedPassword]
+    );
+
+    const newUser = rows[0];
+
+    await client.query("COMMIT");
+
+    // Send email with password
+    const transporter = nodemailer.createTransport({
+      service: "gmail", // or SMTP config
+      auth: {
+        user: process.env.EMAIL_USER,
+        pass: process.env.EMAIL_PASS,
+      },
+    });
+
+    await transporter.sendMail({
+      from: `"Admin Panel" <${process.env.EMAIL_USER}>`,
+      to: email,
+      subject: "Your Admin Account Credentials",
+      text: `Hello ${name},\n\nYour admin account has been created.\n\nEmail: ${email}\nPassword: ${plainPassword}\n\nPlease login and change your password.\n\nRegards,\nTeam`,
+    });
+
+    return res.status(201).json({
+      success: true,
+      message: "Admin created successfully. Credentials sent via email.",
+      data: newUser,
+    });
+  } catch (error) {
+    await client.query("ROLLBACK");
+    console.error("Add new admin error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error",
+    });
+  } finally {
+    client.release();
+  }
+};
+
+
+
+
+// ----admin user role edit
+
+export const changeUserRole = async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { id, role } = req.body;
+
+    if (!id || !role) {
+      return res.status(400).json({
+        success: false,
+        message: "User ID and role are required",
+      });
+    }
+
+    await client.query("BEGIN");
+
+    // Check if user exists
+    const { rows: existing } = await client.query(
+      `SELECT id FROM admins WHERE id = $1`,
+      [id]
+    );
+
+    if (existing.length === 0) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({
+        success: false,
+        message: "User not found",
+      });
+    }
+
+    // Update role
+    const { rows } = await client.query(
+      `UPDATE admins SET role = $1 WHERE id = $2 RETURNING id, name, email, role`,
+      [role, id]
+    );
+
+    await client.query("COMMIT");
+
+    return res.status(200).json({
+      success: true,
+      message: "User role updated successfully",
+      data: rows[0],
+    });
+  } catch (error) {
+    await client.query("ROLLBACK");
+    console.error("Change user role error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error",
+    });
+  } finally {
+    client.release();
+  }
+};
+
+
+
+
+
+
+
+// -----Delete user admin
+
+export const deleteAdminUser = async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { id } = req.body;
+
+    if (!id) {
+      return res.status(400).json({
+        success: false,
+        message: "User ID is required",
+      });
+    }
+
+    await client.query("BEGIN");
+
+    // Check if user exists
+    const { rows: existing } = await client.query(
+      `SELECT id FROM admins WHERE id = $1`,
+      [id]
+    );
+
+    if (existing.length === 0) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({
+        success: false,
+        message: "User not found",
+      });
+    }
+
+    await client.query(`DELETE FROM admins WHERE id = $1`, [id]);
+
+    await client.query("COMMIT");
+
+    return res.status(200).json({
+      success: true,
+      message: "User deleted successfully",
+    });
+  } catch (error) {
+    await client.query("ROLLBACK");
+    console.error(" Delete user error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error",
+    });
+  } finally {
+    client.release();
+  }
+};
+
+
+
+
+
+
+
 // admin edit...
 
 export const adminEdit = async (req, res) => {
