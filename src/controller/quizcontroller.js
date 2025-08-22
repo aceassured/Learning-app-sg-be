@@ -67,28 +67,89 @@ export const getHomeData = async (req, res) => {
 
 // start quiz: create session, fetch N questions according to user settings
 
+// export const startQuiz = async (req, res) => {
+//   try {
+//     const userId = req.userId;
+//     const userRes = await pool.query('SELECT questions_per_day FROM users WHERE id=$1', [userId]);
+//     const qpd = userRes.rows[0]?.questions_per_day || 10;
+//     const qRes = await pool.query(`SELECT id, question_text, options FROM questions ORDER BY random() LIMIT $1`, [qpd]);
+//     const questions = qRes.rows;
+
+//     const sessionRes = await pool.query(
+//       `INSERT INTO user_quiz_sessions (user_id, started_at, allowed_duration_seconds, total_questions)
+//        VALUES ($1, now(), 300, $2) RETURNING *`,
+//       [userId, questions.length]
+//     );
+
+//     const session = sessionRes.rows[0];
+
+//     res.json({ ok:true, session, questions });
+//   } catch (err) {
+//     console.error(err);
+//     res.status(500).json({ ok:false, message:'Server error' });
+//   }
+// };
+
 export const startQuiz = async (req, res) => {
   try {
     const userId = req.userId;
-    const userRes = await pool.query('SELECT questions_per_day FROM users WHERE id=$1', [userId]);
+    const { subjects } = req.body; // e.g. ["mathematics","science"]
+
+    // Get questions_per_day from users table
+    const userRes = await pool.query(
+      "SELECT questions_per_day FROM users WHERE id=$1",
+      [userId]
+    );
     const qpd = userRes.rows[0]?.questions_per_day || 10;
-    const qRes = await pool.query(`SELECT id, question_text, options FROM questions ORDER BY random() LIMIT $1`, [qpd]);
+
+    let qRes;
+    if (subjects && subjects.length > 0) {
+      // Filter by selected subjects (case-insensitive)
+      qRes = await pool.query(
+        `
+        SELECT id, subject, question_text, options 
+        FROM questions 
+        WHERE LOWER(subject) = ANY($1) 
+        ORDER BY random() 
+        LIMIT $2
+        `,
+        [subjects.map((s) => s.toLowerCase()), qpd]
+      );
+    } else {
+      // Fallback: pick from all subjects
+      qRes = await pool.query(
+        `
+        SELECT id, subject, question_text, options 
+        FROM questions 
+        ORDER BY random() 
+        LIMIT $1
+        `,
+        [qpd]
+      );
+    }
+
     const questions = qRes.rows;
 
+    // Insert into user_quiz_sessions
     const sessionRes = await pool.query(
-      `INSERT INTO user_quiz_sessions (user_id, started_at, allowed_duration_seconds, total_questions)
-       VALUES ($1, now(), 300, $2) RETURNING *`,
+      `
+      INSERT INTO user_quiz_sessions 
+      (user_id, started_at, allowed_duration_seconds, total_questions)
+      VALUES ($1, now(), 300, $2)
+      RETURNING *
+      `,
       [userId, questions.length]
     );
 
     const session = sessionRes.rows[0];
 
-    res.json({ ok:true, session, questions });
+    res.json({ ok: true, session, questions });
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ ok:false, message:'Server error' });
+    console.error("startQuiz error:", err);
+    res.status(500).json({ ok: false, message: "Server error" });
   }
 };
+
 
 // submit answers for a session (array of {question_id, selected_option_id})
 
