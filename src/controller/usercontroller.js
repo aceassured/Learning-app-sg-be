@@ -134,7 +134,7 @@ export const commonLogin = async (req, res) => {
       const user = rows[0];
 
       const token = jwt.sign(
-        { userId: user.id, role: "user" },
+        { userId: user.id, role: user.role },
         process.env.JWT_SECRET,
         { expiresIn: "1d" }
       );
