@@ -731,18 +731,29 @@ export const deleteAdminUser = async (req, res) => {
 export const getAllUsers = async (req, res) => {
   const client = await pool.connect();
   try {
-    const { rows } = await client.query(
-      `SELECT id, name, email, role, created_at 
+    // Fetch admins
+    const { rows: adminRows } = await client.query(
+      `SELECT id, name, email, 'admin' AS role, created_at 
        FROM admins 
        ORDER BY id ASC`
     );
 
+    // Fetch users
+    const { rows: userRows } = await client.query(
+      `SELECT id, name, email, 'user' AS role, created_at 
+       FROM users 
+       ORDER BY id ASC`
+    );
+
+    // Merge results
+    const allUsers = [...adminRows, ...userRows];
+
     return res.status(200).json({
       success: true,
-      data: rows,
+      data: allUsers,
     });
   } catch (error) {
-    console.error(" Get users error:", error);
+    console.error("Get users error:", error);
     return res.status(500).json({
       success: false,
       message: "Internal server error",
