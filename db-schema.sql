@@ -84,3 +84,24 @@ CREATE TABLE user_settings (
   dark_mode BOOLEAN DEFAULT false,
   sound_enabled BOOLEAN DEFAULT true
 );
+
+
+-- forum likes........
+
+CREATE TABLE forum_likes (
+  id SERIAL PRIMARY KEY,
+  post_id INT REFERENCES forum_posts(id) ON DELETE CASCADE,
+  user_id INT REFERENCES users(id) ON DELETE CASCADE,
+  created_at TIMESTAMP DEFAULT now(),
+  UNIQUE (post_id, user_id) -- prevent duplicate likes
+);
+
+-- forum comments....
+
+CREATE TABLE forum_comments (
+  id SERIAL PRIMARY KEY,
+  post_id INT REFERENCES forum_posts(id) ON DELETE CASCADE,
+  user_id INT REFERENCES users(id) ON DELETE CASCADE,
+  content TEXT NOT NULL,
+  created_at TIMESTAMP DEFAULT now()
+);
