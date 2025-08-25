@@ -476,7 +476,7 @@ export const adminRegister = async (req, res) => {
     const { rows } = await pool.query(
       `INSERT INTO admins 
        (email, password, name, role, phone, department, employee_id, created_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
+       VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
        RETURNING *`,
       [email, hashedPassword, name || null, "admin", phone, department, employee_id]
     );
