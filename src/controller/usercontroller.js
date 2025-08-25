@@ -123,7 +123,7 @@ export const commonLogin = async (req, res) => {
       const value = email || phone;
 
       const { rows } = await pool.query(
-        `SELECT id, email, phone FROM users WHERE ${field} = $1 LIMIT 1`,
+        `SELECT id, email, phone, role FROM users WHERE ${field} = $1 LIMIT 1`,
         [value]
       );
 
