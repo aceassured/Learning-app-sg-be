@@ -46,6 +46,21 @@ export const listPosts = async (req, res) => {
           '[]'
         ) AS files,
 
+        -- Aggregate comments
+        COALESCE(
+          JSON_AGG(
+            DISTINCT JSONB_BUILD_OBJECT(
+              'id', fc.id,
+              'content', fc.content,
+              'created_at', fc.created_at,
+              'user_id', cu.id,
+              'user_name', cu.name,
+              'profile_photo_url', cu.profile_photo_url
+            )
+          ) FILTER (WHERE fc.id IS NOT NULL),
+          '[]'
+        ) AS comments,
+
         -- Author details
         COALESCE(u.id, a.id) AS author_id,
         COALESCE(u.name, a.name) AS author_name,
@@ -70,6 +85,10 @@ export const listPosts = async (req, res) => {
       LEFT JOIN admins a ON a.id = p.admin_id
       LEFT JOIN forum_files ff ON ff.post_id = p.id
 
+      -- comments + user info
+      LEFT JOIN forum_comments fc ON fc.post_id = p.id
+      LEFT JOIN users cu ON cu.id = fc.user_id
+
       -- join like counts
       LEFT JOIN (
         SELECT post_id, COUNT(*) AS like_count
@@ -86,7 +105,7 @@ export const listPosts = async (req, res) => {
 
       -- ✅ join specific user like
       LEFT JOIN forum_likes ul 
-        ON ul.post_id = p.id AND ul.user_id = $${1}
+        ON ul.post_id = p.id AND ul.user_id = $1
     `;
 
     const conditions = [];
@@ -127,6 +146,7 @@ export const listPosts = async (req, res) => {
     res.status(500).json({ ok: false });
   }
 };
+
 
 
 export const createPost = async (req, res) => {
