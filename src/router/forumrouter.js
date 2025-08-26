@@ -8,7 +8,7 @@ const router = express.Router();
 
 router.get('/', auth, listPosts);
 router.post('/addlike', auth,addLike);
-router.delete('/removelike', auth, removeLike);
+router.post('/removelike', auth, removeLike);
 router.post('/addcomment', auth, addComment);
 router.delete('/removecomment', auth, deleteComment);
 router.post('/likesandcomments', auth, getAlllikesandComments);
