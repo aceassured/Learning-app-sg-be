@@ -64,7 +64,7 @@ export const listPosts = async (req, res) => {
         -- Author details
         COALESCE(u.id, a.id) AS author_id,
         COALESCE(u.name, a.name) AS author_name,
-        u.profile_photo_url,
+        COALESCE(u.profile_photo_url, a.profile_photo_url) AS profile_photo_url,
         u.school_name,
         u.grade_level AS user_grade_level,
         COALESCE(u.created_at, a.created_at) AS author_created_at,
