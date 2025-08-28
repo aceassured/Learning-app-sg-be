@@ -892,14 +892,14 @@ export const getAllUsers = async (req, res) => {
   try {
     // Fetch admins
     const { rows: adminRows } = await client.query(
-      `SELECT id, name, email, 'admin' AS role, created_at 
+      `SELECT id, name, email, 'admin' AS role, created_at, profile_photo_url
        FROM admins 
        ORDER BY id ASC`
     );
 
     // Fetch users
     const { rows: userRows } = await client.query(
-      `SELECT id, name, email, 'user' AS role, created_at 
+      `SELECT id, name, email, 'user' AS role, created_at , profile_photo_url
        FROM users 
        ORDER BY id ASC`
     );
