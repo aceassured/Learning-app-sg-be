@@ -172,7 +172,7 @@ export const userRegister = async (req, res) => {
       });
     }
 
-    await pool.query("BEGIN"); 
+    await pool.query("BEGIN");
 
     const { rows: existing } = await pool.query(
       `SELECT id, email, phone FROM users WHERE email = $1 OR phone = $2 LIMIT 1`,
@@ -614,6 +614,61 @@ export const addNewUser = async (req, res) => {
 
 // ----admin user role edit
 
+// export const changeUserRole = async (req, res) => {
+//   const client = await pool.connect();
+//   try {
+//     const { id, role } = req.body;
+
+//     if (!id || !role) {
+//       return res.status(400).json({
+//         success: false,
+//         message: "User ID and role are required",
+//       });
+//     }
+
+//     await client.query("BEGIN");
+
+//     // Check if user exists
+//     const { rows: existing } = await client.query(
+//       `SELECT id FROM admins WHERE id = $1`,
+//       [id]
+//     );
+
+//     if (existing.length === 0) {
+//       await client.query("ROLLBACK");
+//       return res.status(404).json({
+//         success: false,
+//         message: "User not found",
+//       });
+//     }
+
+//     // Update role
+//     const { rows } = await client.query(
+//       `UPDATE admins SET role = $1 WHERE id = $2 RETURNING id, name, email, role`,
+//       [role, id]
+//     );
+
+//     await client.query("COMMIT");
+
+//     return res.status(200).json({
+//       success: true,
+//       message: "User role updated successfully",
+//       data: rows[0],
+//     });
+//   } catch (error) {
+//     await client.query("ROLLBACK");
+//     console.error("Change user role error:", error);
+//     return res.status(500).json({
+//       success: false,
+//       message: "Internal server error",
+//     });
+//   } finally {
+//     client.release();
+//   }
+// };
+
+
+
 export const changeUserRole = async (req, res) => {
   const client = await pool.connect();
   try {
@@ -622,54 +677,134 @@ export const changeUserRole = async (req, res) => {
     if (!id || !role) {
       return res.status(400).json({
         success: false,
-        message: "User ID and role are required",
+        message: "User ID and target role are required",
       });
     }
 
     await client.query("BEGIN");
 
-    // Check if user exists
-    const { rows: existing } = await client.query(
-      `SELECT id FROM admins WHERE id = $1`,
-      [id]
-    );
+    let result;
 
-    if (existing.length === 0) {
-      await client.query("ROLLBACK");
-      return res.status(404).json({
-        success: false,
-        message: "User not found",
+    if (role === "student") {
+      // 🔹 Move from admins → users
+      console.log("690 trigger")
+      const { rows: adminRows } = await client.query(
+        `SELECT * FROM admins WHERE id = $1`,
+        [id]
+      );
+
+      if (adminRows.length === 0) {
+        await client.query("ROLLBACK");
+        return res.status(404).json({ success: false, message: "Admin not found" });
+      }
+
+      const admin = adminRows[0];
+
+      await client.query(`DELETE FROM admins WHERE id = $1`, [id]);
+
+      const insertUserQuery = `
+        INSERT INTO users (email, phone, name, grade_level, questions_per_day, daily_reminder_time, selected_subjects, created_at, updated_at)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, now(), now())
+        RETURNING id, email, phone, name, grade_level
+      `;
+
+      const { rows: userRows } = await client.query(insertUserQuery, [
+        admin.email,
+        admin.phone || null,
+        admin.name || null,
+        null, null, null, null
+      ]);
+
+      result = userRows[0];
+    }
+    else if (role === "admin") {
+      // 🔹 Move from users → admins
+      console.log("722 trigger")
+
+      const { rows: userRows } = await client.query(
+        `SELECT * FROM users WHERE id = $1`,
+        [id]
+      );
+
+      console.log("userRows", userRows)
+      if (userRows.length === 0) {
+        await client.query("ROLLBACK");
+        return res.status(404).json({ success: false, message: "User not found" });
+      }
+
+      const user = userRows[0];
+
+      // Generate random 6-digit password
+      const rawPassword = Math.floor(100000 + Math.random() * 900000).toString();
+
+      // Hash password
+      const hashedPassword = await bcrypt.hash(rawPassword, 10);
+
+      // Delete from users  
+
+      await client.query(`UPDATE user_quiz_sessions SET user_id = NULL WHERE user_id = $1`, [id]);
+      await client.query(`UPDATE user_activity SET user_id = NULL WHERE user_id = $1`, [id]);
+      await client.query(`UPDATE user_settings SET user_id = NULL WHERE user_id = $1`, [id]);
+      await client.query(`UPDATE forum_likes SET user_id = NULL WHERE user_id = $1`, [id]);
+      await client.query(`UPDATE forum_comments SET user_id = NULL WHERE user_id = $1`, [id]);
+      await client.query(`UPDATE forum_posts SET user_id = NULL WHERE user_id = $1`, [id]);
+
+      await client.query(`DELETE FROM users WHERE id = $1`, [id]);
+
+      // Insert into admins
+      const insertAdminQuery = `
+        INSERT INTO admins (email, password, name, role, phone, department, employee_id, created_at)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, now())
+        RETURNING id, email, name, role
+      `;
+
+      const { rows: adminRows } = await client.query(insertAdminQuery, [
+        user.email,
+        hashedPassword,
+        user.name || null,
+        "admin",
+        user.phone || null,
+        null,
+        null
+      ]);
+
+      result = adminRows[0];
+
+        const transporter = nodemailer.createTransport({
+            service: 'gmail',
+            auth: {
+              user: 'csksarathi07@gmail.com',
+              pass: 'gmeh ckmx uxfp mloo',
+            },
+        });
+
+      await transporter.sendMail({
+        from: `${process.env.SMTP_USER}`,
+        to: user.email,
+        subject: "Admin Account Created",
+        text: `Hello ${user.name || ""},\n\nYou have been promoted to Admin.\n\nYour login password: ${rawPassword}\n\nPlease change it after logging in.`,
       });
     }
-
-    // Update role
-    const { rows } = await client.query(
-      `UPDATE admins SET role = $1 WHERE id = $2 RETURNING id, name, email, role`,
-      [role, id]
-    );
+    else {
+      await client.query("ROLLBACK");
+      return res.status(400).json({ success: false, message: "Invalid target role" });
+    }
 
     await client.query("COMMIT");
 
     return res.status(200).json({
       success: true,
-      message: "User role updated successfully",
-      data: rows[0],
+      message: `User role changed to ${role} successfully`,
+      data: result,
     });
   } catch (error) {
     await client.query("ROLLBACK");
     console.error("Change user role error:", error);
-    return res.status(500).json({
-      success: false,
-      message: "Internal server error",
-    });
+    return res.status(500).json({ success: false, message: "Internal server error" });
   } finally {
     client.release();
   }
 };
-
-
-
-
 
 
 
@@ -689,31 +824,55 @@ export const deleteAdminUser = async (req, res) => {
 
     await client.query("BEGIN");
 
-    // Check if user exists
-    const { rows: existing } = await client.query(
+    // Check if user exists in users table
+    const { rows: userExists } = await client.query(
+      `SELECT id FROM users WHERE id = $1`,
+      [id]
+    );
+
+    if (userExists.length > 0) {
+      // Clean up related references first
+      await client.query(`UPDATE user_quiz_sessions SET user_id = NULL WHERE user_id = $1`, [id]);
+      await client.query(`UPDATE user_activity SET user_id = NULL WHERE user_id = $1`, [id]);
+      await client.query(`UPDATE user_settings SET user_id = NULL WHERE user_id = $1`, [id]);
+      await client.query(`UPDATE forum_likes SET user_id = NULL WHERE user_id = $1`, [id]);
+      await client.query(`UPDATE forum_comments SET user_id = NULL WHERE user_id = $1`, [id]);
+
+      // Delete from users
+      await client.query(`DELETE FROM users WHERE id = $1`, [id]);
+
+      await client.query("COMMIT");
+      return res.status(200).json({
+        success: true,
+        message: "User deleted successfully from users table",
+      });
+    }
+
+    // Check if user exists in admins table
+    const { rows: adminExists } = await client.query(
       `SELECT id FROM admins WHERE id = $1`,
       [id]
     );
 
-    if (existing.length === 0) {
-      await client.query("ROLLBACK");
-      return res.status(404).json({
-        success: false,
-        message: "User not found",
+    if (adminExists.length > 0) {
+      await client.query(`DELETE FROM admins WHERE id = $1`, [id]);
+
+      await client.query("COMMIT");
+      return res.status(200).json({
+        success: true,
+        message: "User deleted successfully from admins table",
       });
     }
 
-    await client.query(`DELETE FROM admins WHERE id = $1`, [id]);
-
-    await client.query("COMMIT");
-
-    return res.status(200).json({
-      success: true,
-      message: "User deleted successfully",
+    // If user not found in both tables
+    await client.query("ROLLBACK");
+    return res.status(404).json({
+      success: false,
+      message: "User not found in users or admins table",
     });
   } catch (error) {
     await client.query("ROLLBACK");
-    console.error(" Delete user error:", error);
+    console.error("Delete user error:", error);
     return res.status(500).json({
       success: false,
       message: "Internal server error",
@@ -770,7 +929,7 @@ export const getAllUsers = async (req, res) => {
 
 export const adminEdit = async (req, res) => {
   try {
-    const adminId = req.userId; 
+    const adminId = req.userId;
     console.log("adminId", adminId)
     const { name, email, phone } = req.body;
 
@@ -1011,10 +1170,10 @@ export const newQuestionsadd = async (req, res) => {
     const {
       question_text,
       options,
-      correct_option_id, 
-      difficulty_level,  
+      correct_option_id,
+      difficulty_level,
       grade_level,
-      category           
+      category
     } = req.body;
 
     if (!question_text || !options || options.length !== 4 || !correct_option_id || !category) {
