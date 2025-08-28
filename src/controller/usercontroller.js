@@ -1054,7 +1054,7 @@ export const newQuestionsadd = async (req, res) => {
 
 export const getAllquestions = async (req, res) => {
   try {
-    const query = `SELECT * FROM questions ORDER BY id ASC;`;
+    const query = `SELECT * FROM questions ORDER BY created_at ASC;`;
     const result = await pool.query(query);
 
     return res.status(200).json({
