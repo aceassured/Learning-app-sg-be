@@ -1013,6 +1013,7 @@ export const newQuestionsadd = async (req, res) => {
       options,
       correct_option_id, 
       difficulty_level,  
+      grade_level,
       category           
     } = req.body;
 
@@ -1022,8 +1023,8 @@ export const newQuestionsadd = async (req, res) => {
 
     const query = `
       INSERT INTO questions 
-      (subject, question_text, options, correct_option_id, created_at, difficulty_level) 
-      VALUES ($1, $2, $3, $4, NOW(), $5)
+      (subject, question_text, options, correct_option_id, created_at, difficulty_level, grade_level) 
+      VALUES ($1, $2, $3, $4, NOW(), $5, $6)
       RETURNING *;
     `;
 
@@ -1033,6 +1034,7 @@ export const newQuestionsadd = async (req, res) => {
       JSON.stringify(options),
       correct_option_id,
       difficulty_level || "Easy",
+      grade_level
     ];
 
     const result = await pool.query(query, values);
