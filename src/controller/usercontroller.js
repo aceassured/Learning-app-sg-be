@@ -703,8 +703,8 @@ export const changeUserRole = async (req, res) => {
       await client.query(`DELETE FROM admins WHERE id = $1`, [id]);
 
       const insertUserQuery = `
-        INSERT INTO users (email, phone, name, grade_level, questions_per_day, daily_reminder_time, selected_subjects, created_at, updated_at)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, now(), now())
+        INSERT INTO users (email, phone, name, grade_level, questions_per_day, daily_reminder_time, selected_subjects, profile_photo_url, created_at, updated_at)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, now(), now())
         RETURNING id, email, phone, name, grade_level
       `;
 
@@ -712,7 +712,8 @@ export const changeUserRole = async (req, res) => {
         admin.email,
         admin.phone || null,
         admin.name || null,
-        null, null, null, null
+        null, null, null, null,
+        admin.profile_photo_url
       ]);
 
       result = userRows[0];
@@ -753,7 +754,7 @@ export const changeUserRole = async (req, res) => {
 
       // Insert into admins
       const insertAdminQuery = `
-        INSERT INTO admins (email, password, name, role, phone, department, employee_id, created_at)
+        INSERT INTO admins (email, password, name, role, phone, department, employee_id, profile_photo_url, created_at)
         VALUES ($1, $2, $3, $4, $5, $6, $7, now())
         RETURNING id, email, name, role
       `;
@@ -765,7 +766,8 @@ export const changeUserRole = async (req, res) => {
         "admin",
         user.phone || null,
         null,
-        null
+        null,
+        user.profile_photo_url
       ]);
 
       result = adminRows[0];
