@@ -755,7 +755,7 @@ export const changeUserRole = async (req, res) => {
       // Insert into admins
       const insertAdminQuery = `
         INSERT INTO admins (email, password, name, role, phone, department, employee_id, profile_photo_url, created_at)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, now())
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, now())
         RETURNING id, email, name, role
       `;
 
