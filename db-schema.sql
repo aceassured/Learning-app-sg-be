@@ -124,3 +124,26 @@ CREATE TABLE forum_comments (
   content TEXT NOT NULL,
   created_at TIMESTAMP DEFAULT now()
 );
+
+
+
+CREATE TABLE subjects (
+    id SERIAL PRIMARY KEY,
+    subject TEXT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+
+CREATE TABLE topics (
+    id SERIAL PRIMARY KEY,
+    grade_level TEXT,
+    subject_id INT NOT NULL,
+    topic TEXT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_subject
+      FOREIGN KEY (subject_id)
+      REFERENCES subjects(id)
+      ON DELETE CASCADE
+);
