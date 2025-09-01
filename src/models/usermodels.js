@@ -36,7 +36,8 @@ export const updateUser = async (id, fields) => {
 
 
 export const getUserById = async (id) => {
-  console.log("id", id)
+  console.log("id", id);
+  
   const res = await pool.query(
     `SELECT ud.*, us.*
      FROM users ud
@@ -44,7 +45,23 @@ export const getUserById = async (id) => {
      WHERE ud.id = $1`,
     [id]
   );
-  console.log(res.rows[0])
-  return res.rows[0];
 
+  if (!res.rows[0]) return null;
+
+  const user = res.rows[0];
+
+  // Convert selected_subjects IDs to objects with id and subject
+  let selectedSubjects = [];
+  if (user.selected_subjects && user.selected_subjects.length > 0) {
+    const { rows } = await pool.query(
+      `SELECT id, subject FROM subjects WHERE id = ANY($1::int[])`,
+      [user.selected_subjects.map(Number)]
+    );
+    selectedSubjects = rows.map((r) => ({ id: r.id, subject: r.subject }));
+  }
+
+  return {
+    ...user,
+    selected_subjects: selectedSubjects,
+  };
 };
