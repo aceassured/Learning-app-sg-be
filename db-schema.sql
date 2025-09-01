@@ -13,6 +13,24 @@ CREATE TABLE users (
   created_at TIMESTAMP DEFAULT now()
 );
 
+
+CREATE TABLE user_question_status (
+  id SERIAL PRIMARY KEY,
+  user_id INT REFERENCES users(id) ON DELETE CASCADE,
+  question_id INT REFERENCES questions(id) ON DELETE CASCADE,
+  status question_status DEFAULT 'not_visited'
+);
+
+CREATE TYPE question_status AS ENUM (
+  'not_visited',
+  'not_answered',
+  'answered',
+  'marked_for_review',
+  'answered_and_marked_for_review'
+);
+
+
+
 -- quizzes: store quiz definitions per day or question bank
 CREATE TABLE questions (
   id SERIAL PRIMARY KEY,
@@ -20,6 +38,7 @@ CREATE TABLE questions (
   question_text TEXT NOT NULL,
   options JSONB NOT NULL, -- e.g. [{id:1,text:'A'},{id:2,text:'B'}]
   correct_option_id INT,
+  question_type TEXT,
   created_at TIMESTAMP DEFAULT now()
 );
 

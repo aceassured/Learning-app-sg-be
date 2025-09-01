@@ -1167,10 +1167,59 @@ export const confirmPassword = async (req, res) => {
 
 // new questions add..........
 
+// export const newQuestionsadd = async (req, res) => {
+//   try {
+//     const {
+//       question_text,
+//       question_type,
+//       files,
+//       topics,
+//       options,
+//       correct_option_id,
+//       difficulty_level,
+//       grade_level,
+//       category
+//     } = req.body;
+
+//     if ( !options || options.length !== 4 || !correct_option_id || !category || !topics) {
+//       return res.status(400).json({ message: "Invalid request body" });
+//     }
+
+//     const query = `
+//       INSERT INTO questions 
+//       (subject, question_text, options, correct_option_id, created_at, difficulty_level, grade_level) 
+//       VALUES ($1, $2, $3, $4, NOW(), $5, $6)
+//       RETURNING *;
+//     `;
+
+//     const values = [
+//       category,
+//       question_text,
+//       JSON.stringify(options),
+//       correct_option_id,
+//       difficulty_level || "Easy",
+//       grade_level
+//     ];
+
+//     const result = await pool.query(query, values);
+
+//     return res.status(201).json({
+//       message: "Question added successfully",
+//       question: result.rows[0],
+//     });
+
+//   } catch (error) {
+//     console.error("Error adding new question:", error);
+//     return res.status(500).json({ message: "Internal Server Error" });
+//   }
+// };
+
 export const newQuestionsadd = async (req, res) => {
-  try {
+try {
     const {
       question_text,
+      question_type,
+      topics,
       options,
       correct_option_id,
       difficulty_level,
@@ -1178,24 +1227,44 @@ export const newQuestionsadd = async (req, res) => {
       category
     } = req.body;
 
-    if (!question_text || !options || options.length !== 4 || !correct_option_id || !category) {
+    // validate options (string → parse JSON if needed)
+    let parsedOptions;
+    try {
+      parsedOptions = typeof options === "string" ? JSON.parse(options) : options;
+    } catch (err) {
+      return res.status(400).json({ message: "Invalid options format" });
+    }
+
+    if (!parsedOptions || parsedOptions.length !== 4 || !correct_option_id || !category || !topics) {
       return res.status(400).json({ message: "Invalid request body" });
+    }
+
+    // handle files upload (form-data)
+    let fileUrls
+    if (req.files && req.files.length > 0) {
+      for (const file of req.files) {
+        const url = await uploadBufferToVercel(file.buffer, file.originalname);
+        fileUrls = url;
+      }
     }
 
     const query = `
       INSERT INTO questions 
-      (subject, question_text, options, correct_option_id, created_at, difficulty_level, grade_level) 
-      VALUES ($1, $2, $3, $4, NOW(), $5, $6)
+      (subject, question_text, options, correct_option_id, created_at, difficulty_level, grade_level, question_type, question_url, topics) 
+      VALUES ($1, $2, $3, $4, NOW(), $5, $6, $7, $8, $9)
       RETURNING *;
     `;
 
     const values = [
       category,
       question_text,
-      JSON.stringify(options),
+      JSON.stringify(parsedOptions),
       correct_option_id,
       difficulty_level || "Easy",
-      grade_level
+      grade_level,
+      question_type,
+      fileUrls ? fileUrls : null,
+      topics
     ];
 
     const result = await pool.query(query, values);
@@ -1204,12 +1273,13 @@ export const newQuestionsadd = async (req, res) => {
       message: "Question added successfully",
       question: result.rows[0],
     });
-
   } catch (error) {
     console.error("Error adding new question:", error);
     return res.status(500).json({ message: "Internal Server Error" });
   }
 };
+
+
 
 // get all questions......
 
