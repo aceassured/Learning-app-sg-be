@@ -17,22 +17,26 @@ export const getHomeData = async (req, res) => {
     const todaySession = todayRes.rows[0] || null;
 
     const weekDatesRes = await pool.query(
-      `SELECT activity_date, correct_count, incorrect_count FROM user_activity
-       WHERE user_id = $1 AND activity_date >= (current_date - INTERVAL '6 days')
-       ORDER BY activity_date`, [userId]
+      `SELECT activity_date, correct_count, incorrect_count 
+   FROM user_activity
+   WHERE user_id = $1 
+     AND activity_date >= date_trunc('week', current_date)
+   ORDER BY activity_date`,
+      [userId]
     );
+
 
     const weekMap = {};
     weekDatesRes.rows.forEach(r => {
-      weekMap[r.activity_date.toISOString().slice(0,10)] = r;
+      weekMap[r.activity_date.toISOString().slice(0, 10)] = r;
     });
 
     let streak = 0;
     let consecutive = 0;
-    for (let i = 6; i >=0; i--) {
+    for (let i = 6; i >= 0; i--) {
       const date = new Date();
       date.setDate(date.getDate() - i);
-      const dayKey = date.toISOString().slice(0,10);
+      const dayKey = date.toISOString().slice(0, 10);
       const entry = weekMap[dayKey];
       if (entry && (entry.correct_count + entry.incorrect_count) > 0) {
         consecutive++;
@@ -47,20 +51,20 @@ export const getHomeData = async (req, res) => {
        FROM user_activity WHERE user_id = $1 AND date_trunc('month', activity_date) = date_trunc('month', current_date)`, [userId]
     );
 
-    const month = monthRes.rows[0] || {correct: 0, incorrect: 0};
+    const month = monthRes.rows[0] || { correct: 0, incorrect: 0 };
     const completedThisMonth = +(month.correct || 0) + +(month.incorrect || 0);
 
     res.json({
-      ok:true,
+      ok: true,
       todaySession,
       week: weekDatesRes.rows,
       all7: all7 ? 7 : 0,
       consecutive,
-      monthly: { completed: completedThisMonth, target: 25 } 
+      monthly: { completed: completedThisMonth, target: 25 }
     });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ ok:false, message:'Server error' });
+    res.status(500).json({ ok: false, message: 'Server error' });
   }
 };
 
@@ -228,7 +232,7 @@ export const reviewSession = async (req, res) => {
     const { sessionId } = req.params;
     const userId = req.userId;
     const sRes = await pool.query('SELECT * FROM user_quiz_sessions WHERE id=$1 AND user_id=$2', [sessionId, userId]);
-    if (!sRes.rowCount) return res.status(404).json({ ok:false, message:'Session not found' });
+    if (!sRes.rowCount) return res.status(404).json({ ok: false, message: 'Session not found' });
 
     const qRes = await pool.query(
       `SELECT a.*, q.question_text, q.options, q.correct_option_id
@@ -237,9 +241,9 @@ export const reviewSession = async (req, res) => {
        WHERE a.session_id = $1`, [sessionId]
     );
 
-    res.json({ ok:true, answers: qRes.rows });
+    res.json({ ok: true, answers: qRes.rows });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ ok:false, message:'Server error' });
+    res.status(500).json({ ok: false, message: 'Server error' });
   }
 };
