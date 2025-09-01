@@ -925,6 +925,31 @@ export const getAllUsers = async (req, res) => {
 };
 
 
+export const getAllSubject = async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { rows: allSubjects } = await client.query(
+      `SELECT *
+       FROM subjects 
+       ORDER BY subject ASC`
+    );
+
+    return res.status(200).json({
+      success: true,
+      data: allSubjects,
+    });
+  } catch (error) {
+    console.error("Get subjects error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error",
+    });
+  } finally {
+    client.release();
+  }
+};
+
+
 
 
 // admin edit...
