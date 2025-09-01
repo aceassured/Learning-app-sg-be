@@ -15,12 +15,32 @@ export const login = async (req, res) => {
   try {
     const { email, phone } = req.body;
     let user = null;
+
     if (email) user = await findUserByEmail(email);
     if (!user && phone) user = await findUserByPhone(phone);
 
     if (user) {
+        console.log(user.selected_subjects)
+      // Convert selected_subjects IDs to names
+      let selectedSubjectsNames = [];
+      if (user.selected_subjects && user.selected_subjects.length > 0) {
+        console.log(user.selected_subjects)
+        const { rows } = await pool.query(
+          `SELECT subject FROM subjects WHERE id = ANY($1::int[])`,
+          [user.selected_subjects.map(Number)]
+        );
+        selectedSubjectsNames = rows.map((r) => r.subject);
+      }
+
       const token = jwt.sign({ userId: user.id }, JWT_SECRET, { expiresIn: '7d' });
-      return res.json({ ok: true, user, token, redirect: 'home' });
+
+      // Replace IDs with names in response
+      const userResponse = {
+        ...user,
+        selected_subjects: selectedSubjectsNames,
+      };
+
+      return res.json({ ok: true, user: userResponse, token, redirect: 'home' });
     }
 
     return res.json({ ok: false, message: 'Not found', redirect: 'register' });
@@ -29,6 +49,7 @@ export const login = async (req, res) => {
     res.status(500).json({ ok: false, message: 'Server error' });
   }
 };
+
 
 export const register = async (req, res) => {
   try {
