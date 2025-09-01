@@ -97,7 +97,7 @@ export const getHomeData = async (req, res) => {
 export const startQuiz = async (req, res) => {
   try {
     const userId = req.userId;
-    const { subjects } = req.body; // e.g. ["mathematics","science"]
+    const { subjects } = req.body; // e.g. [6, 3]
 
     // Get questions_per_day from users table
     const userRes = await pool.query(
@@ -107,8 +107,16 @@ export const startQuiz = async (req, res) => {
     const qpd = userRes.rows[0]?.questions_per_day || 10;
 
     let qRes;
+
     if (subjects && subjects.length > 0) {
-      // Filter by selected subjects (case-insensitive)
+      // 1️⃣ Get subject names from subject IDs
+      const subjectNameRes = await pool.query(
+        "SELECT subject FROM subjects WHERE id = ANY($1)",
+        [subjects]
+      );
+      const subjectNames = subjectNameRes.rows.map((row) => row.subject.toLowerCase());
+
+      // 2️⃣ Fetch questions using those subject names
       qRes = await pool.query(
         `
         SELECT id, subject, question_text, options 
@@ -117,7 +125,7 @@ export const startQuiz = async (req, res) => {
         ORDER BY random() 
         LIMIT $2
         `,
-        [subjects.map((s) => s.toLowerCase()), qpd]
+        [subjectNames, qpd]
       );
     } else {
       // Fallback: pick from all subjects
@@ -153,6 +161,7 @@ export const startQuiz = async (req, res) => {
     res.status(500).json({ ok: false, message: "Server error" });
   }
 };
+
 
 
 // submit answers for a session (array of {question_id, selected_option_id})
