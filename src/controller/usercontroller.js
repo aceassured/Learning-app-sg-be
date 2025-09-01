@@ -26,10 +26,10 @@ export const login = async (req, res) => {
       if (user.selected_subjects && user.selected_subjects.length > 0) {
         console.log(user.selected_subjects)
         const { rows } = await pool.query(
-          `SELECT id, subject FROM subjects WHERE id = ANY($1::int[])`,
+          `SELECT id,icon,subject FROM subjects WHERE id = ANY($1::int[])`,
           [user.selected_subjects.map(Number)]
         );
-        selectedSubjectsNames = rows.map((r) => ({ id: r.id, subject: r.subject }));
+        selectedSubjectsNames = rows.map((r) => ({ id: r.id, subject: r.subject, icon:r.icon }));
       }
 
       const token = jwt.sign({ userId: user.id }, JWT_SECRET, { expiresIn: '7d' });
