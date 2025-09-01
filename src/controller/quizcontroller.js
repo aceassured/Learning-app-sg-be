@@ -199,10 +199,10 @@ export const submitAnswers = async (req, res) => {
       );
     }
 
-    await pool.query(
+    const quizsessionData = await pool.query(
       `UPDATE user_quiz_sessions 
        SET finished_at = now(), score = $1 
-       WHERE id = $2`,
+       WHERE id = $2 RETURNING *`,
       [correctCount, session_id]
     );
 
@@ -217,7 +217,7 @@ export const submitAnswers = async (req, res) => {
       [userId, correctCount, incorrectCount]
     );
 
-    res.json({ ok: true, score: correctCount, total: answers.length });
+    res.json({ ok: true, score: correctCount, total: answers.length , data: quizsessionData.rows[0], });
   } catch (err) {
     console.error(err);
     res.status(500).json({ ok: false, message: 'Server error' });
