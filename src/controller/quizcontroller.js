@@ -119,7 +119,7 @@ export const startQuiz = async (req, res) => {
       // 2️⃣ Fetch questions using those subject names
       qRes = await pool.query(
         `
-        SELECT id, subject, question_text, options 
+        SELECT id, subject, question_text, options , question_url, answer_file_url
         FROM questions 
         WHERE LOWER(subject) = ANY($1) 
         ORDER BY random() 
@@ -131,7 +131,7 @@ export const startQuiz = async (req, res) => {
       // Fallback: pick from all subjects
       qRes = await pool.query(
         `
-        SELECT id, subject, question_text, options 
+        SELECT id, subject, question_text, options, question_url, answer_file_url
         FROM questions 
         ORDER BY random() 
         LIMIT $1
