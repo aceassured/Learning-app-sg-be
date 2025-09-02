@@ -244,7 +244,7 @@ export const reviewSession = async (req, res) => {
     if (!sRes.rowCount) return res.status(404).json({ ok: false, message: 'Session not found' });
 
     const qRes = await pool.query(
-      `SELECT a.*, q.question_text, q.options, q.correct_option_id
+      `SELECT a.*, q.question_text, q.options, q.correct_option_id, q.question_url, q.answer_file_url, q.answer_explanation
        FROM user_answers a
        JOIN questions q ON q.id = a.question_id
        WHERE a.session_id = $1`, [sessionId]
