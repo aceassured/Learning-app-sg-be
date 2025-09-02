@@ -1261,7 +1261,7 @@ export const confirmPassword = async (req, res) => {
 // };
 
 export const newQuestionsadd = async (req, res) => {
-try {
+  try {
     const {
       question_text,
       question_type,
@@ -1270,7 +1270,8 @@ try {
       correct_option_id,
       difficulty_level,
       grade_level,
-      category
+      category,
+      answer_explanation,   // ✅ new field
     } = req.body;
 
     // validate options (string → parse JSON if needed)
@@ -1286,18 +1287,23 @@ try {
     }
 
     // handle files upload (form-data)
-    let fileUrls
-    if (req.files && req.files.length > 0) {
-      for (const file of req.files) {
-        const url = await uploadBufferToVercel(file.buffer, file.originalname);
-        fileUrls = url;
-      }
+    let questionFileUrl = null;
+    let answerFileUrl = null;
+
+    if (req.files?.file?.length > 0) {
+      const file = req.files.file[0];
+      questionFileUrl = await uploadBufferToVercel(file.buffer, file.originalname);
+    }
+
+    if (req.files?.fileanswer?.length > 0) {
+      const fileAns = req.files.fileanswer[0];
+      answerFileUrl = await uploadBufferToVercel(fileAns.buffer, fileAns.originalname);
     }
 
     const query = `
       INSERT INTO questions 
-      (subject, question_text, options, correct_option_id, created_at, difficulty_level, grade_level, question_type, question_url, topics) 
-      VALUES ($1, $2, $3, $4, NOW(), $5, $6, $7, $8, $9)
+      (subject, question_text, options, correct_option_id, created_at, difficulty_level, grade_level, question_type, question_url, topics, answer_explanation, answer_file_url) 
+      VALUES ($1, $2, $3, $4, NOW(), $5, $6, $7, $8, $9, $10, $11)
       RETURNING *;
     `;
 
@@ -1309,8 +1315,10 @@ try {
       difficulty_level || "Easy",
       grade_level,
       question_type,
-      fileUrls ? fileUrls : null,
-      topics
+      questionFileUrl,   // ✅ question file
+      topics,
+      answer_explanation, // ✅ answer field
+      answerFileUrl      // ✅ answer file
     ];
 
     const result = await pool.query(query, values);
@@ -1324,6 +1332,7 @@ try {
     return res.status(500).json({ message: "Internal Server Error" });
   }
 };
+
 
 
 

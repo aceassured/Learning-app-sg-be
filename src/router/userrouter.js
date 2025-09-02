@@ -41,7 +41,7 @@ router.post("/verifyotp", verifyOtp)
 router.put("/confirmpassword", confirmPassword)
 router.put("/adminedit",auth, upload.single("file"), adminEdit)
 router.put("/edit", auth, upload.single("profile_photo"), userEdit);
-router.post("/questionadd", upload.array("file"), newQuestionsadd)
+router.post("/questionadd",upload.fields([{ name: "file", maxCount: 1 },{ name: "fileanswer", maxCount: 1 }]),newQuestionsadd);
 router.get("/allquestions", getAllquestions)
 router.get("/home", homeApi)
 router.delete("/deletequestion", deleteQuestions)
