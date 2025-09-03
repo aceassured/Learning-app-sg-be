@@ -226,7 +226,7 @@ export const submitAnswers = async (req, res) => {
       [userId, correctCount, incorrectCount]
     );
 
-    res.json({ ok: true, score: correctCount, total: answers.length , data: quizsessionData.rows[0], });
+    res.json({ ok: true, score: correctCount, total: answers.length, data: quizsessionData.rows[0], });
   } catch (err) {
     console.error(err);
     res.status(500).json({ ok: false, message: 'Server error' });
@@ -278,6 +278,7 @@ export const getTopics = async (req, res) => {
 
     const { rows } = await pool.query(query, [subject_id]);
 
+    // 🔑 Group by subject
     const groupedData = rows.reduce((acc, row) => {
       if (!acc[row.subject]) {
         acc[row.subject] = [];
@@ -299,3 +300,58 @@ export const getTopics = async (req, res) => {
     });
   }
 };
+
+
+export const admingetTopics = async (req, res) => {
+  try {
+    let { grade_id, subject_id } = req.body;
+
+    // ✅ Validate grade_id
+    grade_id = parseInt(grade_id, 10);
+    if (!grade_id) {
+      return res
+        .status(400)
+        .json({ message: "grade_id is required and must be a valid number" });
+    }
+
+    // ✅ Validate subject_id array
+    if (!Array.isArray(subject_id) || subject_id.length === 0) {
+      return res
+        .status(400)
+        .json({ message: "subject_id must be a non-empty array" });
+    }
+
+    subject_id = subject_id.map((id) => parseInt(id, 10)).filter(Boolean);
+
+    const query = `
+      SELECT 
+        t.id, 
+        t.topic, 
+        t.subject_id, 
+        t.grade_id,
+        s.subject,
+        g.grade_level AS grade_level
+      FROM topics t
+      JOIN subjects s ON t.subject_id = s.id
+      JOIN grades g ON t.grade_id = g.id
+      WHERE t.grade_id = $1
+        AND t.subject_id = ANY($2::int[])
+      ORDER BY s.subject, t.topic;
+    `;
+
+    const { rows } = await pool.query(query, [grade_id, subject_id]);
+
+    return res.status(200).json({
+      success: true,
+      data: rows, // flat array of topics with subject + grade
+    });
+
+  } catch (error) {
+    console.error("Error fetching topics:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error",
+    });
+  }
+};
+

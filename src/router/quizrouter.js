@@ -9,7 +9,6 @@ router.use(auth);
 router.get('/home', getHomeData);
 router.post('/start', startQuiz);
 router.post('/submit', submitAnswers);
-router.post('/gettopics', getTopics);
 router.get('/review/:sessionId', reviewSession);
 
 export default router;

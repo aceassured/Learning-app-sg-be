@@ -4,8 +4,10 @@ import auth from '../middleware/auth.js';
 import { uploadBufferToVercel } from '../utils/vercel-blob.js';
 import { adminEdit, adminRegister, adminResetPassword, commonLogin, confirmPassword, deleteQuestions, editProfile, getAdmindetails, getAllquestions, 
   getProfile, getUserdetails, homeApi, login, newQuestionsadd, register, userEdit, userRegister, verifyOtp,addNewUser,changeUserRole ,deleteAdminUser,getAllUsers,
-  getAllSubject} from '../controller/usercontroller.js';
+  getAllSubject,
+  getAllGrade} from '../controller/usercontroller.js';
 import { deleteForum, deleteUser } from '../controller/forumcontroller.js';
+import { admingetTopics, getTopics } from '../controller/quizcontroller.js';
 
 const upload = multer({ storage: multer.memoryStorage() });
 const router = express.Router();
@@ -52,7 +54,9 @@ router.put("/changeUserRole",changeUserRole)
 router.delete("/deleteAdminUser",deleteAdminUser)
 router.get("/getAllUsers",getAllUsers);
 router.get("/getallsubject",getAllSubject);
-
+router.get("/getallgrades",getAllGrade);
+router.post('/gettopics', getTopics);
+router.post('/admingettopics', admingetTopics);
 
 
 

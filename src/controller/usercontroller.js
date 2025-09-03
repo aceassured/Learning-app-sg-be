@@ -971,6 +971,29 @@ export const getAllSubject = async (req, res) => {
 };
 
 
+export const getAllGrade = async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { rows: allGrades } = await client.query(
+      `SELECT *
+       FROM grades 
+       ORDER BY grade_level ASC`
+    );
+
+    return res.status(200).json({
+      success: true,
+      data: allGrades,
+    });
+  } catch (error) {
+    console.error("Get grades error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error",
+    });
+  } finally {
+    client.release();
+  }
+};
 
 
 // admin edit...
