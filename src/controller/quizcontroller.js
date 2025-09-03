@@ -94,69 +94,167 @@ export const getHomeData = async (req, res) => {
 //   }
 // };
 
+
+// start quiz........
+
+// export const startQuiz = async (req, res) => {
+//   try {
+//     const userId = req.userId;
+//     const { subjects, topics } = req.body; // subjects = [id...], topics = [id...]
+
+//     // Get questions_per_day from users table
+//     const userRes = await pool.query(
+//       "SELECT questions_per_day FROM users WHERE id=$1",
+//       [userId]
+//     );
+//     const qpd = userRes.rows[0]?.questions_per_day || 10;
+
+//     let qRes;
+
+//     if (topics && topics.length > 0) {
+//       // 🎯 Filter by topic IDs
+//       qRes = await pool.query(
+//         `
+//         SELECT id, subject, topic_id, question_text, options, question_url, 
+//                answer_file_url, answer_explanation
+//         FROM questions 
+//         WHERE topic_id = ANY($1::int[]) 
+//         ORDER BY random() 
+//         LIMIT $2
+//         `,
+//         [topics, qpd]
+//       );
+//     } else if (subjects && subjects.length > 0) {
+//       // 🎯 Fallback: Filter by subject IDs
+//       const subjectNameRes = await pool.query(
+//         "SELECT subject FROM subjects WHERE id = ANY($1)",
+//         [subjects]
+//       );
+//       const subjectNames = subjectNameRes.rows.map((row) => row.subject.toLowerCase());
+
+//       qRes = await pool.query(
+//         `
+//         SELECT id, subject, topic_id, question_text, options, question_url, 
+//                answer_file_url, answer_explanation
+//         FROM questions 
+//         WHERE LOWER(subject) = ANY($1) 
+//         ORDER BY random() 
+//         LIMIT $2
+//         `,
+//         [subjectNames, qpd]
+//       );
+//     } else {
+//       // 🎯 Default: random questions from all subjects
+//       qRes = await pool.query(
+//         `
+//         SELECT id, subject, topic_id, question_text, options, question_url, 
+//                answer_file_url, answer_explanation
+//         FROM questions 
+//         ORDER BY random() 
+//         LIMIT $1
+//         `,
+//         [qpd]
+//       );
+//     }
+
+//     const questions = qRes.rows;
+
+//     // Insert into user_quiz_sessions
+//     const sessionRes = await pool.query(
+//       `
+//       INSERT INTO user_quiz_sessions 
+//       (user_id, started_at, allowed_duration_seconds, total_questions)
+//       VALUES ($1, now(), 300, $2)
+//       RETURNING *
+//       `,
+//       [userId, questions.length]
+//     );
+
+//     const session = sessionRes.rows[0];
+
+//     res.json({ ok: true, session, questions });
+//   } catch (err) {
+//     console.error("startQuiz error:", err);
+//     res.status(500).json({ ok: false, message: "Server error" });
+//   }
+// };
+
+
 export const startQuiz = async (req, res) => {
   try {
     const userId = req.userId;
     const { subjects, topics } = req.body; // subjects = [id...], topics = [id...]
 
-    // Get questions_per_day from users table
+    // ✅ Get user's questions_per_day
     const userRes = await pool.query(
       "SELECT questions_per_day FROM users WHERE id=$1",
       [userId]
     );
     const qpd = userRes.rows[0]?.questions_per_day || 10;
 
+    // ✅ Already answered question_ids
+    const answeredRes = await pool.query(
+      "SELECT question_id FROM user_answered_questions WHERE user_id=$1",
+      [userId]
+    );
+    const answeredIds = answeredRes.rows.map((r) => r.question_id);
+
     let qRes;
 
     if (topics && topics.length > 0) {
-      // 🎯 Filter by topic IDs
+      // 🎯 Pick by topics, exclude answered
       qRes = await pool.query(
         `
         SELECT id, subject, topic_id, question_text, options, question_url, 
                answer_file_url, answer_explanation
         FROM questions 
-        WHERE topic_id = ANY($1::int[]) 
-        ORDER BY random() 
-        LIMIT $2
+        WHERE topic_id = ANY($1::int[])
+          AND NOT (id = ANY($2::int[]))
+        ORDER BY random()
+        LIMIT $3
         `,
-        [topics, qpd]
+        [topics, answeredIds, qpd]
       );
     } else if (subjects && subjects.length > 0) {
-      // 🎯 Fallback: Filter by subject IDs
+      // 🎯 Pick by subjects, exclude answered
       const subjectNameRes = await pool.query(
         "SELECT subject FROM subjects WHERE id = ANY($1)",
         [subjects]
       );
-      const subjectNames = subjectNameRes.rows.map((row) => row.subject.toLowerCase());
+      const subjectNames = subjectNameRes.rows.map((row) =>
+        row.subject.toLowerCase()
+      );
 
       qRes = await pool.query(
         `
         SELECT id, subject, topic_id, question_text, options, question_url, 
                answer_file_url, answer_explanation
         FROM questions 
-        WHERE LOWER(subject) = ANY($1) 
-        ORDER BY random() 
-        LIMIT $2
+        WHERE LOWER(subject) = ANY($1)
+          AND NOT (id = ANY($2::int[]))
+        ORDER BY random()
+        LIMIT $3
         `,
-        [subjectNames, qpd]
+        [subjectNames, answeredIds, qpd]
       );
     } else {
-      // 🎯 Default: random questions from all subjects
+      // 🎯 Default: all questions, exclude answered
       qRes = await pool.query(
         `
         SELECT id, subject, topic_id, question_text, options, question_url, 
                answer_file_url, answer_explanation
         FROM questions 
-        ORDER BY random() 
-        LIMIT $1
+        WHERE NOT (id = ANY($1::int[]))
+        ORDER BY random()
+        LIMIT $2
         `,
-        [qpd]
+        [answeredIds, qpd]
       );
     }
 
     const questions = qRes.rows;
 
-    // Insert into user_quiz_sessions
+    // ✅ Insert quiz session
     const sessionRes = await pool.query(
       `
       INSERT INTO user_quiz_sessions 
@@ -169,13 +267,12 @@ export const startQuiz = async (req, res) => {
 
     const session = sessionRes.rows[0];
 
-    res.json({ ok: true, session, questions });
+    return res.json({ ok: true, session, questions });
   } catch (err) {
     console.error("startQuiz error:", err);
-    res.status(500).json({ ok: false, message: "Server error" });
+    return res.status(500).json({ ok: false, message: "Server error" });
   }
 };
-
 
 
 
