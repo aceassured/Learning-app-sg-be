@@ -97,7 +97,7 @@ export const getHomeData = async (req, res) => {
 export const startQuiz = async (req, res) => {
   try {
     const userId = req.userId;
-    const { subjects } = req.body; // e.g. [6, 3]
+    const { subjects, topics } = req.body; // subjects = [id...], topics = [id...]
 
     // Get questions_per_day from users table
     const userRes = await pool.query(
@@ -108,18 +108,31 @@ export const startQuiz = async (req, res) => {
 
     let qRes;
 
-    if (subjects && subjects.length > 0) {
-      // 1️⃣ Get subject names from subject IDs
+    if (topics && topics.length > 0) {
+      // 🎯 Filter by topic IDs
+      qRes = await pool.query(
+        `
+        SELECT id, subject, topic_id, question_text, options, question_url, 
+               answer_file_url, answer_explanation
+        FROM questions 
+        WHERE topic_id = ANY($1::int[]) 
+        ORDER BY random() 
+        LIMIT $2
+        `,
+        [topics, qpd]
+      );
+    } else if (subjects && subjects.length > 0) {
+      // 🎯 Fallback: Filter by subject IDs
       const subjectNameRes = await pool.query(
         "SELECT subject FROM subjects WHERE id = ANY($1)",
         [subjects]
       );
       const subjectNames = subjectNameRes.rows.map((row) => row.subject.toLowerCase());
 
-      // 2️⃣ Fetch questions using those subject names
       qRes = await pool.query(
         `
-        SELECT id, subject, question_text, options , question_url, answer_file_url, answer_explanation
+        SELECT id, subject, topic_id, question_text, options, question_url, 
+               answer_file_url, answer_explanation
         FROM questions 
         WHERE LOWER(subject) = ANY($1) 
         ORDER BY random() 
@@ -128,10 +141,11 @@ export const startQuiz = async (req, res) => {
         [subjectNames, qpd]
       );
     } else {
-      // Fallback: pick from all subjects
+      // 🎯 Default: random questions from all subjects
       qRes = await pool.query(
         `
-        SELECT id, subject, question_text, options, question_url, answer_file_url, answer_explanation
+        SELECT id, subject, topic_id, question_text, options, question_url, 
+               answer_file_url, answer_explanation
         FROM questions 
         ORDER BY random() 
         LIMIT $1
@@ -161,6 +175,7 @@ export const startQuiz = async (req, res) => {
     res.status(500).json({ ok: false, message: "Server error" });
   }
 };
+
 
 
 
