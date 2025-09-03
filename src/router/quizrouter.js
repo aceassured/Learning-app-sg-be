@@ -1,6 +1,6 @@
 import express from 'express';
 import auth from '../middleware/auth.js';
-import { getHomeData, reviewSession, startQuiz, submitAnswers } from '../controller/quizcontroller.js';
+import { getHomeData, reviewSession, startQuiz, submitAnswers, getTopics } from '../controller/quizcontroller.js';
 
 const router = express.Router();
 
@@ -9,6 +9,7 @@ router.use(auth);
 router.get('/home', getHomeData);
 router.post('/start', startQuiz);
 router.post('/submit', submitAnswers);
+router.post('/gettopics', getTopics);
 router.get('/review/:sessionId', reviewSession);
 
 export default router;

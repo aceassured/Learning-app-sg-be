@@ -256,3 +256,46 @@ export const reviewSession = async (req, res) => {
     res.status(500).json({ ok: false, message: 'Server error' });
   }
 };
+
+
+export const getTopics = async (req, res) => {
+  try {
+    let { subject_id } = req.body;
+
+    if (!Array.isArray(subject_id) || subject_id.length === 0) {
+      return res.status(400).json({ message: "subject_id must be a non-empty array" });
+    }
+
+    subject_id = subject_id.map((id) => parseInt(id, 10)).filter(Boolean);
+
+    const query = `
+      SELECT t.id, t.topic, t.subject_id, s.subject
+      FROM topics t
+      JOIN subjects s ON t.subject_id = s.id
+      WHERE t.subject_id = ANY($1::int[])
+      ORDER BY s.subject, t.topic;
+    `;
+
+    const { rows } = await pool.query(query, [subject_id]);
+
+    const groupedData = rows.reduce((acc, row) => {
+      if (!acc[row.subject]) {
+        acc[row.subject] = [];
+      }
+      acc[row.subject].push(row);
+      return acc;
+    }, {});
+
+    return res.status(200).json({
+      success: true,
+      data: groupedData,
+    });
+
+  } catch (error) {
+    console.error("Error fetching topics:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error",
+    });
+  }
+};
