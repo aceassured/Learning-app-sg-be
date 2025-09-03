@@ -1398,8 +1398,8 @@ export const newQuestionsadd = async (req, res) => {
     // ✅ Insert into questions
     const query = `
       INSERT INTO questions 
-      (subject, question_text, options, correct_option_id, created_at, difficulty_level, grade_level, question_type, question_url, topic_id, answer_explanation, answer_file_url) 
-      VALUES ($1, $2, $3, $4, NOW(), $5, $6, $7, $8, $9, $10, $11)
+      (subject, question_text, options, correct_option_id, created_at, difficulty_level, grade_level, question_type, question_url, topic_id, answer_explanation, answer_file_url, topics) 
+      VALUES ($1, $2, $3, $4, NOW(), $5, $6, $7, $8, $9, $10, $11, $12)
       RETURNING *;
     `;
 
@@ -1414,7 +1414,8 @@ export const newQuestionsadd = async (req, res) => {
       questionFileUrl,               // question file
       topics,                        // topic_id (FK)
       answer_explanation,
-      answerFileUrl,                 // answer file
+      answerFileUrl,
+      topics               // answer file
     ];
 
     const result = await pool.query(query, values);
