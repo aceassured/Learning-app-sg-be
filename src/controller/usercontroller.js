@@ -1415,7 +1415,7 @@ export const newQuestionsadd = async (req, res) => {
       topics,                        // topic_id (FK)
       answer_explanation,
       answerFileUrl,
-      topics               // answer file
+      topicName               // answer file
     ];
 
     const result = await pool.query(query, values);
