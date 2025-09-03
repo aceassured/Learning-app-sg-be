@@ -55,7 +55,7 @@ router.delete("/deleteAdminUser",deleteAdminUser)
 router.get("/getAllUsers",getAllUsers);
 router.get("/getallsubject",getAllSubject);
 router.get("/getallgrades",getAllGrade);
-router.post('/gettopics', getTopics);
+router.post('/gettopics',auth,  getTopics);
 router.post('/admingettopics', admingetTopics);
 
 
