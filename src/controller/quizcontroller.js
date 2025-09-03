@@ -211,17 +211,27 @@ export const submitAnswers = async (req, res) => {
       const is_correct = (correct === ans.selected_option_id);
       if (is_correct) correctCount++;
 
+      // ✅ Save answer
       await pool.query(
         `INSERT INTO user_answers (session_id, question_id, selected_option_id, is_correct, answered_at)
-         VALUES ($1, $2, $3, $4, now())
-         ON CONFLICT (session_id, question_id)
-         DO UPDATE SET 
-            selected_option_id = EXCLUDED.selected_option_id,
-            is_correct = EXCLUDED.is_correct,
-            answered_at = now()`,
+     VALUES ($1, $2, $3, $4, now())
+     ON CONFLICT (session_id, question_id)
+     DO UPDATE SET 
+        selected_option_id = EXCLUDED.selected_option_id,
+        is_correct = EXCLUDED.is_correct,
+        answered_at = now()`,
         [session_id, ans.question_id, ans.selected_option_id, is_correct]
       );
+
+      // ✅ Mark question as "seen" by this user
+      await pool.query(
+        `INSERT INTO user_answered_questions (user_id, question_id, answered_at)
+     VALUES ($1, $2, now())
+     ON CONFLICT (user_id, question_id) DO NOTHING`,
+        [userId, ans.question_id]
+      );
     }
+
 
     const quizsessionData = await pool.query(
       `UPDATE user_quiz_sessions 
