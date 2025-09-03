@@ -1236,38 +1236,66 @@ export const confirmPassword = async (req, res) => {
 
 // new questions add..........
 
+
 // export const newQuestionsadd = async (req, res) => {
 //   try {
 //     const {
 //       question_text,
 //       question_type,
-//       files,
 //       topics,
 //       options,
 //       correct_option_id,
 //       difficulty_level,
 //       grade_level,
-//       category
+//       category,
+//       answer_explanation,   // ✅ new field
 //     } = req.body;
 
-//     if ( !options || options.length !== 4 || !correct_option_id || !category || !topics) {
+//     // validate options (string → parse JSON if needed)
+//     let parsedOptions;
+//     try {
+//       parsedOptions = typeof options === "string" ? JSON.parse(options) : options;
+//     } catch (err) {
+//       return res.status(400).json({ message: "Invalid options format" });
+//     }
+
+//     if (!parsedOptions || parsedOptions.length !== 4 || !correct_option_id || !category || !topics) {
 //       return res.status(400).json({ message: "Invalid request body" });
+//     }
+
+//     // handle files upload (form-data)
+//     let questionFileUrl = null;
+//     let answerFileUrl = null;
+
+//     if (req.files?.file?.length > 0) {
+//       const file = req.files.file[0];
+//       questionFileUrl = await uploadBufferToVercel(file.buffer, file.originalname);
+//     }
+
+//     if (req.files?.fileanswer?.length > 0) {
+//       const fileAns = req.files.fileanswer[0];
+//       answerFileUrl = await uploadBufferToVercel(fileAns.buffer, fileAns.originalname);
 //     }
 
 //     const query = `
 //       INSERT INTO questions 
-//       (subject, question_text, options, correct_option_id, created_at, difficulty_level, grade_level) 
-//       VALUES ($1, $2, $3, $4, NOW(), $5, $6)
+//       (subject, question_text, options, correct_option_id, created_at, difficulty_level, grade_level, question_type, question_url, topics, answer_explanation, answer_file_url) 
+//       VALUES ($1, $2, $3, $4, NOW(), $5, $6, $7, $8, $9, $10, $11)
 //       RETURNING *;
 //     `;
 
 //     const values = [
 //       category,
 //       question_text,
-//       JSON.stringify(options),
+//       JSON.stringify(parsedOptions),
 //       correct_option_id,
 //       difficulty_level || "Easy",
-//       grade_level
+//       grade_level,
+//       question_type,
+//       questionFileUrl,   // ✅ question file
+//       topics,
+//       answer_explanation, // ✅ answer field
+//       answerFileUrl      // ✅ answer file
 //     ];
 
 //     const result = await pool.query(query, values);
@@ -1276,72 +1304,117 @@ export const confirmPassword = async (req, res) => {
 //       message: "Question added successfully",
 //       question: result.rows[0],
 //     });
-
 //   } catch (error) {
 //     console.error("Error adding new question:", error);
 //     return res.status(500).json({ message: "Internal Server Error" });
 //   }
 // };
 
+
 export const newQuestionsadd = async (req, res) => {
   try {
     const {
       question_text,
       question_type,
-      topics,
+      topics,        // topic_id
       options,
       correct_option_id,
       difficulty_level,
-      grade_level,
-      category,
-      answer_explanation,   // ✅ new field
+      grade_level,   // grade_id
+      category,      // subject_id
+      answer_explanation,
     } = req.body;
 
-    // validate options (string → parse JSON if needed)
+    // ✅ Validate options
     let parsedOptions;
     try {
-      parsedOptions = typeof options === "string" ? JSON.parse(options) : options;
+      parsedOptions =
+        typeof options === "string" ? JSON.parse(options) : options;
     } catch (err) {
       return res.status(400).json({ message: "Invalid options format" });
     }
 
-    if (!parsedOptions || parsedOptions.length !== 4 || !correct_option_id || !category || !topics) {
+    if (
+      !parsedOptions ||
+      parsedOptions.length !== 4 ||
+      !correct_option_id ||
+      !category ||
+      !topics ||
+      !grade_level
+    ) {
       return res.status(400).json({ message: "Invalid request body" });
     }
 
-    // handle files upload (form-data)
+    // ✅ Fetch subject name
+    const subjectRes = await pool.query(
+      "SELECT subject FROM subjects WHERE id=$1",
+      [category]
+    );
+    if (subjectRes.rowCount === 0) {
+      return res.status(400).json({ message: "Invalid subject id" });
+    }
+    const subjectName = subjectRes.rows[0].subject;
+
+    // ✅ Fetch topic name
+    const topicRes = await pool.query(
+      "SELECT topic FROM topics WHERE id=$1",
+      [topics]
+    );
+    if (topicRes.rowCount === 0) {
+      return res.status(400).json({ message: "Invalid topic id" });
+    }
+    const topicName = topicRes.rows[0].topic;
+
+    // ✅ Fetch grade level name
+    const gradeRes = await pool.query(
+      "SELECT grade_level FROM grades WHERE id=$1",
+      [grade_level]
+    );
+    if (gradeRes.rowCount === 0) {
+      return res.status(400).json({ message: "Invalid grade id" });
+    }
+    const gradeLevelName = gradeRes.rows[0].grade_level;
+
+    // ✅ Handle file uploads
     let questionFileUrl = null;
     let answerFileUrl = null;
 
     if (req.files?.file?.length > 0) {
       const file = req.files.file[0];
-      questionFileUrl = await uploadBufferToVercel(file.buffer, file.originalname);
+      questionFileUrl = await uploadBufferToVercel(
+        file.buffer,
+        file.originalname
+      );
     }
 
     if (req.files?.fileanswer?.length > 0) {
       const fileAns = req.files.fileanswer[0];
-      answerFileUrl = await uploadBufferToVercel(fileAns.buffer, fileAns.originalname);
+      answerFileUrl = await uploadBufferToVercel(
+        fileAns.buffer,
+        fileAns.originalname
+      );
     }
 
+    // ✅ Insert into questions
     const query = `
       INSERT INTO questions 
-      (subject, question_text, options, correct_option_id, created_at, difficulty_level, grade_level, question_type, question_url, topics, answer_explanation, answer_file_url) 
+      (subject, question_text, options, correct_option_id, created_at, difficulty_level, grade_level, question_type, question_url, topic_id, answer_explanation, answer_file_url) 
       VALUES ($1, $2, $3, $4, NOW(), $5, $6, $7, $8, $9, $10, $11)
       RETURNING *;
     `;
 
     const values = [
-      category,
+      subjectName,                   // subject (string from subjects table)
       question_text,
       JSON.stringify(parsedOptions),
       correct_option_id,
       difficulty_level || "Easy",
-      grade_level,
+      gradeLevelName,                // grade_level (string from grades table)
       question_type,
-      questionFileUrl,   // ✅ question file
-      topics,
-      answer_explanation, // ✅ answer field
-      answerFileUrl      // ✅ answer file
+      questionFileUrl,               // question file
+      topics,                        // topic_id (FK)
+      answer_explanation,
+      answerFileUrl,                 // answer file
     ];
 
     const result = await pool.query(query, values);
@@ -1355,8 +1428,6 @@ export const newQuestionsadd = async (req, res) => {
     return res.status(500).json({ message: "Internal Server Error" });
   }
 };
-
-
 
 
 // get all questions......
