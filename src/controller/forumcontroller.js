@@ -156,17 +156,25 @@ export const createPost = async (req, res) => {
 
     let postRes;
 
+    const getGradequerry = `SELECT grade_level FROM grades WHERE id = $1`
+    const gradeResult = await pool.query(getGradequerry, [grade_level])
+    const gradeValue = gradeResult.rows[0].grade_value
+
+    const getSubjectquerry = `SELECT subject FROM subjects WHERE id = $1`
+    const subjectResult = await pool.query(getSubjectquerry, [subject_tag])
+    const subjectValue = subjectResult.rows[0].subject
+
     if (author_type === "user") {
       postRes = await pool.query(
         `INSERT INTO forum_posts (user_id, grade_level, content, subject_tag, type_of_upload) 
          VALUES ($1, $2, $3, $4, $5) RETURNING *`,
-        [authorId, grade_level, content, subject_tag, type_of_upload]
+        [authorId, gradeValue, content, subjectValue, type_of_upload]
       );
     } else if (author_type === "admin") {
       postRes = await pool.query(
         `INSERT INTO forum_posts (admin_id, grade_level, content, subject_tag, type_of_upload) 
          VALUES ($1, $2, $3, $4, $5) RETURNING *`,
-        [authorId, grade_level, content, subject_tag, type_of_upload]
+        [authorId, gradeValue, content, subjectValue, type_of_upload]
       );
     } else {
       return res.status(400).json({ ok: false, message: "Invalid author_type" });
