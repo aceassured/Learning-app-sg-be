@@ -20,7 +20,7 @@ export const login = async (req, res) => {
     if (!user && phone) user = await findUserByPhone(phone);
 
     if (user) {
-        console.log(user.selected_subjects)
+      console.log(user.selected_subjects)
       // Convert selected_subjects IDs to names
       let selectedSubjectsNames = [];
       if (user.selected_subjects && user.selected_subjects.length > 0) {
@@ -29,7 +29,7 @@ export const login = async (req, res) => {
           `SELECT id,icon,subject FROM subjects WHERE id = ANY($1::int[])`,
           [user.selected_subjects.map(Number)]
         );
-        selectedSubjectsNames = rows.map((r) => ({ id: r.id, subject: r.subject, icon:r.icon }));
+        selectedSubjectsNames = rows.map((r) => ({ id: r.id, subject: r.subject, icon: r.icon }));
       }
 
       const token = jwt.sign({ userId: user.id }, JWT_SECRET, { expiresIn: '7d' });
@@ -193,7 +193,11 @@ export const userRegister = async (req, res) => {
         message: "Email or phone is required",
       });
     }
-console.log("grade_level", grade_level)
+
+    const parsedGradeId = grade_id ? parseInt(grade_id, 10) : null;
+    const parsedGradeLevel = grade_level ? parseInt(grade_level, 10) : null;
+
+    console.log("grade_level", grade_level)
     await pool.query("BEGIN");
 
     const { rows: existing } = await pool.query(
@@ -218,11 +222,11 @@ console.log("grade_level", grade_level)
         email || null,
         phone || null,
         name || null,
-        grade_level,
+        parsedGradeLevel,
         questions_per_day || null,
         daily_reminder_time || null,
         selected_subjects || null,
-        grade_id
+        parsedGradeId
       ]
     );
 
@@ -930,13 +934,13 @@ export const changeUserRole = async (req, res) => {
 
       result = adminRows[0];
 
-        const transporter = nodemailer.createTransport({
-            service: 'gmail',
-            auth: {
-              user: 'csksarathi07@gmail.com',
-              pass: 'gmeh ckmx uxfp mloo',
-            },
-        });
+      const transporter = nodemailer.createTransport({
+        service: 'gmail',
+        auth: {
+          user: 'csksarathi07@gmail.com',
+          pass: 'gmeh ckmx uxfp mloo',
+        },
+      });
 
       await transporter.sendMail({
         from: `${process.env.SMTP_USER}`,
