@@ -194,10 +194,15 @@ export const userRegister = async (req, res) => {
       });
     }
 
+    // 🔑 Parse to integers where needed
     const parsedGradeId = grade_id ? parseInt(grade_id, 10) : null;
     const parsedGradeLevel = grade_level ? parseInt(grade_level, 10) : null;
+    const parsedSubjects = Array.isArray(selected_subjects)
+      ? selected_subjects.map((s) => parseInt(s, 10))
+      : null;
 
-    console.log("grade_level", grade_level)
+    console.log("grade_level:", parsedGradeLevel, "grade_id:", parsedGradeId);
+
     await pool.query("BEGIN");
 
     const { rows: existing } = await pool.query(
@@ -207,6 +212,7 @@ export const userRegister = async (req, res) => {
 
     if (existing.length > 0) {
       const conflict = existing[0].email === email ? "Email" : "Phone";
+      await pool.query("ROLLBACK");
       return res.status(409).json({
         success: false,
         message: `${conflict} already registered`,
@@ -215,7 +221,7 @@ export const userRegister = async (req, res) => {
 
     const { rows } = await pool.query(
       `INSERT INTO users 
-       (email, phone, name, grade_level, questions_per_day, daily_reminder_time, selected_subjects, grade_id,  created_at, updated_at)
+       (email, phone, name, grade_level, questions_per_day, daily_reminder_time, selected_subjects, grade_id, created_at, updated_at)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, now(), now())
        RETURNING id, email, phone, name, grade_level, questions_per_day, daily_reminder_time, selected_subjects, grade_id`,
       [
@@ -225,15 +231,15 @@ export const userRegister = async (req, res) => {
         parsedGradeLevel,
         questions_per_day || null,
         daily_reminder_time || null,
-        selected_subjects || null,
-        parsedGradeId
+        parsedSubjects,
+        parsedGradeId,
       ]
     );
 
     const newUser = rows[0];
 
     await pool.query(
-      `INSERT INTO users_settings (user_id,  created_at, updated_at)
+      `INSERT INTO users_settings (user_id, created_at, updated_at)
        VALUES ($1, now(), now())`,
       [newUser.id]
     );
@@ -249,12 +255,11 @@ export const userRegister = async (req, res) => {
     return res.status(201).json({
       success: true,
       message: "User registered successfully",
-      data: {
-        user: newUser,
-        token,
-      },
+      user: newUser,
+      token,
     });
   } catch (error) {
+    await pool.query("ROLLBACK");
     console.error("❌ User register error:", error);
     return res.status(500).json({
       success: false,
@@ -262,6 +267,8 @@ export const userRegister = async (req, res) => {
     });
   }
 };
+
+
 
 // get user details.............
 
