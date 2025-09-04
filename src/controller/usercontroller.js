@@ -1,4 +1,4 @@
-import { findUserByEmail, findUserByPhone, createUser, updateUser, getUserById } from "../models/usermodels.js"
+import { findUserByEmail, findUserByPhone, createUser, updateUser, getUserById, updateUserSettings } from "../models/usermodels.js"
 import dotenv from 'dotenv';
 import jwt from "jsonwebtoken"
 import pool from "../../database.js";
@@ -96,10 +96,58 @@ export const editProfile = async (req, res) => {
   try {
     const updates = { ...req.body };
     if (req.fileUrl) updates.profile_photo_url = req.fileUrl;
-    const updated = await updateUser(req.userId, updates);
-    res.json({ ok: true, user: updated });
+
+    // --- Split fields ---
+    const userFields = {};
+    const settingsFields = {};
+
+    if (updates.name !== undefined) userFields.name = updates.name;
+    if (updates.school_name !== undefined) userFields.school_name = updates.school_name;
+
+    if (updates.grade_level !== undefined)
+      userFields.grade_level = parseInt(updates.grade_level, 10);
+
+    if (updates.questions_per_day !== undefined)
+      userFields.questions_per_day = parseInt(updates.questions_per_day, 10);
+
+    if (updates.selected_subjects !== undefined)
+      userFields.selected_subjects = updates.selected_subjects.map(Number);
+
+    if (updates.profile_photo_url !== undefined)
+      userFields.profile_photo_url = updates.profile_photo_url;
+
+    // settings fields
+    if (updates.study_reminder !== undefined)
+      settingsFields.study_reminder =
+        updates.study_reminder === "true" || updates.study_reminder === true;
+
+    if (updates.forum_update !== undefined)
+      settingsFields.forum_update =
+        updates.forum_update === "true" || updates.forum_update === true;
+
+    // --- Update both tables ---
+    let updatedUser = null;
+    if (Object.keys(userFields).length > 0) {
+      updatedUser = await updateUser(req.userId, userFields);
+    }
+
+    let updatedSettings = null;
+    if (Object.keys(settingsFields).length > 0) {
+      updatedSettings = await updateUserSettings(req.userId, settingsFields);
+    }
+
+    res.json({
+      ok: true,
+      user: updatedUser,
+      settings: updatedSettings,
+    });
   } catch (err) {
-    res.status(500).json({ ok: false, message: 'Server error' });
+    console.error("❌ editProfile error:", err);
+    res.status(500).json({
+      ok: false,
+      message: "Server error",
+      error: err.message,
+    });
   }
 };
 
@@ -569,17 +617,17 @@ export const userEdit = async (req, res) => {
     // Update user settings
     // -------------------
     const settingsUpdateQuery = `
-      INSERT INTO users_settings 
+      INSERT INTO user_settings 
         (user_id, questions_per_day, quiz_time_seconds, daily_reminder_time, reminder_enabled, dark_mode, sound_enabled, updated_at)
       VALUES ($1,$2,$3,$4,$5,$6,$7,NOW())
       ON CONFLICT (user_id) 
       DO UPDATE SET 
-        questions_per_day = COALESCE(EXCLUDED.questions_per_day, users_settings.questions_per_day),
-        quiz_time_seconds = COALESCE(EXCLUDED.quiz_time_seconds, users_settings.quiz_time_seconds),
-        daily_reminder_time = COALESCE(EXCLUDED.daily_reminder_time, users_settings.daily_reminder_time),
-        reminder_enabled = COALESCE(EXCLUDED.reminder_enabled, users_settings.reminder_enabled),
-        dark_mode = COALESCE(EXCLUDED.dark_mode, users_settings.dark_mode),
-        sound_enabled = COALESCE(EXCLUDED.sound_enabled, users_settings.sound_enabled),
+        questions_per_day = COALESCE(EXCLUDED.questions_per_day, user_settings.questions_per_day),
+        quiz_time_seconds = COALESCE(EXCLUDED.quiz_time_seconds, user_settings.quiz_time_seconds),
+        daily_reminder_time = COALESCE(EXCLUDED.daily_reminder_time, user_settings.daily_reminder_time),
+        reminder_enabled = COALESCE(EXCLUDED.reminder_enabled, user_settings.reminder_enabled),
+        dark_mode = COALESCE(EXCLUDED.dark_mode, user_settings.dark_mode),
+        sound_enabled = COALESCE(EXCLUDED.sound_enabled, user_settings.sound_enabled),
         updated_at = NOW()
       RETURNING *;
     `;
