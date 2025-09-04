@@ -181,6 +181,7 @@ export const userRegister = async (req, res) => {
       phone,
       name,
       grade_level,
+      grade_id,
       questions_per_day,
       daily_reminder_time,
       selected_subjects,
@@ -221,7 +222,7 @@ console.log("grade_level", grade_level)
         questions_per_day || null,
         daily_reminder_time || null,
         selected_subjects || null,
-        grade_level
+        grade_id
       ]
     );
 
