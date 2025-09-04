@@ -1479,6 +1479,7 @@ export const deleteQuestions = async (req, res) => {
 
 export const homeApi = async (req, res) => {
   try {
+    // Recent questions
     const { rows: recentQuestions } = await pool.query(
       `SELECT * 
        FROM questions
@@ -1486,11 +1487,25 @@ export const homeApi = async (req, res) => {
        ORDER BY created_at DESC`
     );
 
+    // Recent forum posts with their files
     const { rows: recentPosts } = await pool.query(
-      `SELECT * 
-       FROM forum_posts
-       WHERE created_at >= NOW() - INTERVAL '48 hours'
-       ORDER BY created_at DESC`
+      `SELECT fp.*,
+              COALESCE(
+                json_agg(
+                  json_build_object(
+                    'id', ff.id,
+                    'url', ff.url,
+                    'filename', ff.filename,
+                    'created_at', ff.created_at
+                  )
+                ) FILTER (WHERE ff.id IS NOT NULL),
+                '[]'
+              ) AS files
+       FROM forum_posts fp
+       LEFT JOIN forum_files ff ON fp.id = ff.post_id
+       WHERE fp.created_at >= NOW() - INTERVAL '48 hours'
+       GROUP BY fp.id
+       ORDER BY fp.created_at DESC`
     );
 
     return res.json({
