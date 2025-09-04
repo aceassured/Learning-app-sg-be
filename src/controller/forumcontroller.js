@@ -158,8 +158,8 @@ export const createPost = async (req, res) => {
 
     const getGradequerry = `SELECT grade_level FROM grades WHERE id = $1`
     const gradeResult = await pool.query(getGradequerry, [grade_level])
-    const gradeValue = gradeResult.rows[0].grade_value
-
+    const gradeValue = gradeResult.rows[0].grade_level
+console.log(gradeValue)
     const getSubjectquerry = `SELECT subject FROM subjects WHERE id = $1`
     const subjectResult = await pool.query(getSubjectquerry, [subject_tag])
     const subjectValue = subjectResult.rows[0].subject
