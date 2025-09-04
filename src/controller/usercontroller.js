@@ -53,10 +53,10 @@ export const login = async (req, res) => {
 
 export const register = async (req, res) => {
   try {
-    const { email, phone, name, grade_level, selected_subjects, daily_reminder_time, questions_per_day, school_name } = req.body;
+    const { email, phone, name, grade_level, selected_subjects, daily_reminder_time, questions_per_day, school_name, grade_id } = req.body;
 
     console.log(req.body)
-    if (!grade_level || !selected_subjects || selected_subjects.length < 3 || !questions_per_day) {
+    if (!grade_level || !selected_subjects || selected_subjects.length < 3 || !questions_per_day || !grade_id) {
       return res.status(400).json({ ok: false, message: 'Missing or invalid fields. Select minimum 3 subjects.' });
     }
 
@@ -69,7 +69,8 @@ export const register = async (req, res) => {
       daily_reminder_time,
       questions_per_day,
       profile_photo_url: null,
-      school_name
+      school_name,
+      grade_id
 
     });
 
