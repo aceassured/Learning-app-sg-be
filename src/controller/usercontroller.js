@@ -354,6 +354,116 @@ export const getAdmindetails = async (req, res) => {
 
 // user edit.......
 
+// export const userEdit = async (req, res) => {
+//   try {
+//     const userId = req.userId;
+//     if (!userId) {
+//       return res.status(401).json({ ok: false, message: "Unauthorized" });
+//     }
+
+//     const {
+//       name,
+//       email,
+//       phone,
+//       grade_level,
+//       questions_per_day,
+//       daily_reminder_time,
+//       selected_subjects,
+//       role,
+//       quiz_time_seconds,
+//       reminder_enabled,
+//       dark_mode,
+//       sound_enabled
+//     } = req.body;
+
+//     let profilePhotoUrl;
+
+//     if (req.file && req.file.buffer) {
+//       const filename = `user_${userId}_${Date.now()}_${req.file.originalname}`;
+//       profilePhotoUrl = await uploadBufferToVercel(req.file.buffer, filename);
+//     }
+
+//     await pool.query("BEGIN");
+
+//     const userUpdateQuery = `
+//       UPDATE users 
+//       SET 
+//         name = COALESCE($1, name),
+//         email = COALESCE($2, email),
+//         phone = COALESCE($3, phone),
+//         grade_level = COALESCE($4, grade_level),
+//         questions_per_day = COALESCE($5, questions_per_day),
+//         daily_reminder_time = COALESCE($6, daily_reminder_time),
+//         selected_subjects = COALESCE($7, selected_subjects),
+//         role = COALESCE($8, role),
+//         profile_photo_url = COALESCE($9, profile_photo_url),
+//         updated_at = NOW()
+//       WHERE id = $10
+//       RETURNING *;
+//     `;
+
+//     const userResult = await pool.query(userUpdateQuery, [
+//       name || null,
+//       email || null,
+//       phone || null,
+//       grade_level || null,
+//       questions_per_day || null,
+//       daily_reminder_time || null,
+//       selected_subjects ? selected_subjects : null,
+//       role || null,
+//       profilePhotoUrl || null,
+//       userId
+//     ]);
+
+//     if (userResult.rows.length === 0) {
+//       throw new Error("User not found");
+//     }
+
+//     const settingsUpdateQuery = `
+//       INSERT INTO users_settings 
+//         (user_id, questions_per_day, quiz_time_seconds, daily_reminder_time, reminder_enabled, dark_mode, sound_enabled, updated_at)
+//       VALUES ($1,$2,$3,$4,$5,$6,$7,NOW())
+//       ON CONFLICT (user_id) 
+//       DO UPDATE SET 
+//         questions_per_day = COALESCE(EXCLUDED.questions_per_day, users_settings.questions_per_day),
+//         quiz_time_seconds = COALESCE(EXCLUDED.quiz_time_seconds, users_settings.quiz_time_seconds),
+//         daily_reminder_time = COALESCE(EXCLUDED.daily_reminder_time, users_settings.daily_reminder_time),
+//         reminder_enabled = COALESCE(EXCLUDED.reminder_enabled, users_settings.reminder_enabled),
+//         dark_mode = COALESCE(EXCLUDED.dark_mode, users_settings.dark_mode),
+//         sound_enabled = COALESCE(EXCLUDED.sound_enabled, users_settings.sound_enabled),
+//         updated_at = NOW()
+//       RETURNING *;
+//     `;
+
+//     const settingsResult = await pool.query(settingsUpdateQuery, [
+//       userId,
+//       questions_per_day || null,
+//       quiz_time_seconds || null,
+//       daily_reminder_time || null,
+//       reminder_enabled !== undefined ? reminder_enabled : null,
+//       dark_mode !== undefined ? dark_mode : null,
+//       sound_enabled !== undefined ? sound_enabled : null
+//     ]);
+
+//     await pool.query("COMMIT");
+
+//     return res.status(200).json({
+//       ok: true,
+//       message: "User details updated successfully",
+//       user: userResult.rows[0],
+//       settings: settingsResult.rows[0]
+//     });
+
+//   } catch (error) {
+//     await pool.query("ROLLBACK");
+//     console.error("userEdit error:", error);
+//     return res.status(500).json({ ok: false, message: "Internal server error", error: error.message });
+//   } finally {
+//     pool.release();
+//   }
+// };
+
+
 export const userEdit = async (req, res) => {
   try {
     const userId = req.userId;
@@ -373,7 +483,7 @@ export const userEdit = async (req, res) => {
       quiz_time_seconds,
       reminder_enabled,
       dark_mode,
-      sound_enabled
+      sound_enabled,
     } = req.body;
 
     let profilePhotoUrl;
@@ -385,40 +495,65 @@ export const userEdit = async (req, res) => {
 
     await pool.query("BEGIN");
 
-    const userUpdateQuery = `
-      UPDATE users 
-      SET 
-        name = COALESCE($1, name),
-        email = COALESCE($2, email),
-        phone = COALESCE($3, phone),
-        grade_level = COALESCE($4, grade_level),
-        questions_per_day = COALESCE($5, questions_per_day),
-        daily_reminder_time = COALESCE($6, daily_reminder_time),
-        selected_subjects = COALESCE($7, selected_subjects),
-        role = COALESCE($8, role),
-        profile_photo_url = COALESCE($9, profile_photo_url),
-        updated_at = NOW()
-      WHERE id = $10
-      RETURNING *;
-    `;
+    // -------------------
+    // Build dynamic user update query
+    // -------------------
+    const userFields = [];
+    const userValues = [];
+    let paramIndex = 1;
 
-    const userResult = await pool.query(userUpdateQuery, [
-      name || null,
-      email || null,
-      phone || null,
-      grade_level || null,
-      questions_per_day || null,
-      daily_reminder_time || null,
-      selected_subjects ? selected_subjects : null,
-      role || null,
-      profilePhotoUrl || null,
-      userId
-    ]);
-
-    if (userResult.rows.length === 0) {
-      throw new Error("User not found");
+    if (name !== undefined) {
+      userFields.push(`name = $${paramIndex++}`);
+      userValues.push(name);
+    }
+    if (email !== undefined) {
+      userFields.push(`email = $${paramIndex++}`);
+      userValues.push(email);
+    }
+    if (phone !== undefined) {
+      userFields.push(`phone = $${paramIndex++}`);
+      userValues.push(phone);
+    }
+    if (grade_level !== undefined) {
+      userFields.push(`grade_level = $${paramIndex++}`);
+      userValues.push(grade_level);
+    }
+    if (questions_per_day !== undefined) {
+      userFields.push(`questions_per_day = $${paramIndex++}`);
+      userValues.push(questions_per_day);
+    }
+    if (daily_reminder_time !== undefined) {
+      userFields.push(`daily_reminder_time = $${paramIndex++}`);
+      userValues.push(daily_reminder_time);
+    }
+    if (selected_subjects !== undefined) {
+      userFields.push(`selected_subjects = $${paramIndex++}`);
+      userValues.push(selected_subjects);
+    }
+    if (role !== undefined) {
+      userFields.push(`role = $${paramIndex++}`);
+      userValues.push(role);
+    }
+    if (profilePhotoUrl !== undefined) {
+      userFields.push(`profile_photo_url = $${paramIndex++}`);
+      userValues.push(profilePhotoUrl);
     }
 
+    if (userFields.length > 0) {
+      const userUpdateQuery = `
+        UPDATE users
+        SET ${userFields.join(", ")}, updated_at = NOW()
+        WHERE id = $${paramIndex}
+        RETURNING *;
+      `;
+      userValues.push(userId);
+
+      await pool.query(userUpdateQuery, userValues);
+    }
+
+    // -------------------
+    // Update user settings
+    // -------------------
     const settingsUpdateQuery = `
       INSERT INTO users_settings 
         (user_id, questions_per_day, quiz_time_seconds, daily_reminder_time, reminder_enabled, dark_mode, sound_enabled, updated_at)
@@ -437,12 +572,12 @@ export const userEdit = async (req, res) => {
 
     const settingsResult = await pool.query(settingsUpdateQuery, [
       userId,
-      questions_per_day || null,
-      quiz_time_seconds || null,
-      daily_reminder_time || null,
+      questions_per_day !== undefined ? questions_per_day : null,
+      quiz_time_seconds !== undefined ? quiz_time_seconds : null,
+      daily_reminder_time !== undefined ? daily_reminder_time : null,
       reminder_enabled !== undefined ? reminder_enabled : null,
       dark_mode !== undefined ? dark_mode : null,
-      sound_enabled !== undefined ? sound_enabled : null
+      sound_enabled !== undefined ? sound_enabled : null,
     ]);
 
     await pool.query("COMMIT");
@@ -450,16 +585,16 @@ export const userEdit = async (req, res) => {
     return res.status(200).json({
       ok: true,
       message: "User details updated successfully",
-      user: userResult.rows[0],
-      settings: settingsResult.rows[0]
+      settings: settingsResult.rows[0],
     });
-
   } catch (error) {
     await pool.query("ROLLBACK");
     console.error("userEdit error:", error);
-    return res.status(500).json({ ok: false, message: "Internal server error", error: error.message });
-  } finally {
-    pool.release();
+    return res.status(500).json({
+      ok: false,
+      message: "Internal server error",
+      error: error.message,
+    });
   }
 };
 
