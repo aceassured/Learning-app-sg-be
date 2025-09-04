@@ -192,7 +192,7 @@ export const userRegister = async (req, res) => {
         message: "Email or phone is required",
       });
     }
-
+console.log("grade_level", grade_level)
     await pool.query("BEGIN");
 
     const { rows: existing } = await pool.query(
@@ -217,11 +217,11 @@ export const userRegister = async (req, res) => {
         email || null,
         phone || null,
         name || null,
-        grade_level || null,
+        grade_level,
         questions_per_day || null,
         daily_reminder_time || null,
         selected_subjects || null,
-        grade_level || null
+        grade_level
       ]
     );
 
