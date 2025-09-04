@@ -210,9 +210,9 @@ export const userRegister = async (req, res) => {
 
     const { rows } = await pool.query(
       `INSERT INTO users 
-       (email, phone, name, grade_level, questions_per_day, daily_reminder_time, selected_subjects, created_at, updated_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, now(), now())
-       RETURNING id, email, phone, name, grade_level, questions_per_day, daily_reminder_time, selected_subjects`,
+       (email, phone, name, grade_level, questions_per_day, daily_reminder_time, selected_subjects, grade_id,  created_at, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, now(), now())
+       RETURNING id, email, phone, name, grade_level, questions_per_day, daily_reminder_time, selected_subjects, grade_id`,
       [
         email || null,
         phone || null,
@@ -221,6 +221,7 @@ export const userRegister = async (req, res) => {
         questions_per_day || null,
         daily_reminder_time || null,
         selected_subjects || null,
+        grade_id || null
       ]
     );
 
