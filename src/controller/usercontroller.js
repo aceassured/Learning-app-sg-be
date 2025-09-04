@@ -221,7 +221,7 @@ export const userRegister = async (req, res) => {
         questions_per_day || null,
         daily_reminder_time || null,
         selected_subjects || null,
-        grade_id || null
+        grade_level || null
       ]
     );
 
