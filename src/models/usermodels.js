@@ -10,11 +10,11 @@ export const findUserByPhone = async (phone) => {
   return res.rows[0];
 };
 
-export const createUser = async ({ email, phone, name, grade_level, selected_subjects, daily_reminder_time, questions_per_day, profile_photo_url, school_name }) => {
+export const createUser = async ({ email, phone, name, grade_level, selected_subjects, daily_reminder_time, questions_per_day, profile_photo_url, school_name , grade_id}) => {
   const res = await pool.query(
-    `INSERT INTO users (email, phone, name, grade_level, selected_subjects, daily_reminder_time, questions_per_day, profile_photo_url, school_name)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8, $9) RETURNING *`,
-    [email, phone, name, grade_level, selected_subjects, daily_reminder_time, questions_per_day, profile_photo_url, school_name]
+    `INSERT INTO users (email, phone, name, grade_level, selected_subjects, daily_reminder_time, questions_per_day, profile_photo_url, school_name, grade_id)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8, $9, $10) RETURNING *`,
+    [email, phone, name, grade_level, selected_subjects, daily_reminder_time, questions_per_day, profile_photo_url, school_name, grade_id]
   );
   await pool.query(
     `INSERT INTO user_settings (user_id)
