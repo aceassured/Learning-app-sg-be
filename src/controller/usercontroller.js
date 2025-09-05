@@ -618,8 +618,8 @@ export const userEdit = async (req, res) => {
     // -------------------
     const settingsUpdateQuery = `
       INSERT INTO user_settings 
-        (user_id, questions_per_day, quiz_time_seconds, daily_reminder_time, reminder_enabled, dark_mode, sound_enabled, updated_at)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,NOW())
+        (user_id, quiz_time_seconds, daily_reminder_time, reminder_enabled, dark_mode, sound_enabled, updated_at)
+      VALUES ($1,$2,$3,$4,$5,$6, NOW())
       ON CONFLICT (user_id) 
       DO UPDATE SET 
         quiz_time_seconds = COALESCE(EXCLUDED.quiz_time_seconds, user_settings.quiz_time_seconds),
@@ -633,7 +633,6 @@ export const userEdit = async (req, res) => {
 
     const settingsResult = await pool.query(settingsUpdateQuery, [
       userId,
-      questions_per_day !== undefined ? questions_per_day : null,
       quiz_time_seconds !== undefined ? quiz_time_seconds : null,
       daily_reminder_time !== undefined ? daily_reminder_time : null,
       reminder_enabled !== undefined ? reminder_enabled : null,
