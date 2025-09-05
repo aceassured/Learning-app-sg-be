@@ -622,7 +622,6 @@ export const userEdit = async (req, res) => {
       VALUES ($1,$2,$3,$4,$5,$6,$7,NOW())
       ON CONFLICT (user_id) 
       DO UPDATE SET 
-        questions_per_day = COALESCE(EXCLUDED.questions_per_day, user_settings.questions_per_day),
         quiz_time_seconds = COALESCE(EXCLUDED.quiz_time_seconds, user_settings.quiz_time_seconds),
         daily_reminder_time = COALESCE(EXCLUDED.daily_reminder_time, user_settings.daily_reminder_time),
         reminder_enabled = COALESCE(EXCLUDED.reminder_enabled, user_settings.reminder_enabled),
