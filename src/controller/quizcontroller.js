@@ -190,8 +190,8 @@ export const startQuiz = async (req, res) => {
       "SELECT questions_per_day FROM users WHERE id=$1",
       [userId]
     );
-    const qpd = userRes.rows[0]?.questions_per_day || 10;
-
+    const qpd = userRes.rows[0]?.questions_per_day;
+    console.log("question per day", qpd)
     // ✅ Already answered question_ids
     const answeredRes = await pool.query(
       "SELECT question_id FROM user_answered_questions WHERE user_id=$1",
