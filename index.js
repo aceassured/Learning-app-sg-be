@@ -7,6 +7,7 @@ import userRouter from "./src/router/userrouter.js"
 import quizRouter from "./src/router/quizrouter.js"
 import forumRouter from "./src/router/forumrouter.js"
 import progressStates from "./src/router/progressRoutes.js"
+import adminRouter from "./src/router/adminrouter.js"
 import fs from "fs";
 import { exec } from "child_process";
 dotenv.config({ quiet: true })
@@ -41,6 +42,7 @@ app.use('/api/user', userRouter);
 app.use('/api/quiz', quizRouter);
 app.use('/api/forum', forumRouter);
 app.use('/api/progress', progressStates);
+app.use('/api/admin', adminRouter);
 
 
 app.get("/", async (req, res) => {

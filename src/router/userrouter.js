@@ -5,7 +5,8 @@ import { uploadBufferToVercel } from '../utils/vercel-blob.js';
 import { adminEdit, adminRegister, adminResetPassword, commonLogin, confirmPassword, deleteQuestions, editProfile, getAdmindetails, getAllquestions, 
   getProfile, getUserdetails, homeApi, login, newQuestionsadd, register, userEdit, userRegister, verifyOtp,addNewUser,changeUserRole ,deleteAdminUser,getAllUsers,
   getAllSubject,
-  getAllGrade} from '../controller/usercontroller.js';
+  getAllGrade,
+  userVoteforpoll} from '../controller/usercontroller.js';
 import { deleteForum, deleteUser } from '../controller/forumcontroller.js';
 import { admingetTopics, getTopics } from '../controller/quizcontroller.js';
 
@@ -57,6 +58,7 @@ router.get("/getallsubject",getAllSubject);
 router.get("/getallgrades",getAllGrade);
 router.post('/gettopics',auth,  getTopics);
 router.post('/admingettopics', admingetTopics);
+router.post('/uservotepoll', auth, userVoteforpoll);
 
 
 

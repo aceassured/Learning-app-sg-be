@@ -147,3 +147,42 @@ CREATE TABLE topics (
       REFERENCES subjects(id)
       ON DELETE CASCADE
 );
+
+
+CREATE TABLE polls (
+  id SERIAL PRIMARY KEY,
+  question TEXT NOT NULL,
+  allow_multiple BOOLEAN DEFAULT FALSE,
+  expires_at TIMESTAMP WITH TIME ZONE NULL,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT now()
+);
+
+CREATE TABLE poll_options (
+  id SERIAL PRIMARY KEY,
+  poll_id INTEGER REFERENCES polls(id) ON DELETE CASCADE,
+  option_text TEXT NOT NULL
+);
+
+CREATE TABLE poll_votes (
+  id SERIAL PRIMARY KEY,
+  poll_id INTEGER REFERENCES polls(id) ON DELETE CASCADE,
+  option_id INTEGER REFERENCES poll_options(id) ON DELETE CASCADE,
+  user_id INTEGER NOT NULL,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
+  UNIQUE(poll_id, user_id, option_id) -- prevents duplicate same option votes
+);
+
+CREATE TABLE announcements (
+  id SERIAL PRIMARY KEY,
+  admin_id INTEGER NOT NULL,
+  title TEXT NOT NULL,
+  content TEXT,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
+  active BOOLEAN DEFAULT TRUE
+);
+
+
+CREATE INDEX idx_posts_created_at ON forum_posts(created_at DESC);
+CREATE INDEX idx_polls_post_id ON polls(post_id);
+CREATE INDEX idx_poll_options_poll_id ON poll_options(poll_id);
+CREATE INDEX idx_votes_poll_user ON poll_votes(poll_id, user_id);
