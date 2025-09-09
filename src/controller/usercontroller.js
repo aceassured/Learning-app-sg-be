@@ -1719,6 +1719,48 @@ export const homeApi = async (req, res) => {
 
 // user vote for the poll.......
 
+// export const userVoteforpoll = async (req, res) => {
+//   try {
+//     const { poll_id, option_ids } = req.body; // option_ids should be array
+//     const userId = req.userId;
+
+//     if (!poll_id || !option_ids || option_ids.length === 0) {
+//       return res.status(400).json({ message: "poll_id and option_ids required" });
+//     }
+
+//     // Check if poll allows multiple votes
+//     const pollRes = await pool.query(`SELECT * FROM polls WHERE id = $1`, [poll_id]);
+//     if (pollRes.rows.length === 0) return res.status(404).json({ message: "Poll not found" });
+
+//     const poll = pollRes.rows[0];
+//     if (!poll.allow_multiple && option_ids.length > 1) {
+//       return res.status(400).json({ message: "This poll does not allow multiple votes" });
+//     }
+
+//     // Delete any previous votes if single choice
+//     if (!poll.allow_multiple) {
+//       await pool.query(`DELETE FROM poll_votes WHERE poll_id = $1 AND user_id = $2`, [
+//         poll_id,
+//         userId,
+//       ]);
+//     }
+
+//     // Insert votes
+//     for (let optId of option_ids) {
+//       await pool.query(
+//         `INSERT INTO poll_votes (poll_id, option_id, user_id) 
+//          VALUES ($1,$2,$3) ON CONFLICT DO NOTHING`,
+//         [poll_id, optId, userId]
+//       );
+//     }
+
+//     return res.json({ message: "Vote recorded successfully" });
+//   } catch (error) {
+//     console.error("userVoteforpoll error:", error);
+//     return res.status(500).json({ message: "Internal server error" });
+//   }
+// };
+
 export const userVoteforpoll = async (req, res) => {
   try {
     const { poll_id, option_ids } = req.body; // option_ids should be array
@@ -1737,19 +1779,17 @@ export const userVoteforpoll = async (req, res) => {
       return res.status(400).json({ message: "This poll does not allow multiple votes" });
     }
 
-    // Delete any previous votes if single choice
-    if (!poll.allow_multiple) {
-      await pool.query(`DELETE FROM poll_votes WHERE poll_id = $1 AND user_id = $2`, [
-        poll_id,
-        userId,
-      ]);
-    }
+    // Always delete previous votes to allow vote changes
+    await pool.query(`DELETE FROM poll_votes WHERE poll_id = $1 AND user_id = $2`, [
+      poll_id,
+      userId,
+    ]);
 
-    // Insert votes
+    // Insert new votes
     for (let optId of option_ids) {
       await pool.query(
         `INSERT INTO poll_votes (poll_id, option_id, user_id) 
-         VALUES ($1,$2,$3) ON CONFLICT DO NOTHING`,
+         VALUES ($1,$2,$3)`,
         [poll_id, optId, userId]
       );
     }
