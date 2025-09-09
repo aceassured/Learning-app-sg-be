@@ -1,6 +1,8 @@
 // src/controller/forumcontroller.js
-import pool from '../../database.js';
-import { uploadBufferToVercel } from '../utils/vercel-blob.js';
+import axios from "axios";
+import pool from "../../database.js";
+import { uploadBufferToVercel } from "../utils/vercel-blob.js";
+import { abusiveWords } from "../middleware/abusiveWords.js";
 
 // export const listPosts = async (req, res) => {
 //   try {
@@ -147,23 +149,152 @@ export const listPosts = async (req, res) => {
   }
 };
 
+// export const createPost = async (req, res) => {
+//   try {
+//     const { grade_level, content, subject_tag, type_of_upload, author_type } = req.body;
+//     const authorId = req.userId;
 
+//     let postRes;
+
+//     const getGradequerry = `SELECT grade_level FROM grades WHERE id = $1`
+//     const gradeResult = await pool.query(getGradequerry, [grade_level])
+//     const gradeValue = gradeResult.rows[0].grade_level
+// console.log(gradeValue)
+//     const getSubjectquerry = `SELECT subject FROM subjects WHERE id = $1`
+//     const subjectResult = await pool.query(getSubjectquerry, [subject_tag])
+//     const subjectValue = subjectResult.rows[0].subject
+
+//     if (author_type === "user") {
+//       postRes = await pool.query(
+//         `INSERT INTO forum_posts (user_id, grade_level, content, subject_tag, type_of_upload)
+//          VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+//         [authorId, gradeValue, content, subjectValue, type_of_upload]
+//       );
+//     } else if (author_type === "admin") {
+//       postRes = await pool.query(
+//         `INSERT INTO forum_posts (admin_id, grade_level, content, subject_tag, type_of_upload)
+//          VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+//         [authorId, gradeValue, content, subjectValue, type_of_upload]
+//       );
+//     } else {
+//       return res.status(400).json({ ok: false, message: "Invalid author_type" });
+//     }
+
+//     const post = postRes.rows[0];
+
+//     if (req.files && req.files.length) {
+//       for (const f of req.files) {
+//         const url = await uploadBufferToVercel(f.buffer, f.originalname);
+//         await pool.query(
+//           `INSERT INTO forum_files (post_id, url, filename) VALUES ($1, $2, $3)`,
+//           [post.id, url, f.originalname]
+//         );
+//       }
+//     }
+
+//     res.json({ ok: true, post });
+//   } catch (err) {
+//     console.error(err);
+//     res.status(500).json({ ok: false, message: "Server error" });
+//   }
+// };
+
+function escapeRegex(word) {
+  return word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
 
 export const createPost = async (req, res) => {
   try {
-    const { grade_level, content, subject_tag, type_of_upload, author_type } = req.body;
+    const { grade_level, content, subject_tag, type_of_upload, author_type } =
+      req.body;
     const authorId = req.userId;
 
+    if (!content || content.trim() === "") {
+      return res
+        .status(400)
+        .json({ ok: false, message: "Content is required" });
+    }
+
+    // ✅ Step 1: Local abusive word check
+    const lowerContent = content.toLowerCase();
+
+    let detectedWord = null;
+    for (const lang in abusiveWords) {
+      for (const word of abusiveWords[lang]) {
+        const escaped = escapeRegex(word.toLowerCase());
+        const regex = new RegExp(`\\b${escaped}\\b`, "i"); // safe regex
+        if (regex.test(lowerContent)) {
+          detectedWord = word;
+          break;
+        }
+      }
+      if (detectedWord) break;
+    }
+
+    if (detectedWord) {
+      return res.status(400).json({
+        ok: false,
+        message: `Your post contains abusive/violent word: "${detectedWord}". Please remove it.`,
+      });
+    }
+
+    // ✅ Step 2: Call Perspective API
+    const apiKey = process.env.PERSPECTIVE_API_KEY;
+    const perspectiveRes = await axios.post(
+      `https://commentanalyzer.googleapis.com/v1alpha1/comments:analyze?key=${apiKey}`,
+      {
+        comment: { text: content },
+        languages: ["en"],
+        requestedAttributes: {
+          TOXICITY: {},
+          SEVERE_TOXICITY: {},
+          IDENTITY_ATTACK: {},
+          INSULT: {},
+          PROFANITY: {},
+          THREAT: {},
+          SEXUALLY_EXPLICIT: {},
+          FLIRTATION: {},
+        },
+      }
+    );
+
+    // Extract scores dynamically
+    const scores = {};
+    for (const [key, value] of Object.entries(
+      perspectiveRes.data.attributeScores
+    )) {
+      scores[key.toLowerCase()] = value.summaryScore.value;
+    }
+
+    // ✅ Step 3: Check abusive thresholds
+    const abusive = Object.entries(scores).some(
+      ([attr, score]) => score >= 0.7
+    );
+
+    if (abusive) {
+      return res.status(400).json({
+        ok: false,
+        message:
+          "Your post contains abusive or harmful content and cannot be published.",
+        scores,
+      });
+    }
+
+    // ✅ Step 4: Get grade & subject values
+    const gradeResult = await pool.query(
+      `SELECT grade_level FROM grades WHERE id = $1`,
+      [grade_level]
+    );
+    const gradeValue = gradeResult.rows[0]?.grade_level;
+
+    const subjectResult = await pool.query(
+      `SELECT subject FROM subjects WHERE id = $1`,
+      [subject_tag]
+    );
+    const subjectValue = subjectResult.rows[0]?.subject;
+
+    // ✅ Step 5: Insert post
     let postRes;
-
-    const getGradequerry = `SELECT grade_level FROM grades WHERE id = $1`
-    const gradeResult = await pool.query(getGradequerry, [grade_level])
-    const gradeValue = gradeResult.rows[0].grade_level
-console.log(gradeValue)
-    const getSubjectquerry = `SELECT subject FROM subjects WHERE id = $1`
-    const subjectResult = await pool.query(getSubjectquerry, [subject_tag])
-    const subjectValue = subjectResult.rows[0].subject
-
     if (author_type === "user") {
       postRes = await pool.query(
         `INSERT INTO forum_posts (user_id, grade_level, content, subject_tag, type_of_upload) 
@@ -177,11 +308,14 @@ console.log(gradeValue)
         [authorId, gradeValue, content, subjectValue, type_of_upload]
       );
     } else {
-      return res.status(400).json({ ok: false, message: "Invalid author_type" });
+      return res
+        .status(400)
+        .json({ ok: false, message: "Invalid author_type" });
     }
 
     const post = postRes.rows[0];
 
+    // ✅ Step 6: Handle file uploads
     if (req.files && req.files.length) {
       for (const f of req.files) {
         const url = await uploadBufferToVercel(f.buffer, f.originalname);
@@ -194,38 +328,45 @@ console.log(gradeValue)
 
     res.json({ ok: true, post });
   } catch (err) {
-    console.error(err);
+    console.error(err.response?.data || err.message);
     res.status(500).json({ ok: false, message: "Server error" });
   }
 };
 
-
-
 // delete froum .........
-
 export const deleteForum = async (req, res) => {
   try {
     const { id } = req.body;
 
     if (!id) {
-      return res.status(400).json({ ok: false, message: "Post ID is required" });
+      return res
+        .status(400)
+        .json({ ok: false, message: "Post ID is required" });
     }
 
     await pool.query(`DELETE FROM forum_files WHERE post_id = $1`, [id]);
 
-    const result = await pool.query(`DELETE FROM forum_posts WHERE id = $1 RETURNING *`, [id]);
+    const result = await pool.query(
+      `DELETE FROM forum_posts WHERE id = $1 RETURNING *`,
+      [id]
+    );
 
     if (result.rowCount === 0) {
-      return res.status(404).json({ ok: false, message: "Forum post not found" });
+      return res
+        .status(404)
+        .json({ ok: false, message: "Forum post not found" });
     }
 
-    res.json({ ok: true, message: "Forum post deleted successfully", deleted: result.rows[0] });
+    res.json({
+      ok: true,
+      message: "Forum post deleted successfully",
+      deleted: result.rows[0],
+    });
   } catch (error) {
     console.error("Error deleting forum post:", error);
     res.status(500).json({ ok: false, message: "Internal server error" });
   }
 };
-
 
 // delete user...........
 
@@ -234,16 +375,27 @@ export const deleteUser = async (req, res) => {
     const { id } = req.body;
 
     if (!id) {
-      return res.status(400).json({ ok: false, message: "User ID is required" });
+      return res
+        .status(400)
+        .json({ ok: false, message: "User ID is required" });
     }
 
-    const result = await pool.query(`DELETE FROM users WHERE id = $1 RETURNING *`, [id]);
+    const result = await pool.query(
+      `DELETE FROM users WHERE id = $1 RETURNING *`,
+      [id]
+    );
 
     if (result.rowCount === 0) {
-      return res.status(404).json({ ok: false, message: "Users post not found" });
+      return res
+        .status(404)
+        .json({ ok: false, message: "Users post not found" });
     }
 
-    res.json({ ok: true, message: "User deleted successfully", deleted: result.rows[0] });
+    res.json({
+      ok: true,
+      message: "User deleted successfully",
+      deleted: result.rows[0],
+    });
   } catch (error) {
     console.error("Error deleting Users post:", error);
     res.status(500).json({ ok: false, message: "Internal server error" });
@@ -291,7 +443,6 @@ export const addLike = async (req, res) => {
   }
 };
 
-
 // ✅ Remove Like
 export const removeLike = async (req, res) => {
   try {
@@ -299,26 +450,38 @@ export const removeLike = async (req, res) => {
     const userId = req.userId;
 
     if (!postId || !userId) {
-      return res.status(400).json({ success: false, message: "postId and userId are required" });
+      return res
+        .status(400)
+        .json({ success: false, message: "postId and userId are required" });
     }
 
-    await pool.query(`DELETE FROM forum_likes WHERE post_id=$1 AND user_id=$2`, [postId, userId]);
+    await pool.query(
+      `DELETE FROM forum_likes WHERE post_id=$1 AND user_id=$2`,
+      [postId, userId]
+    );
 
-    return res.status(200).json({ success: true, message: "Like removed successfully" });
+    return res
+      .status(200)
+      .json({ success: true, message: "Like removed successfully" });
   } catch (error) {
     console.error("❌ removeLike error:", error);
-    return res.status(500).json({ success: false, message: "Internal server error" });
+    return res
+      .status(500)
+      .json({ success: false, message: "Internal server error" });
   }
 };
 
 // ✅ Add Comment
 export const addComment = async (req, res) => {
   try {
-    const userId = req.userId
+    const userId = req.userId;
     const { postId, content } = req.body;
 
     if (!postId || !userId || !content) {
-      return res.status(400).json({ success: false, message: "postId, userId, and content are required" });
+      return res.status(400).json({
+        success: false,
+        message: "postId, userId, and content are required",
+      });
     }
 
     const { rows } = await pool.query(
@@ -328,10 +491,14 @@ export const addComment = async (req, res) => {
       [postId, userId, content]
     );
 
-    return res.status(201).json({ success: true, message: "Comment added", comment: rows[0] });
+    return res
+      .status(201)
+      .json({ success: true, message: "Comment added", comment: rows[0] });
   } catch (error) {
     console.error("❌ addComment error:", error);
-    return res.status(500).json({ success: false, message: "Internal server error" });
+    return res
+      .status(500)
+      .json({ success: false, message: "Internal server error" });
   }
 };
 
@@ -342,7 +509,9 @@ export const deleteComment = async (req, res) => {
     const userId = req.userId;
 
     if (!commentId || !userId) {
-      return res.status(400).json({ success: false, message: "commentId and userId are required" });
+      return res
+        .status(400)
+        .json({ success: false, message: "commentId and userId are required" });
     }
 
     // ensure only owner can delete
@@ -352,13 +521,20 @@ export const deleteComment = async (req, res) => {
     );
 
     if (rowCount === 0) {
-      return res.status(403).json({ success: false, message: "Not authorized or comment not found" });
+      return res.status(403).json({
+        success: false,
+        message: "Not authorized or comment not found",
+      });
     }
 
-    return res.status(200).json({ success: true, message: "Comment deleted successfully" });
+    return res
+      .status(200)
+      .json({ success: true, message: "Comment deleted successfully" });
   } catch (error) {
     console.error("❌ deleteComment error:", error);
-    return res.status(500).json({ success: false, message: "Internal server error" });
+    return res
+      .status(500)
+      .json({ success: false, message: "Internal server error" });
   }
 };
 
@@ -367,7 +543,9 @@ export const getAlllikesandComments = async (req, res) => {
     const { postId } = req.body;
 
     if (!postId) {
-      return res.status(400).json({ success: false, message: "postId is required" });
+      return res
+        .status(400)
+        .json({ success: false, message: "postId is required" });
     }
 
     // ✅ Get likes with user details
@@ -404,12 +582,14 @@ export const getAlllikesandComments = async (req, res) => {
     return res.status(200).json({
       success: true,
       data: {
-        likes: likeRows,     // array of who liked
+        likes: likeRows, // array of who liked
         comments: commentRows, // array of who commented
       },
     });
   } catch (error) {
     console.error("❌ getAlllikesandComments error:", error);
-    return res.status(500).json({ success: false, message: "Internal server error" });
+    return res
+      .status(500)
+      .json({ success: false, message: "Internal server error" });
   }
 };
