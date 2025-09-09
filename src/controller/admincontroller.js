@@ -50,13 +50,21 @@ export const getAllpoll = async (req, res) => {
 
     const pollsWithOptions = [];
     for (let poll of polls.rows) {
+      // fetch options + votes + user names
       const options = await pool.query(
         `SELECT 
            po.id, 
-           po.option_text, 
-           COUNT(pv.id) AS vote_count
+           po.option_text,
+           COALESCE(COUNT(pv.id), 0) AS vote_count,
+           COALESCE(
+             json_agg(
+               json_build_object('id', u.id, 'name', u.name)
+             ) FILTER (WHERE u.id IS NOT NULL),
+             '[]'
+           ) AS voters
          FROM poll_options po
          LEFT JOIN poll_votes pv ON po.id = pv.option_id
+         LEFT JOIN users u ON pv.user_id = u.id
          WHERE po.poll_id = $1
          GROUP BY po.id, po.option_text
          ORDER BY po.id`,
@@ -65,10 +73,11 @@ export const getAllpoll = async (req, res) => {
 
       pollsWithOptions.push({
         ...poll,
-        options: options.rows.map(o => ({
+        options: options.rows.map((o) => ({
           ...o,
-          vote_count: Number(o.vote_count) // convert from string to number
-        }))
+          vote_count: Number(o.vote_count), // convert from string to number
+          voters: o.voters, // array of {id, name}
+        })),
       });
     }
 
