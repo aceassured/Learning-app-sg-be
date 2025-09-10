@@ -148,6 +148,105 @@ export const listPosts = async (req, res) => {
 };
 
 
+// get only particular forum notes.......
+
+export const getonlyForumNotes = async (req, res) => {
+  try {
+    const { id } = req.body; // id = forum post id
+
+    if (!id) {
+      return res.status(400).json({ ok: false, error: "Post ID is required" });
+    }
+
+    const q = `
+      SELECT 
+        p.id,
+        p.content,
+        p.subject_tag,
+        p.type_of_upload,
+        p.grade_level,
+        p.created_at,
+
+        -- Aggregate attached files
+        COALESCE(
+          JSON_AGG(
+            DISTINCT JSONB_BUILD_OBJECT(
+              'id', ff.id,
+              'url', ff.url,
+              'filename', ff.filename
+            )
+          ) FILTER (WHERE ff.id IS NOT NULL),
+          '[]'
+        ) AS files,
+
+        -- Aggregate comments
+        COALESCE(
+          JSON_AGG(
+            DISTINCT JSONB_BUILD_OBJECT(
+              'id', fc.id,
+              'content', fc.content,
+              'created_at', fc.created_at,
+              'user_id', cu.id,
+              'user_name', cu.name,
+              'profile_photo_url', cu.profile_photo_url
+            )
+          ) FILTER (WHERE fc.id IS NOT NULL),
+          '[]'
+        ) AS comments,
+
+        -- Author details
+        COALESCE(u.id, a.id) AS author_id,
+        COALESCE(u.name, a.name) AS author_name,
+        COALESCE(u.profile_photo_url, a.profile_photo_url) AS profile_photo_url,
+        u.school_name,
+        u.grade_level AS user_grade_level,
+        COALESCE(u.created_at, a.created_at) AS author_created_at,
+        CASE 
+          WHEN u.id IS NOT NULL THEN 'user'
+          WHEN a.id IS NOT NULL THEN 'admin'
+        END AS author_type,
+
+        -- Counts
+        COALESCE(l.like_count, 0) AS like_count,
+        COALESCE(c.comment_count, 0) AS comment_count
+
+      FROM forum_posts p
+      LEFT JOIN users u ON u.id = p.user_id
+      LEFT JOIN admins a ON a.id = p.admin_id
+      LEFT JOIN forum_files ff ON ff.post_id = p.id
+      LEFT JOIN forum_comments fc ON fc.post_id = p.id
+      LEFT JOIN users cu ON cu.id = fc.user_id
+      LEFT JOIN (
+        SELECT post_id, COUNT(*) AS like_count
+        FROM forum_likes
+        GROUP BY post_id
+      ) l ON l.post_id = p.id
+      LEFT JOIN (
+        SELECT post_id, COUNT(*) AS comment_count
+        FROM forum_comments
+        GROUP BY post_id
+      ) c ON c.post_id = p.id
+      WHERE p.id = $1
+      GROUP BY 
+        p.id, 
+        u.id, a.id, 
+        l.like_count, 
+        c.comment_count
+    `;
+
+    const r = await pool.query(q, [id]);
+
+    if (r.rows.length === 0) {
+      return res.status(404).json({ ok: false, error: "Post not found" });
+    }
+
+    res.json({ ok: true, post: r.rows[0] });
+  } catch (err) {
+    console.error("Error fetching post:", err);
+    res.status(500).json({ ok: false, error: "Server error" });
+  }
+};
+
 
 export const createPost = async (req, res) => {
   try {
