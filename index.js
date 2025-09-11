@@ -31,6 +31,7 @@ const corsOptions = {
         'http://localhost:8000',
         'https://localhost:8000',
         'http://localhost:8001',
+        'https://ace-hive-production-fe.vercel.app',
     ],
     methods: 'GET,HEAD,PUT,PATCH,POST,DELETE',
     allowedHeaders: ['Content-Type', 'Authorization', 'auth'],
