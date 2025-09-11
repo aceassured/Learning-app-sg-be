@@ -1,4 +1,4 @@
-import { findUserByEmail, findUserByPhone, createUser, updateUser, getUserById, updateUserSettings } from "../models/usermodels.js"
+import { findUserByEmail, findUserByPhone, createUser, updateUser, getUserById, updateUserSettings, createUsernew } from "../models/usermodels.js"
 import dotenv from 'dotenv';
 import jwt from "jsonwebtoken"
 import pool from "../../database.js";
@@ -50,6 +50,66 @@ export const login = async (req, res) => {
   }
 };
 
+export const Commonlogin = async (req, res) => {
+  try {
+    const { email, password } = req.body;
+
+    if (!email || !password) {
+      return res.status(400).json({ status: false, message: "Email and password are required" });
+    }
+
+    // ✅ Fetch user by email
+    const { rows } = await pool.query(
+      "SELECT id, name, email, password, selected_subjects FROM users WHERE email = $1",
+      [email]
+    );
+
+    const user = rows[0];
+    if (!user) {
+      return res.status(401).json({ status: false, message: "Invalid credentials" });
+    }
+
+    // ✅ Compare password with hashed password
+    const isMatch = await bcrypt.compare(password, user.password);
+    if (!isMatch) {
+      return res.status(401).json({ status: false, message: "Invalid credentials" });
+    }
+
+    // ✅ Fetch subject details only if selected_subjects exist
+    let selectedSubjectsNames = [];
+    if (user.selected_subjects && user.selected_subjects.length > 0) {
+      const { rows: subjectRows } = await pool.query(
+        `SELECT id, icon, subject 
+         FROM subjects 
+         WHERE id = ANY($1::int[])`,
+        [user.selected_subjects.map(Number)]
+      );
+      selectedSubjectsNames = subjectRows.map((r) => ({
+        id: r.id,
+        subject: r.subject,
+        icon: r.icon,
+      }));
+    }
+
+    // ✅ Generate JWT token
+    const token = jwt.sign({ userId: user.id }, JWT_SECRET, { expiresIn: "7d" });
+
+    // ✅ Return response without password
+    const { password: _, ...userData } = user;
+
+    return res.json({
+      status: true,
+      data: {
+        ...userData,
+        selected_subjects: selectedSubjectsNames,
+      },
+      token
+    });
+  } catch (err) {
+    console.error("Login error:", err);
+    res.status(500).json({ status: false, message: "Server error" });
+  }
+};
 
 export const register = async (req, res) => {
   try {
@@ -82,6 +142,84 @@ export const register = async (req, res) => {
     res.status(500).json({ status: false, message: 'Server error' });
   }
 };
+
+export const userregisterApi = async (req, res) => {
+  try {
+    const {
+      email,
+      phone,
+      name,
+      grade_level,
+      selected_subjects,
+      daily_reminder_time,
+      questions_per_day,
+      school_name,
+      grade_id,
+      password,
+      confirmPassword
+    } = req.body;
+
+    console.log(req.body);
+
+    // ✅ Validate required fields
+    if (
+      !grade_level ||
+      !selected_subjects ||
+      selected_subjects.length < 3 ||
+      !questions_per_day ||
+      !grade_id
+    ) {
+      return res.status(400).json({
+        status: false,
+        message: "Missing or invalid fields. Select minimum 3 subjects."
+      });
+    }
+
+    // ✅ Validate password
+    if (!password || !confirmPassword) {
+      return res.status(400).json({ status: false, message: "Password and confirmPassword are required" });
+    }
+    if (password !== confirmPassword) {
+      return res.status(400).json({ status: false, message: "Passwords do not match" });
+    }
+
+    // ✅ Hash password
+    const hashedPassword = await bcrypt.hash(password, 10);
+
+    // ✅ Insert user into DB
+    const user = await createUsernew({
+      email: email || null,
+      phone: phone || null,
+      name,
+      grade_level,
+      selected_subjects,
+      daily_reminder_time,
+      questions_per_day,
+      profile_photo_url: null,
+      school_name,
+      grade_id,
+      password: hashedPassword, // store hashed password
+    });
+
+    // ✅ Generate JWT
+    const token = jwt.sign({ userId: user.id }, JWT_SECRET, { expiresIn: "7d" });
+
+    // ✅ Never return password in response 
+    const { password: _, ...userData } = user;
+
+    return res.json({
+      status: true,
+      message: "Registered Successfully",
+      user: userData,
+      token,
+      redirect: "home"
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ status: false, message: "Server error" });
+  }
+};
+
 
 export const getProfile = async (req, res) => {
   try {

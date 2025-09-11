@@ -6,7 +6,9 @@ import { adminEdit, adminRegister, adminResetPassword, commonLogin, confirmPassw
   getProfile, getUserdetails, homeApi, login, newQuestionsadd, register, userEdit, userRegister, verifyOtp,addNewUser,changeUserRole ,deleteAdminUser,getAllUsers,
   getAllSubject,
   getAllGrade,
-  userVoteforpoll} from '../controller/usercontroller.js';
+  userVoteforpoll,
+  Commonlogin,
+  userregisterApi} from '../controller/usercontroller.js';
 import { deleteForum, deleteUser } from '../controller/forumcontroller.js';
 import { admingetTopics, getTopics } from '../controller/quizcontroller.js';
 
@@ -34,9 +36,9 @@ router.post('/me/edit', auth, upload.single('profile_photo'), async (req, res, n
 
 // admins apis....
 
-router.post("/userregister", userRegister)
+router.post("/userregisters", userRegister)
 router.post("/adminregister", adminRegister)
-router.post("/commonlogin", commonLogin)
+router.post("/usercommonlogin", commonLogin)
 router.get("/adminusers", auth, getUserdetails)
 router.get("/admindetail", auth, getAdmindetails)
 router.post("/resetpassword", adminResetPassword)
@@ -60,6 +62,11 @@ router.post('/gettopics',auth,  getTopics);
 router.post('/admingettopics', admingetTopics);
 router.post('/uservotepoll', auth, userVoteforpoll);
 
+
+// production....
+
+router.post("/commonlogin", Commonlogin)
+router.post("/userregister", userregisterApi)
 
 
 export default router;
