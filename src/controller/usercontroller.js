@@ -179,7 +179,6 @@ export const userregisterApi = async (req, res) => {
       !grade_level ||
       !selected_subjects ||
       selected_subjects.length < 3 ||
-      !questions_per_day ||
       !grade_id
     ) {
       return res.status(400).json({
