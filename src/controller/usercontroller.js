@@ -58,6 +58,19 @@ export const Commonlogin = async (req, res) => {
       return res.status(400).json({ status: false, message: "Email and password are required" });
     }
 
+    // const existingUser = await pool.query(
+    //   "SELECT id, name, email, password, selected_subjects FROM users WHERE email = $1",
+    //   [email]
+    // );
+
+    // const exisitingUserRuesult = existingUser.rows[0]
+    // if (!exisitingUserRuesult) {
+    //   return res.status(404).json({
+    //     status: false,
+    //     message: "User not found. Please sign up to continue.",
+    //   });
+
+    // }
     // ✅ Fetch user by email
     const { rows } = await pool.query(
       "SELECT id, name, email, password, selected_subjects FROM users WHERE email = $1",
@@ -66,7 +79,7 @@ export const Commonlogin = async (req, res) => {
 
     const user = rows[0];
     if (!user) {
-      return res.status(401).json({ status: false, message: "Invalid credentials" });
+      return res.status(401).json({ status: false, message: "User not found. Please sign up to continue.", });
     }
 
     // ✅ Compare password with hashed password
