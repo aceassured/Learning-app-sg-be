@@ -10,7 +10,8 @@ import { adminEdit, adminRegister, adminResetPassword, commonLogin, confirmPassw
   Commonlogin,
   userregisterApi,
   userJustregisterApi,
-  userverifyOtp} from '../controller/usercontroller.js';
+  userverifyOtp,
+  updateGradesubject} from '../controller/usercontroller.js';
 import { deleteForum, deleteUser } from '../controller/forumcontroller.js';
 import { admingetTopics, getTopics } from '../controller/quizcontroller.js';
 
@@ -71,6 +72,7 @@ router.post("/commonlogin", Commonlogin)
 router.post("/userregister", userregisterApi)
 router.post("/userjustregister", userJustregisterApi)
 router.post("/userverifyotp", userverifyOtp)
+router.post("/completeregister", updateGradesubject)
 
 
 export default router;

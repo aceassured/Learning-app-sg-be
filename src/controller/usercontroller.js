@@ -347,6 +347,66 @@ export const userverifyOtp = async (req, res) => {
 };
 
 
+// update grade and subject........
+
+export const updateGradesubject = async (req, res) => {
+  try {
+    const {
+      email,
+      grade_level,
+      selected_subjects,
+      grade_id,
+    } = req.body;
+
+    if (!email) {
+      return res.status(400).json({ status: false, message: "Email is required" });
+    }
+
+    // ✅ Validate required fields
+    if (!grade_level || !selected_subjects || selected_subjects.length < 3 || !grade_id) {
+      return res.status(400).json({
+        status: false,
+        message: "Missing or invalid fields. Select minimum 3 subjects."
+      });
+    }
+
+
+    // ✅ Update user in DB
+    const userRes = await pool.query(
+      `UPDATE users 
+       SET grade_level = $1, 
+           selected_subjects = $2, 
+           grade_id = $3
+       WHERE email = $4
+       RETURNING id, email, name, grade_level, selected_subjects, grade_id, daily_reminder_time, questions_per_day, school_name, phone`,
+      [
+        grade_level,
+        selected_subjects,
+        grade_id,
+        email
+      ]
+    );
+
+    if (userRes.rows.length === 0) {
+      return res.status(404).json({ status: false, message: "User not found" });
+    }
+
+    const user = userRes.rows[0];
+
+    const token = jwt.sign({ userId: user.id }, JWT_SECRET, { expiresIn: "7d" });
+
+    return res.json({
+      status: true,
+      message: "User updated successfully",
+      user,
+      token,
+      redirect: "home"
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ status: false, message: "Server error" });
+  }
+};
 
 
 export const getProfile = async (req, res) => {
