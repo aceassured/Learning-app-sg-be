@@ -8,7 +8,6 @@ import crypto from "crypto";
 import nodemailer from "nodemailer";
 import { uploadBufferToVercel } from "../utils/vercel-blob.js";
 
-
 const JWT_SECRET = process.env.JWT_SECRET || 'dev_secret';
 
 export const login = async (req, res) => {
@@ -156,6 +155,8 @@ export const register = async (req, res) => {
   }
 };
 
+// user register.........
+
 export const userregisterApi = async (req, res) => {
   try {
     const {
@@ -231,6 +232,121 @@ export const userregisterApi = async (req, res) => {
     res.status(500).json({ status: false, message: "Server error" });
   }
 };
+
+// just register.........
+
+const generateOtp = () => Math.floor(10000 + Math.random() * 90000).toString();
+
+export const userJustregisterApi = async (req, res) => {
+  try {
+    const { email, name, password, confirmPassword } = req.body;
+
+    if (!email || !name || !password || !confirmPassword) {
+      return res.status(400).json({ status: false, message: "All fields are required" });
+    }
+
+    if (password !== confirmPassword) {
+      return res.status(400).json({ status: false, message: "Passwords do not match" });
+    }
+
+    // ✅ Check if email already exists
+    const existingUser = await pool.query(`SELECT * FROM users WHERE email = $1`, [email]);
+    if (existingUser.rows.length > 0) {
+      return res.status(400).json({ status: false, message: "Email already registered" });
+    }
+
+    // ✅ Hash password
+    const hashedPassword = await bcrypt.hash(password, 10);
+
+    // ✅ Generate OTP & expiry
+    const otp = generateOtp();
+    const otpExpiry = new Date(Date.now() + 2 * 60 * 1000); // 10 mins from now
+
+    // ✅ Insert user into DB (with OTP + expiry)
+    const userRes = await pool.query(
+      `INSERT INTO users (email, name, password, otp, otp_expire_time) 
+       VALUES ($1,$2,$3,$4,$5) RETURNING id, email, name`,
+      [email, name, hashedPassword, otp, otpExpiry]
+    );
+
+    const user = userRes.rows[0];
+
+    await pool.query(
+      `INSERT INTO user_settings (user_id)
+       VALUES ($1)`,
+      [user.id]
+    );
+
+    // ✅ Setup nodemailer
+    const transporter = nodemailer.createTransport({
+      service: "gmail", // or other provider
+      auth: {
+        user: process.env.EMAIL_USER,
+        pass: process.env.EMAIL_PASS,
+      },
+    });
+
+    // ✅ Send OTP email
+    await transporter.sendMail({
+      from: process.env.EMAIL_USER,
+      to: email,
+      subject: "Your OTP Code",
+      text: `Your OTP code is ${otp}. It is valid for 10 minutes.`,
+    });
+
+    return res.json({
+      status: true,
+      message: "Registered successfully. OTP sent to email.",
+      user,
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ status: false, message: "Server error" });
+  }
+};
+// email verify......
+
+export const userverifyOtp = async (req, res) => {
+  try {
+    const { email, otp } = req.body;
+
+    if (!email || !otp) {
+      return res.status(400).json({ status: false, message: "Email and OTP are required" });
+    }
+
+    // ✅ Find user
+    const userRes = await pool.query(`SELECT * FROM users WHERE email = $1`, [email]);
+    if (userRes.rows.length === 0) {
+      return res.status(400).json({ status: false, message: "User not found" });
+    }
+
+    const user = userRes.rows[0];
+
+    // ✅ Check OTP match
+    if (user.otp !== otp) {
+      return res.status(400).json({ status: false, message: "Invalid OTP" });
+    }
+
+    // ✅ Check OTP expiry
+    if (new Date() > new Date(user.otp_expire_time)) {
+      return res.status(400).json({ status: false, message: "OTP expired" });
+    }
+
+    // ✅ Clear OTP after verification + mark as verified
+    await pool.query(
+      `UPDATE users SET otp = NULL, otp_expire_time = NULL, is_verified = true WHERE id = $1`,
+      [user.id]
+    );
+
+    return res.json({ status: true, message: "OTP verified successfully" });
+
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ status: false, message: "Server error" });
+  }
+};
+
+
 
 
 export const getProfile = async (req, res) => {

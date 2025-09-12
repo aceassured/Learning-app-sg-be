@@ -8,7 +8,9 @@ import { adminEdit, adminRegister, adminResetPassword, commonLogin, confirmPassw
   getAllGrade,
   userVoteforpoll,
   Commonlogin,
-  userregisterApi} from '../controller/usercontroller.js';
+  userregisterApi,
+  userJustregisterApi,
+  userverifyOtp} from '../controller/usercontroller.js';
 import { deleteForum, deleteUser } from '../controller/forumcontroller.js';
 import { admingetTopics, getTopics } from '../controller/quizcontroller.js';
 
@@ -67,6 +69,8 @@ router.post('/uservotepoll', auth, userVoteforpoll);
 
 router.post("/commonlogin", Commonlogin)
 router.post("/userregister", userregisterApi)
+router.post("/userjustregister", userJustregisterApi)
+router.post("/userverifyotp", userverifyOtp)
 
 
 export default router;
