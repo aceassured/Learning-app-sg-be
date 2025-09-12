@@ -74,5 +74,12 @@ router.post("/userjustregister", userJustregisterApi)
 router.post("/userverifyotp", userverifyOtp)
 router.post("/completeregister", updateGradesubject)
 
+router.get("/data-deletion", async(req, res) => {
+  return res.status(200).json({
+    message: "User data deletion process",
+    instructions: "Send an email to dm@aceassured.com to request deletion. We will delete your data within 7 days.",
+    email: "dm@aceassured.com",
+  });
+});
 
 export default router;
