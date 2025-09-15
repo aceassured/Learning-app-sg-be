@@ -349,64 +349,64 @@ export const userverifyOtp = async (req, res) => {
 
 // update grade and subject........
 
-export const updateGradesubject = async (req, res) => {
-  try {
-    const {
-      email,
-      grade_level,
-      selected_subjects,
-      grade_id,
-    } = req.body;
+// export const updateGradesubject = async (req, res) => {
+//   try {
+//     const {
+//       email,
+//       grade_level,
+//       selected_subjects,
+//       grade_id,
+//     } = req.body;
 
-    if (!email) {
-      return res.status(400).json({ status: false, message: "Email is required" });
-    }
+//     if (!email) {
+//       return res.status(400).json({ status: false, message: "Email is required" });
+//     }
 
-    // ✅ Validate required fields
-    if (!grade_level || !selected_subjects || selected_subjects.length < 3 || !grade_id) {
-      return res.status(400).json({
-        status: false,
-        message: "Missing or invalid fields. Select minimum 3 subjects."
-      });
-    }
+//     // ✅ Validate required fields
+//     if (!grade_level || !selected_subjects || selected_subjects.length < 3 || !grade_id) {
+//       return res.status(400).json({
+//         status: false,
+//         message: "Missing or invalid fields. Select minimum 3 subjects."
+//       });
+//     }
 
 
-    // ✅ Update user in DB
-    const userRes = await pool.query(
-      `UPDATE users 
-       SET grade_level = $1, 
-           selected_subjects = $2, 
-           grade_id = $3
-       WHERE email = $4
-       RETURNING id, email, name, grade_level, selected_subjects, grade_id, daily_reminder_time, questions_per_day, school_name, phone`,
-      [
-        grade_level,
-        selected_subjects,
-        grade_id,
-        email
-      ]
-    );
+//     // ✅ Update user in DB
+//     const userRes = await pool.query(
+//       `UPDATE users 
+//        SET grade_level = $1, 
+//            selected_subjects = $2, 
+//            grade_id = $3
+//        WHERE email = $4
+//        RETURNING id, email, name, grade_level, selected_subjects, grade_id, daily_reminder_time, questions_per_day, school_name, phone`,
+//       [
+//         grade_level,
+//         selected_subjects,
+//         grade_id,
+//         email
+//       ]
+//     );
 
-    if (userRes.rows.length === 0) {
-      return res.status(404).json({ status: false, message: "User not found" });
-    }
+//     if (userRes.rows.length === 0) {
+//       return res.status(404).json({ status: false, message: "User not found" });
+//     }
 
-    const user = userRes.rows[0];
+//     const user = userRes.rows[0];
 
-    const token = jwt.sign({ userId: user.id }, JWT_SECRET, { expiresIn: "7d" });
+//     const token = jwt.sign({ userId: user.id }, JWT_SECRET, { expiresIn: "7d" });
 
-    return res.json({
-      status: true,
-      message: "User updated successfully",
-      user,
-      token,
-      redirect: "home"
-    });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ status: false, message: "Server error" });
-  }
-};
+//     return res.json({
+//       status: true,
+//       message: "User updated successfully",
+//       user,
+//       token,
+//       redirect: "home"
+//     });
+//   } catch (err) {
+//     console.error(err);
+//     res.status(500).json({ status: false, message: "Server error" });
+//   }
+// };
 
 
 export const getProfile = async (req, res) => {
@@ -2124,5 +2124,443 @@ export const userVoteforpoll = async (req, res) => {
   } catch (error) {
     console.error("userVoteforpoll error:", error);
     return res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+// // social login check...........
+
+
+// export const socialLogincheck = async (req, res) => {
+//   try {
+//     const { email, social_id, provider } = req.body;
+
+//     const userResult = await pool.query(
+//       `SELECT * FROM users WHERE email = $1 AND social_id = $2 AND provider = $3 LIMIT 1`,
+//       [email, social_id, provider]
+//     );
+
+//     // ✅ Check if user exists with regular email (non-social login)
+//     const emailUserResult = await pool.query(
+//       `SELECT * FROM users WHERE email = $1 AND (provider IS NULL OR provider = 'local') LIMIT 1`,
+//       [email]
+//     );
+
+//     const user = userResult.rows[0];
+//     const emailUser = emailUserResult.rows[0];
+
+//     res.json({
+//       exists: !!user,
+//       emailExists: !!emailUser,
+//       message: user ? "User exists" : "User not found",
+//     });
+//   } catch (error) {
+//     console.error("Check social user error:", error);
+//     res.status(500).json({
+//       exists: false,
+//       message: "Server error",
+//     });
+//   }
+// }
+
+
+// // social login...........
+
+// export const socialLogin = async (req, res) => {
+//   try {
+//     const { email, social_id, provider } = req.body;
+
+//     // ✅ Find user by social credentials
+//     const userResult = await pool.query(
+//       `SELECT u.id, u.name, u.email, u.grade_level, u.provider
+//        FROM users u
+//        WHERE u.email = $1 AND u.social_id = $2 AND u.provider = $3
+//        LIMIT 1`,
+//       [email, social_id, provider]
+//     );
+
+//     const user = userResult.rows[0];
+
+//     if (!user) {
+//       return res.status(404).json({
+//         status: false,
+//         message: "User not found",
+//       });
+//     }
+
+//     // ✅ Fetch grade
+//     const gradeResult = await pool.query(
+//       `SELECT id, grade_level FROM grades WHERE id = $1 LIMIT 1`,
+//       [user.grade_level]
+//     );
+
+//     const grade = gradeResult.rows[0] || null;
+
+//     // ✅ Fetch subjects (many-to-many)
+//     const subjectsResult = await pool.query(
+//       `SELECT s.id, s.subject
+//        FROM subjects s
+//        INNER JOIN user_subjects us ON us.subject_id = s.id
+//        WHERE us.user_id = $1`,
+//       [user.id]
+//     );
+
+//     const subjects = subjectsResult.rows;
+
+//     // ✅ Generate JWT token
+//     const token = jwt.sign(
+//       {
+//         id: user.id,
+//         email: user.email,
+//         provider: user.provider,
+//       },
+//       process.env.JWT_SECRET,
+//       { expiresIn: "24h" }
+//     );
+
+//     res.json({
+//       status: true,
+//       message: "Login successful",
+//       token,
+//       data: {
+//         id: user.id,
+//         name: user.name,
+//         email: user.email,
+//         grade_level: user.grade_level,
+//         grade,
+//         subjects,
+//         provider: user.provider,
+//         profile_completed: true,
+//       },
+//     });
+//   } catch (error) {
+//     console.error("Social login error:", error);
+//     res.status(500).json({
+//       status: false,
+//       message: "Server error",
+//     });
+//   }
+// };
+
+
+
+
+// 1. Check if social user exists
+export const checkSocialUser = async (req, res) => {
+  try {
+    const { email, social_id, provider } = req.body;
+    
+    if (!email || !social_id || !provider) {
+      return res.status(400).json({
+        status: false,
+        message: "Email, social_id, and provider are required"
+      });
+    }
+
+    // Check if user exists with exact social login credentials
+    const socialUserRes = await pool.query(
+      `SELECT * FROM users WHERE email = $1 AND social_id = $2 AND provider = $3`,
+      [email, social_id, provider]
+    );
+
+    // Check if user exists with same email (any login method)
+    const emailUserRes = await pool.query(
+      `SELECT * FROM users WHERE email = $1`,
+      [email]
+    );
+
+    // Check if this email has any other social providers linked
+    const otherSocialRes = await pool.query(
+      `SELECT * FROM users WHERE email = $1 AND provider IS NOT NULL AND provider != $2`,
+      [email, provider]
+    );
+
+    return res.json({
+      status: true,
+      exists: socialUserRes.rows.length > 0, // Exact social match
+      emailExists: emailUserRes.rows.length > 0, // Email exists (any method)
+      hasOtherSocial: otherSocialRes.rows.length > 0, // Has other social accounts
+      user: socialUserRes.rows.length > 0 ? socialUserRes.rows[0] : 
+            (emailUserRes.rows.length > 0 ? emailUserRes.rows[0] : null),
+      existingUser: emailUserRes.rows.length > 0 ? emailUserRes.rows[0] : null,
+      message: socialUserRes.rows.length > 0 ? "Social user exists" : 
+               emailUserRes.rows.length > 0 ? "Email exists with different login method" : 
+               "User not found"
+    });
+  } catch (error) {
+    console.error('Check social user error:', error);
+    res.status(500).json({
+      status: false,
+      exists: false,
+      message: "Server error"
+    });
+  }
+};
+
+// link social login........
+
+export const linkSocialAccount = async (req, res) => {
+  try {
+    const { email, social_id, provider, name, photoURL } = req.body;
+    
+    if (!email || !social_id || !provider) {
+      return res.status(400).json({
+        status: false,
+        message: "Email, social_id, and provider are required"
+      });
+    }
+
+    // Find existing user by email
+    const existingUserRes = await pool.query(
+      `SELECT * FROM users WHERE email = $1`,
+      [email]
+    );
+
+    if (existingUserRes.rows.length === 0) {
+      return res.status(404).json({
+        status: false,
+        message: "User not found"
+      });
+    }
+
+    const existingUser = existingUserRes.rows[0];
+
+    // Check if this social account is already linked to another user
+    const socialConflictRes = await pool.query(
+      `SELECT * FROM users WHERE social_id = $1 AND provider = $2 AND email != $3`,
+      [social_id, provider, email]
+    );
+
+    if (socialConflictRes.rows.length > 0) {
+      return res.status(400).json({
+        status: false,
+        message: `This ${provider} account is already linked to another user`
+      });
+    }
+
+    // Update the existing user to link the social account
+    const updatedUserRes = await pool.query(
+      `UPDATE users 
+       SET social_id = $1, 
+           provider = $2, 
+           is_social_login = true,
+           profile_photo_url = COALESCE(profile_photo_url, $3),
+           name = COALESCE(name, $4)
+       WHERE email = $5 
+       RETURNING id, email, name, grade_level, selected_subjects, grade_id, 
+                daily_reminder_time, questions_per_day, school_name, phone, 
+                provider, social_id, is_social_login, profile_photo_url`,
+      [social_id, provider, photoURL, name, email]
+    );
+
+    const user = updatedUserRes.rows[0];
+
+    // Generate JWT token
+    const token = jwt.sign({ userId: user.id }, JWT_SECRET, { expiresIn: "7d" });
+
+    return res.json({
+      status: true,
+      message: `${provider} account linked successfully`,
+      user,
+      token,
+      redirect: "home",
+      linked: true
+    });
+
+  } catch (error) {
+    console.error('Link social account error:', error);
+    res.status(500).json({
+      status: false,
+      message: "Server error"
+    });
+  }
+};
+
+
+// 2. Social login API
+export const socialLogin = async (req, res) => {
+  try {
+    const { email, social_id, provider } = req.body;
+    
+    if (!email || !social_id || !provider) {
+      return res.status(400).json({
+        status: false,
+        message: "Email, social_id, and provider are required"
+      });
+    }
+
+    // Find user by social credentials OR by email with this provider
+    const userRes = await pool.query(
+      `SELECT id, email, name, grade_level, selected_subjects, grade_id, 
+              daily_reminder_time, questions_per_day, school_name, phone, 
+              provider, social_id, is_social_login, profile_photo_url
+       FROM users 
+       WHERE (email = $1 AND social_id = $2 AND provider = $3) 
+          OR (email = $1 AND provider = $3)`,
+      [email, social_id, provider]
+    );
+
+    if (userRes.rows.length === 0) {
+      return res.status(404).json({
+        status: false,
+        message: "User not found"
+      });
+    }
+
+    const user = userRes.rows[0];
+
+    // If social_id doesn't match, update it (this handles the case where user was linked)
+    if (user.social_id !== social_id) {
+      await pool.query(
+        `UPDATE users SET social_id = $1 WHERE id = $2`,
+        [social_id, user.id]
+      );
+      user.social_id = social_id;
+    }
+
+    // Generate JWT token
+    const token = jwt.sign({ userId: user.id }, JWT_SECRET, { expiresIn: "7d" });
+
+    return res.json({
+      status: true,
+      message: "Social login successful",
+      user,
+      token,
+      redirect: "home"
+    });
+  } catch (error) {
+    console.error('Social login error:', error);
+    res.status(500).json({
+      status: false,
+      message: "Server error"
+    });
+  }
+};
+
+// 3. Social registration API (creates user without OTP)
+export const socialRegister = async (req, res) => {
+  try {
+    const { email, name, provider, social_id, profile_picture_url } = req.body;
+
+    if (!email || !name || !provider || !social_id) {
+      return res.status(400).json({ 
+        status: false, 
+        message: "Email, name, provider, and social_id are required" 
+      });
+    }
+
+    // Check if user already exists with this social login
+    const existingSocialUser = await pool.query(
+      `SELECT * FROM users WHERE email = $1 AND social_id = $2 AND provider = $3`,
+      [email, social_id, provider]
+    );
+
+    if (existingSocialUser.rows.length > 0) {
+      return res.status(400).json({ 
+        status: false, 
+        message: "User already registered with this social account" 
+      });
+    }
+
+    // Check if user exists with same email but different login method
+    const existingEmailUser = await pool.query(
+      `SELECT * FROM users WHERE email = $1`,
+      [email]
+    );
+
+    if (existingEmailUser.rows.length > 0) {
+      return res.status(400).json({ 
+        status: false, 
+        message: "Email already registered. Please use regular login or different social account." 
+      });
+    }
+
+    // Insert social user into DB (no password, no OTP needed)
+    const userRes = await pool.query(
+      `INSERT INTO users (email, name, provider, social_id, is_social_login, profile_photo_url) 
+       VALUES ($1, $2, $3, $4, $5, $6) 
+       RETURNING id, email, name, provider, social_id, is_social_login`,
+      [email, name, provider, social_id, true, profile_picture_url || null]
+    );
+
+    const user = userRes.rows[0];
+
+    // Create user settings
+    await pool.query(
+      `INSERT INTO user_settings (user_id) VALUES ($1)`,
+      [user.id]
+    );
+
+    return res.json({
+      status: true,
+      message: "Social registration successful. Please complete your profile.",
+      user,
+      requiresProfile: true
+    });
+
+  } catch (err) {
+    console.error('Social register error:', err);
+    res.status(500).json({ status: false, message: "Server error" });
+  }
+};
+
+// 4. Updated updateGradesubject API to handle social users
+export const updateGradesubject = async (req, res) => {
+  try {
+    const {
+      email,
+      grade_level,
+      selected_subjects,
+      grade_id,
+      is_social_completion // Add this flag to know if it's social user completing profile
+    } = req.body;
+
+    if (!email) {
+      return res.status(400).json({ status: false, message: "Email is required" });
+    }
+
+    // ✅ Validate required fields
+    if (!grade_level || !selected_subjects || selected_subjects.length < 3 || !grade_id) {
+      return res.status(400).json({
+        status: false,
+        message: "Missing or invalid fields. Select minimum 3 subjects."
+      });
+    }
+
+    // ✅ Update user in DB
+    const userRes = await pool.query(
+      `UPDATE users 
+       SET grade_level = $1, 
+           selected_subjects = $2, 
+           grade_id = $3
+       WHERE email = $4
+       RETURNING id, email, name, grade_level, selected_subjects, grade_id, 
+                daily_reminder_time, questions_per_day, school_name, phone,
+                provider, social_id, is_social_login`,
+      [
+        grade_level,
+        selected_subjects,
+        grade_id,
+        email
+      ]
+    );
+
+    if (userRes.rows.length === 0) {
+      return res.status(404).json({ status: false, message: "User not found" });
+    }
+
+    const user = userRes.rows[0];
+
+    const token = jwt.sign({ userId: user.id }, JWT_SECRET, { expiresIn: "7d" });
+
+    return res.json({
+      status: true,
+      message: `${is_social_completion ? 'Social registration' : 'User profile'} updated successfully`,
+      user,
+      token,
+      redirect: "home"
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ status: false, message: "Server error" });
   }
 };

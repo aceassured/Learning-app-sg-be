@@ -11,7 +11,11 @@ import { adminEdit, adminRegister, adminResetPassword, commonLogin, confirmPassw
   userregisterApi,
   userJustregisterApi,
   userverifyOtp,
-  updateGradesubject} from '../controller/usercontroller.js';
+  updateGradesubject,
+  socialLogin,
+  checkSocialUser,
+  socialRegister,
+  linkSocialAccount} from '../controller/usercontroller.js';
 import { deleteForum, deleteUser } from '../controller/forumcontroller.js';
 import { admingetTopics, getTopics } from '../controller/quizcontroller.js';
 
@@ -66,6 +70,7 @@ router.post('/admingettopics', admingetTopics);
 router.post('/uservotepoll', auth, userVoteforpoll);
 
 
+
 // production....
 
 router.post("/commonlogin", Commonlogin)
@@ -73,6 +78,11 @@ router.post("/userregister", userregisterApi)
 router.post("/userjustregister", userJustregisterApi)
 router.post("/userverifyotp", userverifyOtp)
 router.post("/completeregister", updateGradesubject)
+
+router.post('/checksocialuser', checkSocialUser);
+router.post('/socialregister', socialRegister);
+router.post('/linksocialaccount', linkSocialAccount);
+router.post('/sociallogin', socialLogin)
 
 router.get("/data-deletion", async(req, res) => {
   return res.status(200).json({
