@@ -2569,7 +2569,7 @@ export const updateGradesubject = async (req, res) => {
 // instagram login callback url........
 
 export const handleCallback =  async (req, res) => {
-  const VERIFY_TOKEN = 'instagram_webhook_verify_token_123'; // Use the same token you set in Facebook App
+  const VERIFY_TOKEN = 'IGAAL5AJCjOGlBZAE5YM2dZALWZACcnZAodlkzMVN3d0ZAnWV9CTFlLQTQ2TFNaTlZAnMmdoal9KcVJtNFBsTHo2UU9yanlXZAnZA2ZAWN1WG1IVGZA1eUREd043bjRZAWC1iQnlKMlk0cUxvYUVpRlNZAaWlMTlphM0dERWxMZAnRKWm9VRlRDQQZDZD'; // Use the same token you set in Facebook App
   
   const mode = req.query['hub.mode'];
   const token = req.query['hub.verify_token'];
