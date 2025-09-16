@@ -2,9 +2,8 @@ import express from 'express';
 import multer from 'multer';
 import auth from '../middleware/auth.js';
 import { uploadBufferToVercel } from '../utils/vercel-blob.js';
-import {
-  adminEdit, adminRegister, adminResetPassword, commonLogin, confirmPassword, deleteQuestions, editProfile, getAdmindetails, getAllquestions,
-  getProfile, getUserdetails, homeApi, login, newQuestionsadd, register, userEdit, userRegister, verifyOtp, addNewUser, changeUserRole, deleteAdminUser, getAllUsers,
+import { adminEdit, adminRegister, adminResetPassword, commonLogin, confirmPassword, deleteQuestions, editProfile, getAdmindetails, getAllquestions, 
+  getProfile, getUserdetails, homeApi, login, newQuestionsadd, register, userEdit, userRegister, verifyOtp,addNewUser,changeUserRole ,deleteAdminUser,getAllUsers,
   getAllSubject,
   getAllGrade,
   userVoteforpoll,
@@ -16,17 +15,7 @@ import {
   socialLogin,
   checkSocialUser,
   socialRegister,
-  linkSocialAccount,
-  handleCallback,
-  handleWebHook,
-  checkInstagramUser,
-  instagramLogin,
-  instagramRegister,
-  linkInstagramAccount,
-  handleInstagramLoginRedirect,
-  exchangeInstagramCode,
-  exchangeInstagramBusinessCode
-} from '../controller/usercontroller.js';
+  linkSocialAccount} from '../controller/usercontroller.js';
 import { deleteForum, deleteUser } from '../controller/forumcontroller.js';
 import { admingetTopics, getTopics } from '../controller/quizcontroller.js';
 
@@ -62,21 +51,21 @@ router.get("/admindetail", auth, getAdmindetails)
 router.post("/resetpassword", adminResetPassword)
 router.post("/verifyotp", verifyOtp)
 router.put("/confirmpassword", confirmPassword)
-router.put("/adminedit", auth, upload.single("file"), adminEdit)
+router.put("/adminedit",auth, upload.single("file"), adminEdit)
 router.put("/edit", auth, upload.single("profile_photo"), userEdit);
-router.post("/questionadd", upload.fields([{ name: "file", maxCount: 1 }, { name: "fileanswer", maxCount: 1 }]), newQuestionsadd);
+router.post("/questionadd",upload.fields([{ name: "file", maxCount: 1 },{ name: "fileanswer", maxCount: 1 }]),newQuestionsadd);
 router.get("/allquestions", getAllquestions)
 router.get("/home", homeApi)
 router.delete("/deletequestion", deleteQuestions)
 router.delete("/deleteforum", deleteForum)
 router.delete("/deleteuser", deleteUser)
-router.post("/addNewUser", addNewUser)
-router.put("/changeUserRole", changeUserRole)
-router.delete("/deleteAdminUser", deleteAdminUser)
-router.get("/getAllUsers", getAllUsers);
-router.get("/getallsubject", getAllSubject);
-router.get("/getallgrades", getAllGrade);
-router.post('/gettopics', auth, getTopics);
+router.post("/addNewUser",addNewUser)
+router.put("/changeUserRole",changeUserRole)
+router.delete("/deleteAdminUser",deleteAdminUser)
+router.get("/getAllUsers",getAllUsers);
+router.get("/getallsubject",getAllSubject);
+router.get("/getallgrades",getAllGrade);
+router.post('/gettopics',auth,  getTopics);
 router.post('/admingettopics', admingetTopics);
 router.post('/uservotepoll', auth, userVoteforpoll);
 
@@ -95,28 +84,7 @@ router.post('/socialregister', socialRegister);
 router.post('/linksocialaccount', linkSocialAccount);
 router.post('/sociallogin', socialLogin)
 
-// instagram callback........
-
-router.get('/webhooks/instagram', handleCallback)
-router.post('/webhooks/instagram', handleWebHook)
-router.get("/instagram/callback", handleInstagramLoginRedirect);
-
-
-
-// Add these routes to your existing user routes
-router.post('/checkinstagramuser', checkInstagramUser);
-router.post('/instagramlogin', instagramLogin);
-router.post('/instagramregister', instagramRegister);
-router.post('/linkinstagramaccount', linkInstagramAccount);
-
-
-
-router.post('/instagram/exchange', exchangeInstagramCode);
-router.post('/instagram/business/exchange', exchangeInstagramBusinessCode);
-
-
-
-router.get("/data-deletion", async (req, res) => {
+router.get("/data-deletion", async(req, res) => {
   return res.status(200).json({
     message: "User data deletion process",
     instructions: "Send an email to dm@aceassured.com to request deletion. We will delete your data within 7 days.",
