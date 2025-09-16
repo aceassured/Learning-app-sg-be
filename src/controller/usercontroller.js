@@ -2564,3 +2564,320 @@ export const updateGradesubject = async (req, res) => {
     res.status(500).json({ status: false, message: "Server error" });
   }
 };
+
+
+// instagram login callback url........
+
+export const handleCallback =  async (req, res) => {
+  const VERIFY_TOKEN = 'instagram_webhook_verify_token_123'; // Use the same token you set in Facebook App
+  
+  const mode = req.query['hub.mode'];
+  const token = req.query['hub.verify_token'];
+  const challenge = req.query['hub.challenge'];
+  
+  if (mode && token) {
+    if (mode === 'subscribe' && token === VERIFY_TOKEN) {
+      console.log('Instagram webhook verified');
+      res.status(200).send(challenge);
+    } else {
+      res.sendStatus(403);
+    }
+  } else {
+    res.sendStatus(400);
+  } 
+}
+
+// Handle Instagram Webhooks
+export const handleWebHook = async(req, res) => {
+  const body = req.body;
+  
+  if (body.object === 'instagram') {
+    console.log('Instagram webhook event received:', body);
+    // Process webhook events here
+    res.status(200).send('EVENT_RECEIVED');
+  } else {
+    res.sendStatus(404);
+  }
+}
+
+
+// instagram login register four api's...........
+
+
+export const checkInstagramUser = async (req, res) => {
+  try {
+    const { email, instagram_id, username, social_id, provider } = req.body;
+    
+    if (!email && !instagram_id && !username) {
+      return res.status(400).json({
+        status: false,
+        message: "Email, instagram_id, or username is required"
+      });
+    }
+
+    let socialUserRes = { rows: [] };
+    let emailUserRes = { rows: [] };
+
+    // Check for Instagram user by instagram_id or social_id
+    if (instagram_id || social_id) {
+      socialUserRes = await pool.query(
+        `SELECT * FROM users WHERE (social_id = $1 OR social_id = $2) AND provider = 'instagram'`,
+        [instagram_id, social_id]
+      );
+    }
+
+    // Check for user by email
+    if (email) {
+      emailUserRes = await pool.query(
+        `SELECT * FROM users WHERE email = $1`,
+        [email]
+      );
+    }
+
+    // Check for user by username (if no email provided)
+    if (!email && username) {
+      const usernameRes = await pool.query(
+        `SELECT * FROM users WHERE name = $1 OR email LIKE $2`,
+        [username, `%${username}%`]
+      );
+      emailUserRes = usernameRes;
+    }
+
+    return res.json({
+      status: true,
+      exists: socialUserRes.rows.length > 0, // Instagram user exists
+      emailExists: emailUserRes.rows.length > 0, // Email/username exists
+      user: socialUserRes.rows.length > 0 ? socialUserRes.rows[0] : 
+            (emailUserRes.rows.length > 0 ? emailUserRes.rows[0] : null),
+      message: socialUserRes.rows.length > 0 ? "Instagram user exists" : 
+               emailUserRes.rows.length > 0 ? "Email/username exists with different login method" : 
+               "User not found"
+    });
+  } catch (error) {
+    console.error('Check Instagram user error:', error);
+    res.status(500).json({
+      status: false,
+      exists: false,
+      message: "Server error"
+    });
+  }
+};
+
+// Instagram Login
+export const instagramLogin = async (req, res) => {
+  try {
+    const { email, instagram_id, username, social_id } = req.body;
+    
+    if (!email && !instagram_id && !username && !social_id) {
+      return res.status(400).json({
+        status: false,
+        message: "Email, instagram_id, username, or social_id is required"
+      });
+    }
+
+    // Try to find user by various identifiers
+    let userRes;
+    
+    if (social_id) {
+      userRes = await pool.query(
+        `SELECT id, email, name, grade_level, selected_subjects, grade_id, 
+                daily_reminder_time, questions_per_day, school_name, phone, 
+                provider, social_id, is_social_login, profile_photo_url
+         FROM users 
+         WHERE social_id = $1 AND provider = 'instagram'`,
+        [social_id]
+      );
+    } else if (email) {
+      userRes = await pool.query(
+        `SELECT id, email, name, grade_level, selected_subjects, grade_id, 
+                daily_reminder_time, questions_per_day, school_name, phone, 
+                provider, social_id, is_social_login, profile_photo_url
+         FROM users 
+         WHERE email = $1 AND provider = 'instagram'`,
+        [email]
+      );
+    } else if (instagram_id) {
+      userRes = await pool.query(
+        `SELECT id, email, name, grade_level, selected_subjects, grade_id, 
+                daily_reminder_time, questions_per_day, school_name, phone, 
+                provider, social_id, is_social_login, profile_photo_url
+         FROM users 
+         WHERE social_id = $1 AND provider = 'instagram'`,
+        [instagram_id]
+      );
+    }
+
+    if (!userRes || userRes.rows.length === 0) {
+      return res.status(404).json({
+        status: false,
+        message: "Instagram user not found"
+      });
+    }
+
+    const user = userRes.rows[0];
+
+    // Generate JWT token
+    const token = jwt.sign({ userId: user.id }, JWT_SECRET, { expiresIn: "7d" });
+
+    return res.json({
+      status: true,
+      message: "Instagram login successful",
+      user,
+      token,
+      redirect: "home"
+    });
+  } catch (error) {
+    console.error('Instagram login error:', error);
+    res.status(500).json({
+      status: false,
+      message: "Server error"
+    });
+  }
+};
+
+// Instagram Registration
+export const instagramRegister = async (req, res) => {
+  try {
+    const { 
+      email, 
+      name, 
+      username, 
+      instagram_id, 
+      social_id, 
+      profile_picture_url, 
+      account_type,
+      followers_count 
+    } = req.body;
+
+    // Use social_id as primary identifier, fallback to instagram_id
+    const primaryId = social_id || instagram_id;
+    
+    if (!primaryId || !name) {
+      return res.status(400).json({ 
+        status: false, 
+        message: "Social ID/Instagram ID and name are required" 
+      });
+    }
+
+    // Create email if not provided (Instagram doesn't always provide email)
+    const userEmail = email || `${username || name.toLowerCase().replace(/\s+/g, '_')}@instagram.local`;
+
+    // Check if user already exists
+    const existingUser = await pool.query(
+      `SELECT * FROM users WHERE social_id = $1 AND provider = 'instagram'`,
+      [primaryId]
+    );
+
+    if (existingUser.rows.length > 0) {
+      return res.status(400).json({ 
+        status: false, 
+        message: "User already registered with this Instagram account" 
+      });
+    }
+
+    // Insert Instagram user into DB
+    const userRes = await pool.query(
+      `INSERT INTO users (email, name, provider, social_id, is_social_login, profile_photo_url) 
+       VALUES ($1, $2, $3, $4, $5, $6) 
+       RETURNING id, email, name, provider, social_id, is_social_login, profile_photo_url`,
+      [userEmail, name, 'instagram', primaryId, true, profile_picture_url || null]
+    );
+
+    const user = userRes.rows[0];
+
+    // Create user settings
+    await pool.query(
+      `INSERT INTO user_settings (user_id) VALUES ($1)`,
+      [user.id]
+    );
+
+    return res.json({
+      status: true,
+      message: "Instagram registration successful. Please complete your profile.",
+      user,
+      requiresProfile: true
+    });
+
+  } catch (err) {
+    console.error('Instagram register error:', err);
+    res.status(500).json({ status: false, message: "Server error" });
+  }
+};
+
+// Link Instagram account to existing user
+export const linkInstagramAccount = async (req, res) => {
+  try {
+    const { email, instagram_id, social_id, username, name, profile_picture_url } = req.body;
+    
+    const primaryId = social_id || instagram_id;
+    
+    if (!email || !primaryId) {
+      return res.status(400).json({
+        status: false,
+        message: "Email and social_id/instagram_id are required"
+      });
+    }
+
+    // Find existing user by email
+    const existingUserRes = await pool.query(
+      `SELECT * FROM users WHERE email = $1`,
+      [email]
+    );
+
+    if (existingUserRes.rows.length === 0) {
+      return res.status(404).json({
+        status: false,
+        message: "User not found"
+      });
+    }
+
+    // Check if this Instagram account is already linked to another user
+    const instagramConflictRes = await pool.query(
+      `SELECT * FROM users WHERE social_id = $1 AND provider = 'instagram' AND email != $2`,
+      [primaryId, email]
+    );
+
+    if (instagramConflictRes.rows.length > 0) {
+      return res.status(400).json({
+        status: false,
+        message: "This Instagram account is already linked to another user"
+      });
+    }
+
+    // Update the existing user to link the Instagram account
+    const updatedUserRes = await pool.query(
+      `UPDATE users 
+       SET social_id = $1, 
+           provider = $2, 
+           is_social_login = true,
+           profile_photo_url = COALESCE(profile_photo_url, $3),
+           name = COALESCE(name, $4)
+       WHERE email = $5 
+       RETURNING id, email, name, grade_level, selected_subjects, grade_id, 
+                daily_reminder_time, questions_per_day, school_name, phone, 
+                provider, social_id, is_social_login, profile_photo_url`,
+      [primaryId, 'instagram', profile_picture_url, name, email]
+    );
+
+    const user = updatedUserRes.rows[0];
+
+    // Generate JWT token
+    const token = jwt.sign({ userId: user.id }, JWT_SECRET, { expiresIn: "7d" });
+
+    return res.json({
+      status: true,
+      message: "Instagram account linked successfully",
+      user,
+      token,
+      redirect: "home",
+      linked: true
+    });
+
+  } catch (error) {
+    console.error('Link Instagram account error:', error);
+    res.status(500).json({
+      status: false,
+      message: "Server error"
+    });
+  }
+};
