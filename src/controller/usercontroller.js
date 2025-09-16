@@ -2606,51 +2606,52 @@ export const handleWebHook = async(req, res) => {
 
 export const checkInstagramUser = async (req, res) => {
   try {
-    const { email, instagram_id, username, social_id, provider } = req.body;
+    const { email, instagram_id, username, social_id } = req.body;
     
-    if (!email && !instagram_id && !username) {
+    if (!email && !instagram_id && !username && !social_id) {
       return res.status(400).json({
         status: false,
-        message: "Email, instagram_id, or username is required"
+        message: "At least one identifier is required"
       });
     }
 
     let socialUserRes = { rows: [] };
     let emailUserRes = { rows: [] };
 
-    // Check for Instagram user by instagram_id or social_id
+    // Check for Instagram user by social_id or instagram_id
     if (instagram_id || social_id) {
+      const searchId = social_id || instagram_id;
       socialUserRes = await pool.query(
-        `SELECT * FROM users WHERE (social_id = $1 OR social_id = $2) AND provider = 'instagram'`,
-        [instagram_id, social_id]
+        `SELECT * FROM users WHERE social_id = $1 AND provider = 'instagram'`,
+        [searchId]
       );
     }
 
     // Check for user by email
-    if (email) {
+    if (email && !email.includes('@instagram.local')) {
       emailUserRes = await pool.query(
         `SELECT * FROM users WHERE email = $1`,
         [email]
       );
     }
 
-    // Check for user by username (if no email provided)
+    // Check for user by username if no email
     if (!email && username) {
       const usernameRes = await pool.query(
         `SELECT * FROM users WHERE name = $1 OR email LIKE $2`,
-        [username, `%${username}%`]
+        [username, `${username}@instagram.local`]
       );
       emailUserRes = usernameRes;
     }
 
     return res.json({
       status: true,
-      exists: socialUserRes.rows.length > 0, // Instagram user exists
-      emailExists: emailUserRes.rows.length > 0, // Email/username exists
+      exists: socialUserRes.rows.length > 0,
+      emailExists: emailUserRes.rows.length > 0,
       user: socialUserRes.rows.length > 0 ? socialUserRes.rows[0] : 
             (emailUserRes.rows.length > 0 ? emailUserRes.rows[0] : null),
       message: socialUserRes.rows.length > 0 ? "Instagram user exists" : 
-               emailUserRes.rows.length > 0 ? "Email/username exists with different login method" : 
+               emailUserRes.rows.length > 0 ? "Email exists with different login method" : 
                "User not found"
     });
   } catch (error) {
@@ -2662,32 +2663,36 @@ export const checkInstagramUser = async (req, res) => {
     });
   }
 };
-
 // Instagram Login
 export const instagramLogin = async (req, res) => {
   try {
     const { email, instagram_id, username, social_id } = req.body;
     
-    if (!email && !instagram_id && !username && !social_id) {
+    if (!social_id && !instagram_id && !email && !username) {
       return res.status(400).json({
         status: false,
-        message: "Email, instagram_id, username, or social_id is required"
+        message: "User identifier is required"
       });
     }
 
-    // Try to find user by various identifiers
     let userRes;
     
-    if (social_id) {
+    // Try to find user by social_id first
+    const searchId = social_id || instagram_id;
+    
+    if (searchId) {
       userRes = await pool.query(
         `SELECT id, email, name, grade_level, selected_subjects, grade_id, 
                 daily_reminder_time, questions_per_day, school_name, phone, 
                 provider, social_id, is_social_login, profile_photo_url
          FROM users 
          WHERE social_id = $1 AND provider = 'instagram'`,
-        [social_id]
+        [searchId]
       );
-    } else if (email) {
+    }
+    
+    // If not found by social_id, try by email
+    if ((!userRes || userRes.rows.length === 0) && email) {
       userRes = await pool.query(
         `SELECT id, email, name, grade_level, selected_subjects, grade_id, 
                 daily_reminder_time, questions_per_day, school_name, phone, 
@@ -2695,15 +2700,6 @@ export const instagramLogin = async (req, res) => {
          FROM users 
          WHERE email = $1 AND provider = 'instagram'`,
         [email]
-      );
-    } else if (instagram_id) {
-      userRes = await pool.query(
-        `SELECT id, email, name, grade_level, selected_subjects, grade_id, 
-                daily_reminder_time, questions_per_day, school_name, phone, 
-                provider, social_id, is_social_login, profile_photo_url
-         FROM users 
-         WHERE social_id = $1 AND provider = 'instagram'`,
-        [instagram_id]
       );
     }
 
@@ -2735,6 +2731,7 @@ export const instagramLogin = async (req, res) => {
   }
 };
 
+
 // Instagram Registration
 export const instagramRegister = async (req, res) => {
   try {
@@ -2749,7 +2746,6 @@ export const instagramRegister = async (req, res) => {
       followers_count 
     } = req.body;
 
-    // Use social_id as primary identifier, fallback to instagram_id
     const primaryId = social_id || instagram_id;
     
     if (!primaryId || !name) {
@@ -2759,8 +2755,10 @@ export const instagramRegister = async (req, res) => {
       });
     }
 
-    // Create email if not provided (Instagram doesn't always provide email)
-    const userEmail = email || `${username || name.toLowerCase().replace(/\s+/g, '_')}@instagram.local`;
+    // Create email for Instagram users
+    const userEmail = email && !email.includes('@instagram.local') ? 
+                      email : 
+                      `${username || name.toLowerCase().replace(/\s+/g, '_')}@instagram.local`;
 
     // Check if user already exists
     const existingUser = await pool.query(
@@ -2803,6 +2801,7 @@ export const instagramRegister = async (req, res) => {
     res.status(500).json({ status: false, message: "Server error" });
   }
 };
+
 
 // Link Instagram account to existing user
 export const linkInstagramAccount = async (req, res) => {
@@ -2882,7 +2881,6 @@ export const linkInstagramAccount = async (req, res) => {
   }
 };
 
-
 export const handleInstagramLoginRedirect = async (req, res) => {
   try {
     const code = req.query.code; // Instagram sends this
@@ -2938,7 +2936,7 @@ export const handleInstagramLoginRedirect = async (req, res) => {
 
 export const exchangeInstagramCode = async (req, res) => {
   try {
-    const { code } = req.body;
+    const { code, redirect_uri } = req.body;
     
     if (!code) {
       return res.status(400).json({
@@ -2949,18 +2947,22 @@ export const exchangeInstagramCode = async (req, res) => {
 
     const appId = '836730775353449'; // Your Instagram App ID
     const appSecret = process.env.INSTAGRAM_APP_SECRET; // Set this in your .env file
-    const redirectUri = `${process.env.FRONTEND_URL}/instagram-callback`;
+    const redirectUri = redirect_uri || `${process.env.FRONTEND_URL}/instagram-callback`;
+
+    console.log('Exchanging Instagram code:', { appId, redirectUri, codeLength: code.length });
 
     // Step 1: Exchange code for short-lived access token
+    const formData = new URLSearchParams({
+      client_id: appId,
+      client_secret: appSecret,
+      grant_type: 'authorization_code',
+      redirect_uri: redirectUri,
+      code: code
+    });
+
     const tokenResponse = await axios.post(
       'https://api.instagram.com/oauth/access_token',
-      {
-        client_id: appId,
-        client_secret: appSecret,
-        grant_type: 'authorization_code',
-        redirect_uri: redirectUri,
-        code: code
-      },
+      formData.toString(),
       {
         headers: {
           'Content-Type': 'application/x-www-form-urlencoded'
@@ -2968,21 +2970,31 @@ export const exchangeInstagramCode = async (req, res) => {
       }
     );
 
+    console.log('Instagram token response:', tokenResponse.data);
+
     const { access_token: shortLivedToken, user_id } = tokenResponse.data;
 
-    // Step 2: Exchange short-lived token for long-lived token
-    const longLivedTokenResponse = await axios.get(
-      'https://graph.instagram.com/access_token',
-      {
-        params: {
-          grant_type: 'ig_exchange_token',
-          client_secret: appSecret,
-          access_token: shortLivedToken
-        }
-      }
-    );
+    // Step 2: Exchange short-lived token for long-lived token (optional)
+    let longLivedToken = shortLivedToken;
+    let expires_in = 3600; // Default 1 hour
 
-    const { access_token: longLivedToken, expires_in } = longLivedTokenResponse.data;
+    try {
+      const longLivedTokenResponse = await axios.get(
+        'https://graph.instagram.com/access_token',
+        {
+          params: {
+            grant_type: 'ig_exchange_token',
+            client_secret: appSecret,
+            access_token: shortLivedToken
+          }
+        }
+      );
+      
+      longLivedToken = longLivedTokenResponse.data.access_token;
+      expires_in = longLivedTokenResponse.data.expires_in;
+    } catch (error) {
+      console.log('Could not get long-lived token, using short-lived token');
+    }
 
     // Step 3: Get user information
     const userResponse = await axios.get(
@@ -2996,24 +3008,25 @@ export const exchangeInstagramCode = async (req, res) => {
     );
 
     const instagramUser = userResponse.data;
+    console.log('Instagram user data:', instagramUser);
 
-    // Step 4: Get user's profile picture (if available)
+    // Step 4: Try to get profile picture from user's media (optional)
     let profilePictureUrl = null;
     try {
       const mediaResponse = await axios.get(
         `https://graph.instagram.com/${user_id}/media`,
         {
           params: {
-            fields: 'id,media_type,media_url,thumbnail_url,permalink,caption,timestamp',
+            fields: 'id,media_type,media_url,thumbnail_url',
             limit: 1,
             access_token: longLivedToken
           }
         }
       );
       
-      // Use first media as profile reference or get from user endpoint if available
       if (mediaResponse.data.data && mediaResponse.data.data.length > 0) {
-        profilePictureUrl = mediaResponse.data.data[0].media_url;
+        const media = mediaResponse.data.data[0];
+        profilePictureUrl = media.media_type === 'IMAGE' ? media.media_url : media.thumbnail_url;
       }
     } catch (error) {
       console.log('Could not fetch user media for profile picture');
@@ -3022,8 +3035,8 @@ export const exchangeInstagramCode = async (req, res) => {
     // Create user object for your app
     const user = {
       id: instagramUser.id,
-      email: `${instagramUser.username}@instagram.local`, // Instagram doesn't provide email
-      name: instagramUser.username, // Use username as name
+      email: `${instagramUser.username}@instagram.local`, // Instagram Basic Display doesn't provide email
+      name: instagramUser.username,
       username: instagramUser.username,
       provider: 'instagram',
       uid: instagramUser.id,
@@ -3050,6 +3063,8 @@ export const exchangeInstagramCode = async (req, res) => {
       errorMessage = error.response.data.error_message;
     } else if (error.response?.data?.error?.message) {
       errorMessage = error.response.data.error.message;
+    } else if (error.response?.data?.error_description) {
+      errorMessage = error.response.data.error_description;
     }
 
     return res.status(400).json({
