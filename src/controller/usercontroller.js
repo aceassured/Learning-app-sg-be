@@ -2881,3 +2881,291 @@ export const linkInstagramAccount = async (req, res) => {
     });
   }
 };
+
+
+export const handleInstagramLoginRedirect = async (req, res) => {
+  try {
+    const code = req.query.code; // Instagram sends this
+    if (!code) return res.status(400).json({ error: 'Missing code parameter' });
+
+    const appId = '836730775353449';
+    const appSecret = 'YOUR_INSTAGRAM_APP_SECRET';
+    const redirectUri = 'https://learning-app-sg-be-lv28.onrender.com/api/user/webhooks/instagram';
+
+    // Exchange code for access token
+    const tokenResponse = await axios.get(
+      `https://graph.facebook.com/v19.0/oauth/access_token`,
+      {
+        params: {
+          client_id: appId,
+          client_secret: appSecret,
+          grant_type: 'authorization_code',
+          redirect_uri: redirectUri,
+          code: code,
+        },
+      }
+    );
+
+    const { access_token, user_id } = tokenResponse.data;
+
+    // Optional: get Instagram Business Account info
+    const userResponse = await axios.get(
+      `https://graph.facebook.com/v19.0/${user_id}`,
+      {
+        params: {
+          fields: 'id,username,account_type,name,profile_picture_url',
+          access_token: access_token,
+        },
+      }
+    );
+
+    const user = userResponse.data;
+
+    // Return info to frontend or create session
+    res.json({
+      success: true,
+      accessToken: access_token,
+      user,
+    });
+  } catch (err) {
+    console.error('Instagram login error:', err.response?.data || err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+};
+
+
+
+
+export const exchangeInstagramCode = async (req, res) => {
+  try {
+    const { code } = req.body;
+    
+    if (!code) {
+      return res.status(400).json({
+        success: false,
+        error: 'Authorization code is required'
+      });
+    }
+
+    const appId = '836730775353449'; // Your Instagram App ID
+    const appSecret = process.env.INSTAGRAM_APP_SECRET; // Set this in your .env file
+    const redirectUri = `${process.env.FRONTEND_URL}/instagram-callback`;
+
+    // Step 1: Exchange code for short-lived access token
+    const tokenResponse = await axios.post(
+      'https://api.instagram.com/oauth/access_token',
+      {
+        client_id: appId,
+        client_secret: appSecret,
+        grant_type: 'authorization_code',
+        redirect_uri: redirectUri,
+        code: code
+      },
+      {
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded'
+        }
+      }
+    );
+
+    const { access_token: shortLivedToken, user_id } = tokenResponse.data;
+
+    // Step 2: Exchange short-lived token for long-lived token
+    const longLivedTokenResponse = await axios.get(
+      'https://graph.instagram.com/access_token',
+      {
+        params: {
+          grant_type: 'ig_exchange_token',
+          client_secret: appSecret,
+          access_token: shortLivedToken
+        }
+      }
+    );
+
+    const { access_token: longLivedToken, expires_in } = longLivedTokenResponse.data;
+
+    // Step 3: Get user information
+    const userResponse = await axios.get(
+      `https://graph.instagram.com/${user_id}`,
+      {
+        params: {
+          fields: 'id,username,account_type,media_count',
+          access_token: longLivedToken
+        }
+      }
+    );
+
+    const instagramUser = userResponse.data;
+
+    // Step 4: Get user's profile picture (if available)
+    let profilePictureUrl = null;
+    try {
+      const mediaResponse = await axios.get(
+        `https://graph.instagram.com/${user_id}/media`,
+        {
+          params: {
+            fields: 'id,media_type,media_url,thumbnail_url,permalink,caption,timestamp',
+            limit: 1,
+            access_token: longLivedToken
+          }
+        }
+      );
+      
+      // Use first media as profile reference or get from user endpoint if available
+      if (mediaResponse.data.data && mediaResponse.data.data.length > 0) {
+        profilePictureUrl = mediaResponse.data.data[0].media_url;
+      }
+    } catch (error) {
+      console.log('Could not fetch user media for profile picture');
+    }
+
+    // Create user object for your app
+    const user = {
+      id: instagramUser.id,
+      email: `${instagramUser.username}@instagram.local`, // Instagram doesn't provide email
+      name: instagramUser.username, // Use username as name
+      username: instagramUser.username,
+      provider: 'instagram',
+      uid: instagramUser.id,
+      photoURL: profilePictureUrl,
+      type: instagramUser.account_type || 'PERSONAL',
+      followers_count: 0, // Basic Display API doesn't provide follower count
+      accessToken: longLivedToken,
+      tokenExpiresIn: expires_in
+    };
+
+    return res.json({
+      success: true,
+      user,
+      accessToken: longLivedToken,
+      expiresIn: expires_in
+    });
+
+  } catch (error) {
+    console.error('Instagram token exchange error:', error.response?.data || error.message);
+    
+    let errorMessage = 'Failed to authenticate with Instagram';
+    
+    if (error.response?.data?.error_message) {
+      errorMessage = error.response.data.error_message;
+    } else if (error.response?.data?.error?.message) {
+      errorMessage = error.response.data.error.message;
+    }
+
+    return res.status(400).json({
+      success: false,
+      error: errorMessage
+    });
+  }
+};
+
+
+
+
+export const exchangeInstagramBusinessCode = async (req, res) => {
+  try {
+    const { code } = req.body;
+    
+    if (!code) {
+      return res.status(400).json({
+        success: false,
+        error: 'Authorization code is required'
+      });
+    }
+
+    const appId = '4148732188732847'; // Your Facebook App ID
+    const appSecret = process.env.FACEBOOK_APP_SECRET; // Set this in your .env file
+    const redirectUri = `${process.env.FRONTEND_URL}/instagram-callback`;
+
+    // Step 1: Exchange code for Facebook access token
+    const tokenResponse = await axios.get(
+      'https://graph.facebook.com/v19.0/oauth/access_token',
+      {
+        params: {
+          client_id: appId,
+          client_secret: appSecret,
+          redirect_uri: redirectUri,
+          code: code
+        }
+      }
+    );
+
+    const { access_token: facebookToken } = tokenResponse.data;
+
+    // Step 2: Get user's Facebook pages
+    const pagesResponse = await axios.get(
+      'https://graph.facebook.com/v19.0/me/accounts',
+      {
+        params: {
+          access_token: facebookToken,
+          fields: 'instagram_business_account{id,username,profile_picture_url,name,followers_count,account_type},name,id,access_token'
+        }
+      }
+    );
+
+    // Step 3: Find pages with Instagram business accounts
+    const instagramAccounts = pagesResponse.data.data
+      .filter(page => page.instagram_business_account)
+      .map(page => ({
+        pageId: page.id,
+        pageName: page.name,
+        pageAccessToken: page.access_token,
+        instagram: page.instagram_business_account
+      }));
+
+    if (instagramAccounts.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'No Instagram Business accounts found. Please connect your Instagram account to a Facebook page.'
+      });
+    }
+
+    // Use the first Instagram business account
+    const selectedAccount = instagramAccounts[0];
+    
+    // Step 4: Get additional user info from Facebook
+    const userResponse = await axios.get(
+      'https://graph.facebook.com/v19.0/me',
+      {
+        params: {
+          access_token: facebookToken,
+          fields: 'id,name,email'
+        }
+      }
+    );
+
+    const user = {
+      id: selectedAccount.instagram.id,
+      email: userResponse.data.email || `${selectedAccount.instagram.username}@instagram.local`,
+      name: selectedAccount.instagram.name || selectedAccount.pageName,
+      username: selectedAccount.instagram.username,
+      provider: 'instagram',
+      uid: userResponse.data.id,
+      photoURL: selectedAccount.instagram.profile_picture_url,
+      type: selectedAccount.instagram.account_type || 'BUSINESS',
+      followers_count: selectedAccount.instagram.followers_count || 0,
+      pageId: selectedAccount.pageId,
+      accessToken: selectedAccount.pageAccessToken
+    };
+
+    return res.json({
+      success: true,
+      user,
+      accessToken: selectedAccount.pageAccessToken
+    });
+
+  } catch (error) {
+    console.error('Instagram Business token exchange error:', error.response?.data || error.message);
+    
+    let errorMessage = 'Failed to authenticate with Instagram Business';
+    
+    if (error.response?.data?.error?.message) {
+      errorMessage = error.response.data.error.message;
+    }
+
+    return res.status(400).json({
+      success: false,
+      error: errorMessage
+    });
+  }
+};
