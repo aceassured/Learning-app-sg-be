@@ -10,7 +10,7 @@ export const findUserByPhone = async (phone) => {
   return res.rows[0];
 };
 
-export const createUser = async ({ email, phone, name, grade_level, selected_subjects, daily_reminder_time, questions_per_day, profile_photo_url, school_name , grade_id}) => {
+export const createUser = async ({ email, phone, name, grade_level, selected_subjects, daily_reminder_time, questions_per_day, profile_photo_url, school_name, grade_id }) => {
   const res = await pool.query(
     `INSERT INTO users (email, phone, name, grade_level, selected_subjects, daily_reminder_time, questions_per_day, profile_photo_url, school_name, grade_id)
      VALUES ($1,$2,$3,$4,$5,$6,$7,$8, $9, $10) RETURNING *`,
@@ -25,7 +25,7 @@ export const createUser = async ({ email, phone, name, grade_level, selected_sub
   return res.rows[0];
 };
 
-export const createUsernew = async ({ email, phone, name, grade_level, selected_subjects, daily_reminder_time, questions_per_day, profile_photo_url, school_name , grade_id, password}) => {
+export const createUsernew = async ({ email, phone, name, grade_level, selected_subjects, daily_reminder_time, questions_per_day, profile_photo_url, school_name, grade_id, password }) => {
   const res = await pool.query(
     `INSERT INTO users (email, phone, name, grade_level, selected_subjects, daily_reminder_time, questions_per_day, profile_photo_url, school_name, grade_id, password)
      VALUES ($1,$2,$3,$4,$5,$6,$7,$8, $9, $10, $11) RETURNING *`,
@@ -92,12 +92,33 @@ export const updateUserSettings = async (id, fields) => {
   `;
 
   const result = await pool.query(query, [...values, id]);
-  return result.rows[0];
+  const updatedUserSettings = result.rows[0];
+
+  // 🔹 Now fetch subjects if selected_subjects exists
+  let selectedSubjects = [];
+  if (
+    updatedUserSettings.selected_subjects &&
+    updatedUserSettings.selected_subjects.length > 0
+  ) {
+    const { rows } = await pool.query(
+      `SELECT id, subject 
+       FROM subjects 
+       WHERE id = ANY($1::int[])`,
+      [updatedUserSettings.selected_subjects.map(Number)]
+    );
+    selectedSubjects = rows.map((r) => ({ id: r.id, subject: r.subject }));
+  }
+
+  return {
+    ...updatedUserSettings,
+    selected_subjects: selectedSubjects,
+  };
 };
+
 
 export const getUserById = async (id) => {
   console.log("id", id);
-  
+
   const res = await pool.query(
     `SELECT ud.*, us.*
      FROM users ud
