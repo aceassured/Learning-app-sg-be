@@ -258,8 +258,8 @@ export const startQuiz = async (req, res) => {
     const sessionRes = await pool.query(
       `
       INSERT INTO user_quiz_sessions 
-      (user_id, started_at, allowed_duration_seconds, total_questions)
-      VALUES ($1, now(), 300, $2)
+      (user_id, started_at, allowed_duration_seconds, total_questions, type)
+      VALUES ($1, now(), 300, $2, 'daily')
       RETURNING *
       `,
       [userId, questions.length]
