@@ -258,7 +258,7 @@ export const createPost = async (req, res) => {
     const getGradequerry = `SELECT grade_level FROM grades WHERE id = $1`
     const gradeResult = await pool.query(getGradequerry, [grade_level])
     const gradeValue = gradeResult.rows[0].grade_level
-console.log(gradeValue)
+    console.log(gradeValue)
     const getSubjectquerry = `SELECT subject FROM subjects WHERE id = $1`
     const subjectResult = await pool.query(getSubjectquerry, [subject_tag])
     const subjectValue = subjectResult.rows[0].subject
@@ -510,5 +510,55 @@ export const getAlllikesandComments = async (req, res) => {
   } catch (error) {
     console.error("❌ getAlllikesandComments error:", error);
     return res.status(500).json({ success: false, message: "Internal server error" });
+  }
+};
+
+
+// save forum......
+
+
+export const saveForum = async (req, res) => {
+  try {
+    const userId = req.userId;
+    const { forumpost_id } = req.body;
+
+    if (!forumpost_id) {
+      return res.status(400).json({ ok: false, message: "forumpost_id required" });
+    }
+
+    const { rows } = await pool.query(
+      "SELECT id FROM forum_posts WHERE id = $1",
+      [forumpost_id]
+    );
+
+    const forum = rows[0];
+    if (!forum) {
+      return res.status(401).json({ status: false, message: "Forum not found.", });
+    }
+
+    // Check if already saved
+    const checkRes = await pool.query(
+      `SELECT id FROM user_saved_forums WHERE user_id=$1 AND forum_post_id=$2`,
+      [userId, forumpost_id]
+    );
+
+    if (checkRes.rows.length > 0) {
+      // Already saved → unsave
+      await pool.query(
+        `DELETE FROM user_saved_forums WHERE user_id=$1 AND forum_post_id=$2`,
+        [userId, forumpost_id]
+      );
+      return res.json({ ok: true, saved: false, message: "Forum unsaved" });
+    } else {
+      // Not saved → save
+      await pool.query(
+        `INSERT INTO user_saved_forums (user_id, forum_post_id) VALUES ($1, $2)`,
+        [userId, forumpost_id]
+      );
+      return res.json({ ok: true, saved: true, message: "Forum saved" });
+    }
+  } catch (error) {
+    console.error("saveForum error:", error);
+    return res.status(500).json({ ok: false, message: "Server error" });
   }
 };
