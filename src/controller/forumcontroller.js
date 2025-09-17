@@ -22,16 +22,16 @@ import { uploadBufferToVercel } from '../utils/vercel-blob.js';
 
 export const listPosts = async (req, res) => {
   try {
-    const { subject, type_of_upload, grade } = req.query;
+    const { id, subjectId, gradeId, type_of_upload } = req.query;
     const userId = req.userId; // from auth middleware
 
     let q = `
       SELECT 
         p.id,
         p.content,
-        p.subject_tag,
+        s.subject AS subject_tag,     -- ✅ join subject name
+        g.grade_level AS grade_level,       -- ✅ join grade name
         p.type_of_upload,
-        p.grade_level,
         p.created_at,
 
         -- Aggregate attached files
@@ -106,24 +106,33 @@ export const listPosts = async (req, res) => {
       -- ✅ join specific user like
       LEFT JOIN forum_likes ul 
         ON ul.post_id = p.id AND ul.user_id = $1
+
+      -- ✅ join subjects & grades
+      LEFT JOIN subjects s ON s.id = p.subject_tag
+      LEFT JOIN grades g ON g.id = p.grade_level
     `;
 
     const conditions = [];
     const params = [userId]; // first param = userId
 
-    if (subject) {
-      params.push(subject);
+    if (id) {
+      params.push(id);
+      conditions.push(`p.id = $${params.length}`);
+    }
+
+    if (subjectId) {
+      params.push(subjectId);
       conditions.push(`p.subject_tag = $${params.length}`);
+    }
+
+    if (gradeId) {
+      params.push(gradeId);
+      conditions.push(`p.grade_level = $${params.length}`);
     }
 
     if (type_of_upload) {
       params.push(type_of_upload);
       conditions.push(`p.type_of_upload = $${params.length}`);
-    }
-
-    if (grade) {
-      params.push(grade);
-      conditions.push(`p.grade_level = $${params.length}`);
     }
 
     if (conditions.length > 0) {
@@ -132,6 +141,7 @@ export const listPosts = async (req, res) => {
 
     q += ` GROUP BY 
              p.id, 
+             s.subject, g.grade_level,   -- ✅ must group by joined columns
              u.id, a.id, 
              l.like_count, 
              c.comment_count, 
@@ -255,25 +265,18 @@ export const createPost = async (req, res) => {
 
     let postRes;
 
-    const getGradequerry = `SELECT grade_level FROM grades WHERE id = $1`
-    const gradeResult = await pool.query(getGradequerry, [grade_level])
-    const gradeValue = gradeResult.rows[0].grade_level
-    console.log(gradeValue)
-    const getSubjectquerry = `SELECT subject FROM subjects WHERE id = $1`
-    const subjectResult = await pool.query(getSubjectquerry, [subject_tag])
-    const subjectValue = subjectResult.rows[0].subject
 
     if (author_type === "user") {
       postRes = await pool.query(
         `INSERT INTO forum_posts (user_id, grade_level, content, subject_tag, type_of_upload) 
          VALUES ($1, $2, $3, $4, $5) RETURNING *`,
-        [authorId, gradeValue, content, subjectValue, type_of_upload]
+        [authorId, grade_level, content, subject_tag, type_of_upload]
       );
     } else if (author_type === "admin") {
       postRes = await pool.query(
         `INSERT INTO forum_posts (admin_id, grade_level, content, subject_tag, type_of_upload) 
          VALUES ($1, $2, $3, $4, $5) RETURNING *`,
-        [authorId, gradeValue, content, subjectValue, type_of_upload]
+        [authorId, grade_level, content, subject_tag, type_of_upload]
       );
     } else {
       return res.status(400).json({ ok: false, message: "Invalid author_type" });
@@ -559,6 +562,190 @@ export const saveForum = async (req, res) => {
     }
   } catch (error) {
     console.error("saveForum error:", error);
+    return res.status(500).json({ ok: false, message: "Server error" });
+  }
+};
+
+
+// get forum and polls data.......
+
+export const getForumAndPollFeed = async (req, res) => {
+  try {
+    const userId = req.userId;
+    const { subject, type_of_upload, grade } = req.query;
+
+    // =======================
+    // 1) Fetch Forums
+    // =======================
+    let forumQuery = `
+      SELECT 
+        p.id,
+        p.content,
+        s.subject AS subject_tag,     -- ✅ get subject name
+        g.grade_level AS grade_level,       -- ✅ get grade name
+        p.type_of_upload,
+        p.created_at,
+
+        COALESCE(
+          JSON_AGG(
+            DISTINCT JSONB_BUILD_OBJECT(
+              'id', ff.id,
+              'url', ff.url,
+              'filename', ff.filename
+            )
+          ) FILTER (WHERE ff.id IS NOT NULL),
+          '[]'
+        ) AS files,
+
+        COALESCE(
+          JSON_AGG(
+            DISTINCT JSONB_BUILD_OBJECT(
+              'id', fc.id,
+              'content', fc.content,
+              'created_at', fc.created_at,
+              'user_id', cu.id,
+              'user_name', cu.name,
+              'profile_photo_url', cu.profile_photo_url
+            )
+          ) FILTER (WHERE fc.id IS NOT NULL),
+          '[]'
+        ) AS comments,
+
+        COALESCE(u.id, a.id) AS author_id,
+        COALESCE(u.name, a.name) AS author_name,
+        COALESCE(u.profile_photo_url, a.profile_photo_url) AS profile_photo_url,
+        u.school_name,
+        u.grade_level AS user_grade_level,
+        COALESCE(u.created_at, a.created_at) AS author_created_at,
+        CASE 
+          WHEN u.id IS NOT NULL THEN 'user'
+          WHEN a.id IS NOT NULL THEN 'admin'
+        END AS author_type,
+
+        COALESCE(l.like_count, 0) AS like_count,
+        COALESCE(c.comment_count, 0) AS comment_count,
+        CASE WHEN ul.user_id IS NOT NULL THEN true ELSE false END AS is_liked_by_user,
+
+        -- ✅ is forum saved by this user
+        CASE WHEN sf.user_id IS NOT NULL THEN true ELSE false END AS is_forum_saved
+
+      FROM forum_posts p
+      LEFT JOIN users u ON u.id = p.user_id
+      LEFT JOIN admins a ON a.id = p.admin_id
+      LEFT JOIN forum_files ff ON ff.post_id = p.id
+      LEFT JOIN forum_comments fc ON fc.post_id = p.id
+      LEFT JOIN users cu ON cu.id = fc.user_id
+
+      LEFT JOIN (
+        SELECT post_id, COUNT(*) AS like_count
+        FROM forum_likes
+        GROUP BY post_id
+      ) l ON l.post_id = p.id
+
+      LEFT JOIN (
+        SELECT post_id, COUNT(*) AS comment_count
+        FROM forum_comments
+        GROUP BY post_id
+      ) c ON c.post_id = p.id
+
+      LEFT JOIN forum_likes ul 
+        ON ul.post_id = p.id AND ul.user_id = $1
+
+      LEFT JOIN subjects s ON s.id = p.subject_tag
+      LEFT JOIN grades g ON g.id = p.grade_level
+
+      -- ✅ join saved forums
+      LEFT JOIN user_saved_forums sf 
+        ON sf.forum_post_id = p.id AND sf.user_id = $1
+    `;
+
+    const conditions = [];
+    const params = [userId];
+
+    if (subject) {
+      params.push(subject);
+      conditions.push(`p.subject_tag = $${params.length}`);
+    }
+    if (type_of_upload) {
+      params.push(type_of_upload);
+      conditions.push(`p.type_of_upload = $${params.length}`);
+    }
+    if (grade) {
+      params.push(grade);
+      conditions.push(`p.grade_level = $${params.length}`);
+    }
+
+    if (conditions.length > 0) {
+      forumQuery += ` WHERE ${conditions.join(" AND ")}`;
+    }
+
+    forumQuery += ` GROUP BY 
+      p.id, s.subject, g.grade_level,
+      u.id, a.id, l.like_count, c.comment_count, ul.user_id, sf.user_id
+      ORDER BY p.created_at DESC
+    `;
+
+    const forumRes = await pool.query(forumQuery, params);
+
+    const forums = forumRes.rows.map(f => ({
+      ...f,
+      data_type: "forum" // ✅ identify type
+    }));
+
+    // =======================
+    // 2) Fetch Polls
+    // =======================
+    const now = new Date();
+    const pollRes = await pool.query(
+      `SELECT * FROM polls 
+       WHERE expires_at IS NULL OR expires_at > $1
+       ORDER BY created_at DESC`,
+      [now]
+    );
+
+    const polls = [];
+    for (let poll of pollRes.rows) {
+      const optionsRes = await pool.query(
+        `SELECT 
+           po.id, 
+           po.option_text,
+           COALESCE(COUNT(pv.id), 0) AS vote_count,
+           COALESCE(
+             json_agg(
+               json_build_object('id', u.id, 'name', u.name)
+             ) FILTER (WHERE u.id IS NOT NULL),
+             '[]'
+           ) AS voters
+         FROM poll_options po
+         LEFT JOIN poll_votes pv ON po.id = pv.option_id
+         LEFT JOIN users u ON pv.user_id = u.id
+         WHERE po.poll_id = $1
+         GROUP BY po.id, po.option_text
+         ORDER BY po.id`,
+        [poll.id]
+      );
+
+      polls.push({
+        ...poll,
+        options: optionsRes.rows.map((o) => ({
+          ...o,
+          vote_count: Number(o.vote_count),
+          voters: o.voters,
+        })),
+        data_type: "poll"
+      });
+    }
+
+    // =======================
+    // 3) Merge + Sort
+    // =======================
+    const feed = [...forums, ...polls].sort(
+      (a, b) => new Date(b.created_at) - new Date(a.created_at)
+    );
+
+    return res.json({ ok: true, data: feed });
+  } catch (err) {
+    console.error("getForumAndPollFeed error:", err);
     return res.status(500).json({ ok: false, message: "Server error" });
   }
 };
