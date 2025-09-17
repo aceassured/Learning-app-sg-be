@@ -604,7 +604,7 @@ export const startRevisionQuiz = async (req, res) => {
         WHERE topic_id = ANY($1::int[])
           AND id = ANY($2::int[])
         ORDER BY random()
-        LIMIT 10
+        LIMIT 30
         `,
         [topics, answeredIds]
       );
@@ -625,7 +625,7 @@ export const startRevisionQuiz = async (req, res) => {
         WHERE LOWER(subject) = ANY($1)
           AND id = ANY($2::int[])
         ORDER BY random()
-        LIMIT 10
+        LIMIT 30
         `,
         [subjectNames, answeredIds]
       );
@@ -637,7 +637,7 @@ export const startRevisionQuiz = async (req, res) => {
         FROM questions 
         WHERE id = ANY($1::int[])
         ORDER BY random()
-        LIMIT 10
+        LIMIT 30
         `,
         [answeredIds]
       );
