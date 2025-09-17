@@ -585,6 +585,7 @@ export const getForumAndPollFeed = async (req, res) => {
         g.grade_level AS grade_level,       -- ✅ get grade name
         p.type_of_upload,
         p.created_at,
+        p.forum_title,
 
         COALESCE(
           JSON_AGG(
