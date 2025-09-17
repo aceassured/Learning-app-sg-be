@@ -15,7 +15,8 @@ import { adminEdit, adminRegister, adminResetPassword, commonLogin, confirmPassw
   socialLogin,
   checkSocialUser,
   socialRegister,
-  linkSocialAccount} from '../controller/usercontroller.js';
+  linkSocialAccount,
+  adminCommonlogin} from '../controller/usercontroller.js';
 import { deleteForum, deleteUser } from '../controller/forumcontroller.js';
 import { admingetTopics, getTopics } from '../controller/quizcontroller.js';
 
@@ -74,6 +75,7 @@ router.post('/uservotepoll', auth, userVoteforpoll);
 // production....
 
 router.post("/commonlogin", Commonlogin)
+router.post("/admincommonlogin", adminCommonlogin)
 router.post("/userregister", userregisterApi)
 router.post("/userjustregister", userJustregisterApi)
 router.post("/userverifyotp", userverifyOtp)

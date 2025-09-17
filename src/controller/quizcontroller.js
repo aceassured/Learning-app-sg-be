@@ -492,3 +492,172 @@ export const admingetTopics = async (req, res) => {
 };
 
 
+// start mini quiz.........
+
+export const startMiniQuiz = async (req, res) => {
+  try {
+    const userId = req.userId;
+    const { subjects, topics } = req.body; // subjects = [id...], topics = [id...]
+
+    // ✅ Already answered question_ids
+    const answeredRes = await pool.query(
+      "SELECT question_id FROM user_answered_questions WHERE user_id=$1",
+      [userId]
+    );
+    const answeredIds = answeredRes.rows.map((r) => r.question_id);
+
+    let qRes;
+
+    if (topics && topics.length > 0) {
+      qRes = await pool.query(
+        `
+        SELECT id, subject, topic_id, question_text, options, question_url, 
+               answer_file_url, answer_explanation
+        FROM questions 
+        WHERE topic_id = ANY($1::int[])
+          AND NOT (id = ANY($2::int[]))
+        ORDER BY random()
+        LIMIT 5
+        `,
+        [topics, answeredIds]
+      );
+    } else if (subjects && subjects.length > 0) {
+      const subjectNameRes = await pool.query(
+        "SELECT subject FROM subjects WHERE id = ANY($1)",
+        [subjects]
+      );
+      const subjectNames = subjectNameRes.rows.map((row) =>
+        row.subject.toLowerCase()
+      );
+
+      qRes = await pool.query(
+        `
+        SELECT id, subject, topic_id, question_text, options, question_url, 
+               answer_file_url, answer_explanation
+        FROM questions 
+        WHERE LOWER(subject) = ANY($1)
+          AND NOT (id = ANY($2::int[]))
+        ORDER BY random()
+        LIMIT 5
+        `,
+        [subjectNames, answeredIds]
+      );
+    } else {
+      qRes = await pool.query(
+        `
+        SELECT id, subject, topic_id, question_text, options, question_url, 
+               answer_file_url, answer_explanation
+        FROM questions 
+        WHERE NOT (id = ANY($1::int[]))
+        ORDER BY random()
+        LIMIT 5
+        `,
+        [answeredIds]
+      );
+    }
+
+    const questions = qRes.rows;
+
+    const sessionRes = await pool.query(
+      `
+      INSERT INTO user_quiz_sessions 
+      (user_id, started_at, allowed_duration_seconds, total_questions, type)
+      VALUES ($1, now(), 150, $2, 'mini')
+      RETURNING *
+      `,
+      [userId, questions.length]
+    );
+
+    return res.json({ ok: true, session: sessionRes.rows[0], questions });
+  } catch (err) {
+    console.error("startMiniQuiz error:", err);
+    return res.status(500).json({ ok: false, message: "Server error" });
+  }
+};
+
+// revision quiz..........
+
+export const startRevisionQuiz = async (req, res) => {
+  try {
+    const userId = req.userId;
+    const { subjects, topics } = req.body;
+
+    // ✅ Already answered question_ids
+    const answeredRes = await pool.query(
+      "SELECT question_id FROM user_answered_questions WHERE user_id=$1",
+      [userId]
+    );
+    const answeredIds = answeredRes.rows.map((r) => r.question_id);
+
+    if (answeredIds.length === 0) {
+      return res.json({ ok: true, session: null, questions: [] });
+    }
+
+    let qRes;
+
+    if (topics && topics.length > 0) {
+      qRes = await pool.query(
+        `
+        SELECT id, subject, topic_id, question_text, options, question_url, 
+               answer_file_url, answer_explanation
+        FROM questions 
+        WHERE topic_id = ANY($1::int[])
+          AND id = ANY($2::int[])
+        ORDER BY random()
+        LIMIT 10
+        `,
+        [topics, answeredIds]
+      );
+    } else if (subjects && subjects.length > 0) {
+      const subjectNameRes = await pool.query(
+        "SELECT subject FROM subjects WHERE id = ANY($1)",
+        [subjects]
+      );
+      const subjectNames = subjectNameRes.rows.map((row) =>
+        row.subject.toLowerCase()
+      );
+
+      qRes = await pool.query(
+        `
+        SELECT id, subject, topic_id, question_text, options, question_url, 
+               answer_file_url, answer_explanation
+        FROM questions 
+        WHERE LOWER(subject) = ANY($1)
+          AND id = ANY($2::int[])
+        ORDER BY random()
+        LIMIT 10
+        `,
+        [subjectNames, answeredIds]
+      );
+    } else {
+      qRes = await pool.query(
+        `
+        SELECT id, subject, topic_id, question_text, options, question_url, 
+               answer_file_url, answer_explanation
+        FROM questions 
+        WHERE id = ANY($1::int[])
+        ORDER BY random()
+        LIMIT 10
+        `,
+        [answeredIds]
+      );
+    }
+
+    const questions = qRes.rows;
+
+    const sessionRes = await pool.query(
+      `
+      INSERT INTO user_quiz_sessions 
+      (user_id, started_at, allowed_duration_seconds, total_questions, type)
+      VALUES ($1, now(), 300, $2, 'revision')
+      RETURNING *
+      `,
+      [userId, questions.length]
+    );
+
+    return res.json({ ok: true, session: sessionRes.rows[0], questions });
+  } catch (err) {
+    console.error("startRevisionQuiz error:", err);
+    return res.status(500).json({ ok: false, message: "Server error" });
+  }
+};

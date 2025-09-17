@@ -2248,7 +2248,7 @@ export const userVoteforpoll = async (req, res) => {
 export const checkSocialUser = async (req, res) => {
   try {
     const { email, social_id, provider } = req.body;
-    
+
     if (!email || !social_id || !provider) {
       return res.status(400).json({
         status: false,
@@ -2279,12 +2279,12 @@ export const checkSocialUser = async (req, res) => {
       exists: socialUserRes.rows.length > 0, // Exact social match
       emailExists: emailUserRes.rows.length > 0, // Email exists (any method)
       hasOtherSocial: otherSocialRes.rows.length > 0, // Has other social accounts
-      user: socialUserRes.rows.length > 0 ? socialUserRes.rows[0] : 
-            (emailUserRes.rows.length > 0 ? emailUserRes.rows[0] : null),
+      user: socialUserRes.rows.length > 0 ? socialUserRes.rows[0] :
+        (emailUserRes.rows.length > 0 ? emailUserRes.rows[0] : null),
       existingUser: emailUserRes.rows.length > 0 ? emailUserRes.rows[0] : null,
-      message: socialUserRes.rows.length > 0 ? "Social user exists" : 
-               emailUserRes.rows.length > 0 ? "Email exists with different login method" : 
-               "User not found"
+      message: socialUserRes.rows.length > 0 ? "Social user exists" :
+        emailUserRes.rows.length > 0 ? "Email exists with different login method" :
+          "User not found"
     });
   } catch (error) {
     console.error('Check social user error:', error);
@@ -2301,7 +2301,7 @@ export const checkSocialUser = async (req, res) => {
 export const linkSocialAccount = async (req, res) => {
   try {
     const { email, social_id, provider, name, photoURL } = req.body;
-    
+
     if (!email || !social_id || !provider) {
       return res.status(400).json({
         status: false,
@@ -2380,7 +2380,7 @@ export const linkSocialAccount = async (req, res) => {
 export const socialLogin = async (req, res) => {
   try {
     const { email, social_id, provider } = req.body;
-    
+
     if (!email || !social_id || !provider) {
       return res.status(400).json({
         status: false,
@@ -2406,7 +2406,24 @@ export const socialLogin = async (req, res) => {
       });
     }
 
+
     const user = userRes.rows[0];
+
+    let selectedSubjectsNames = [];
+    if (user.selected_subjects && user.selected_subjects.length > 0) {
+      const { rows: subjectRows } = await pool.query(
+        `SELECT id, icon, subject 
+         FROM subjects 
+         WHERE id = ANY($1::int[])`,
+        [user.selected_subjects.map(Number)]
+      );
+      selectedSubjectsNames = subjectRows.map((r) => ({
+        id: r.id,
+        subject: r.subject,
+        icon: r.icon,
+      }));
+    }
+
 
     // If social_id doesn't match, update it (this handles the case where user was linked)
     if (user.social_id !== social_id) {
@@ -2419,11 +2436,14 @@ export const socialLogin = async (req, res) => {
 
     // Generate JWT token
     const token = jwt.sign({ userId: user.id }, JWT_SECRET, { expiresIn: "7d" });
-
+    const {selected_subjects:_, ...userData } = user
     return res.json({
       status: true,
       message: "Social login successful",
-      user,
+      data:{
+      ...userData,
+      selected_subjects:selectedSubjectsNames,
+      },
       token,
       redirect: "home"
     });
@@ -2442,9 +2462,9 @@ export const socialRegister = async (req, res) => {
     const { email, name, provider, social_id, profile_picture_url } = req.body;
 
     if (!email || !name || !provider || !social_id) {
-      return res.status(400).json({ 
-        status: false, 
-        message: "Email, name, provider, and social_id are required" 
+      return res.status(400).json({
+        status: false,
+        message: "Email, name, provider, and social_id are required"
       });
     }
 
@@ -2455,9 +2475,9 @@ export const socialRegister = async (req, res) => {
     );
 
     if (existingSocialUser.rows.length > 0) {
-      return res.status(400).json({ 
-        status: false, 
-        message: "User already registered with this social account" 
+      return res.status(400).json({
+        status: false,
+        message: "User already registered with this social account"
       });
     }
 
@@ -2468,9 +2488,9 @@ export const socialRegister = async (req, res) => {
     );
 
     if (existingEmailUser.rows.length > 0) {
-      return res.status(400).json({ 
-        status: false, 
-        message: "Email already registered. Please use regular login or different social account." 
+      return res.status(400).json({
+        status: false,
+        message: "Email already registered. Please use regular login or different social account."
       });
     }
 
@@ -2561,6 +2581,66 @@ export const updateGradesubject = async (req, res) => {
     });
   } catch (err) {
     console.error(err);
+    res.status(500).json({ status: false, message: "Server error" });
+  }
+};
+
+
+// admin login.......
+
+export const adminCommonlogin = async (req, res) => {
+  try {
+    const { email, password } = req.body;
+
+    if (!email || !password) {
+      return res.status(400).json({ status: false, message: "Email and password are required" });
+    }
+
+    // const existingUser = await pool.query(
+    //   "SELECT id, name, email, password, selected_subjects FROM users WHERE email = $1",
+    //   [email]
+    // );
+
+    // const exisitingUserRuesult = existingUser.rows[0]
+    // if (!exisitingUserRuesult) {
+    //   return res.status(404).json({
+    //     status: false,
+    //     message: "User not found. Please sign up to continue.",
+    //   });
+
+    // }
+    // ✅ Fetch user by email
+    const { rows } = await pool.query(
+      "SELECT id, name, email, password FROM admins WHERE email = $1",
+      [email]
+    );
+
+    const user = rows[0];
+    if (!user) {
+      return res.status(401).json({ status: false, message: "Admin not found. Please sign up to continue.", });
+    }
+
+    // ✅ Compare password with hashed password
+    const isMatch = await bcrypt.compare(password, user.password);
+    if (!isMatch) {
+      return res.status(401).json({ status: false, message: "Invalid credentials" });
+    }
+
+    // ✅ Generate JWT token
+    const token = jwt.sign({ userId: user.id }, JWT_SECRET, { expiresIn: "7d" });
+
+    // ✅ Return response without password
+    const { password: _, ...userData } = user;
+
+    return res.json({
+      status: true,
+      data: {
+        ...userData
+      },
+      token
+    });
+  } catch (err) {
+    console.error("Login error:", err);
     res.status(500).json({ status: false, message: "Server error" });
   }
 };
