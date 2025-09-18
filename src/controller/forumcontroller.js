@@ -572,7 +572,7 @@ export const saveForum = async (req, res) => {
 export const getForumAndPollFeed = async (req, res) => {
   try {
     const userId = req.userId;
-    const { subject, type_of_upload, grade } = req.query;
+    const { subject, search, sortBy } = req.query;
 
     // =======================
     // 1) Fetch Forums
@@ -581,11 +581,11 @@ export const getForumAndPollFeed = async (req, res) => {
       SELECT 
         p.id,
         p.content,
-        s.subject AS subject_tag,     -- ✅ get subject name
-        g.grade_level AS grade_level,       -- ✅ get grade name
+        s.subject AS subject_tag,     
+        g.grade_level AS grade_level,       
         p.type_of_upload,
         p.created_at,
-        p.forum_title,
+        p.forum_title AS forum_title,
 
         COALESCE(
           JSON_AGG(
@@ -626,9 +626,9 @@ export const getForumAndPollFeed = async (req, res) => {
         COALESCE(l.like_count, 0) AS like_count,
         COALESCE(c.comment_count, 0) AS comment_count,
         CASE WHEN ul.user_id IS NOT NULL THEN true ELSE false END AS is_liked_by_user,
+        CASE WHEN sf.user_id IS NOT NULL THEN true ELSE false END AS is_forum_saved,
 
-        -- ✅ is forum saved by this user
-        CASE WHEN sf.user_id IS NOT NULL THEN true ELSE false END AS is_forum_saved
+        COALESCE(v.view_count, 0) AS view_count
 
       FROM forum_posts p
       LEFT JOIN users u ON u.id = p.user_id
@@ -655,9 +655,14 @@ export const getForumAndPollFeed = async (req, res) => {
       LEFT JOIN subjects s ON s.id = p.subject_tag
       LEFT JOIN grades g ON g.id = p.grade_level
 
-      -- ✅ join saved forums
       LEFT JOIN user_saved_forums sf 
         ON sf.forum_post_id = p.id AND sf.user_id = $1
+
+      LEFT JOIN (
+        SELECT forum_post_id, COUNT(*) AS view_count
+        FROM forum_views
+        GROUP BY forum_post_id
+      ) v ON v.forum_post_id = p.id
     `;
 
     const conditions = [];
@@ -667,13 +672,9 @@ export const getForumAndPollFeed = async (req, res) => {
       params.push(subject);
       conditions.push(`p.subject_tag = $${params.length}`);
     }
-    if (type_of_upload) {
-      params.push(type_of_upload);
-      conditions.push(`p.type_of_upload = $${params.length}`);
-    }
-    if (grade) {
-      params.push(grade);
-      conditions.push(`p.grade_level = $${params.length}`);
+    if (search) {
+      params.push(`%${search}%`);
+      conditions.push(`p.forum_title ILIKE $${params.length}`);
     }
 
     if (conditions.length > 0) {
@@ -682,71 +683,145 @@ export const getForumAndPollFeed = async (req, res) => {
 
     forumQuery += ` GROUP BY 
       p.id, s.subject, g.grade_level,
-      u.id, a.id, l.like_count, c.comment_count, ul.user_id, sf.user_id
-      ORDER BY p.created_at DESC
+      u.id, a.id, l.like_count, c.comment_count, ul.user_id, sf.user_id, v.view_count
     `;
 
     const forumRes = await pool.query(forumQuery, params);
-
     const forums = forumRes.rows.map(f => ({
       ...f,
-      data_type: "forum" // ✅ identify type
+      data_type: "forum"
     }));
 
     // =======================
-    // 2) Fetch Polls
+    // 2) Fetch Polls (single query with json_agg)
     // =======================
-    const now = new Date();
-    const pollRes = await pool.query(
-      `SELECT * FROM polls 
-       WHERE expires_at IS NULL OR expires_at > $1
-       ORDER BY created_at DESC`,
-      [now]
-    );
+    const pollQuery = `
+      SELECT 
+        p.id,
+        p.question AS poll_title,
+        p.created_at,
+        p.expires_at,
 
-    const polls = [];
-    for (let poll of pollRes.rows) {
-      const optionsRes = await pool.query(
-        `SELECT 
-           po.id, 
-           po.option_text,
-           COALESCE(COUNT(pv.id), 0) AS vote_count,
-           COALESCE(
-             json_agg(
-               json_build_object('id', u.id, 'name', u.name)
-             ) FILTER (WHERE u.id IS NOT NULL),
-             '[]'
-           ) AS voters
-         FROM poll_options po
-         LEFT JOIN poll_votes pv ON po.id = pv.option_id
-         LEFT JOIN users u ON pv.user_id = u.id
-         WHERE po.poll_id = $1
-         GROUP BY po.id, po.option_text
-         ORDER BY po.id`,
-        [poll.id]
-      );
+        COALESCE(v.view_count, 0) AS view_count,
 
-      polls.push({
-        ...poll,
-        options: optionsRes.rows.map((o) => ({
-          ...o,
-          vote_count: Number(o.vote_count),
-          voters: o.voters,
-        })),
-        data_type: "poll"
-      });
-    }
+        COALESCE(
+          JSON_AGG(
+            DISTINCT JSONB_BUILD_OBJECT(
+              'id', po.id,
+              'option_text', po.option_text,
+              'vote_count', COALESCE(pvc.vote_count, 0),
+              'voters', COALESCE(pvc.voters, '[]')
+            )
+          ) FILTER (WHERE po.id IS NOT NULL),
+          '[]'
+        ) AS options
+
+      FROM polls p
+      LEFT JOIN (
+        SELECT poll_id, COUNT(*) AS view_count
+        FROM poll_views
+        GROUP BY poll_id
+      ) v ON v.poll_id = p.id
+
+      LEFT JOIN poll_options po ON po.poll_id = p.id
+      LEFT JOIN (
+        SELECT 
+          pv.option_id,
+          COUNT(pv.id) AS vote_count,
+          json_agg(json_build_object('id', u.id, 'name', u.name)) AS voters
+        FROM poll_votes pv
+        LEFT JOIN users u ON u.id = pv.user_id
+        GROUP BY pv.option_id
+      ) pvc ON pvc.option_id = po.id
+
+      WHERE p.expires_at IS NULL OR p.expires_at > $1
+      GROUP BY p.id, v.view_count
+    `;
+
+    const pollRes = await pool.query(pollQuery, [new Date()]);
+    const polls = pollRes.rows.map(p => ({
+      ...p,
+      data_type: "poll"
+    }));
 
     // =======================
     // 3) Merge + Sort
     // =======================
-    const feed = [...forums, ...polls].sort(
-      (a, b) => new Date(b.created_at) - new Date(a.created_at)
-    );
+    let feed = [...forums, ...polls];
+
+    if (sortBy === "most_recent") {
+      feed.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+    } else if (sortBy === "most_old") {
+      feed.sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+    } else if (sortBy === "most_view") {
+      feed.sort((a, b) => Number(b.view_count) - Number(a.view_count));
+    } else {
+      feed.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+    }
 
     return res.json({ ok: true, data: feed });
   } catch (err) {
     console.error("getForumAndPollFeed error:", err);
+    return res.status(500).json({ ok: false, message: "Server error" });
+  }
+};
+
+
+
+
+// add views count.......
+
+export const addView = async (req, res) => {
+  const userId = req.userId;
+  const { type, id } = req.body; // type = "forum" | "poll"
+
+  try {
+    if (!userId) {
+      return res.status(401).json({ ok: false, message: "Unauthorized" });
+    }
+    if (!["forum", "poll"].includes(type)) {
+      return res.status(400).json({ ok: false, message: "Invalid type" });
+    }
+    if (!id) {
+      return res.status(400).json({ ok: false, message: "ID is required" });
+    }
+
+    let exists;
+    if (type === "forum") {
+      exists = await pool.query(
+        `SELECT id FROM forum_posts WHERE id = $1 LIMIT 1`,
+        [id]
+      );
+      if (exists.rowCount === 0) {
+        return res.status(404).json({ ok: false, message: "Forum not found" });
+      }
+
+      await pool.query(
+        `INSERT INTO forum_views (forum_post_id, user_id)
+         VALUES ($1, $2)
+         ON CONFLICT (forum_post_id, user_id) DO NOTHING`,
+        [id, userId]
+      );
+    } else if (type === "poll") {
+      exists = await pool.query(
+        `SELECT id FROM polls WHERE id = $1 LIMIT 1`,
+        [id]
+      );
+      if (exists.rowCount === 0) {
+        return res.status(404).json({ ok: false, message: "Poll not found" });
+      }
+
+      await pool.query(
+        `INSERT INTO poll_views (poll_id, user_id)
+         VALUES ($1, $2)
+         ON CONFLICT (poll_id, user_id) DO NOTHING`,
+        [id, userId]
+      );
+    }
+
+    return res.json({ ok: true, message: "View added" });
+  } catch (err) {
+    console.error("addView error:", err);
     return res.status(500).json({ ok: false, message: "Server error" });
   }
 };
