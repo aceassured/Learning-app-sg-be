@@ -72,7 +72,7 @@ export const Commonlogin = async (req, res) => {
     // }
     // ✅ Fetch user by email
     const { rows } = await pool.query(
-      "SELECT id, name, email, password, selected_subjects FROM users WHERE email = $1",
+      "SELECT * FROM users WHERE email = $1",
       [email]
     );
 

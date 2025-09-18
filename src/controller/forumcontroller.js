@@ -869,3 +869,28 @@ export const getNotesfromTopics = async (req, res) => {
     });
   }
 };
+
+
+// notes access stored.......
+
+export const trackNoteAccess = async (req, res) => {
+  try {
+    const { forum_file_id, action } = req.body;
+    const user_id = req.userId;
+
+    if (!forum_file_id || !['view', 'share'].includes(action)) {
+      return res.status(400).json({ message: "Invalid request" });
+    }
+
+    await pool.query(
+      `INSERT INTO notes_access (user_id, forum_file_id, action) VALUES ($1, $2, $3)`,
+      [user_id, forum_file_id, action]
+    );
+
+    return res.status(200).json({ success: true, message: "Note access recorded" });
+
+  } catch (error) {
+    console.error("Error tracking note access:", error);
+    return res.status(500).json({ success: false, message: "Internal server error" });
+  }
+};
