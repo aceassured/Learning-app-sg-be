@@ -695,16 +695,17 @@ export const getForumAndPollFeed = async (req, res) => {
     // =======================
     // 2) Fetch Polls (single query with json_agg)
     // =======================
-    const pollQuery = `
+    let pollQuery = `
 SELECT 
   p.id,
   p.question AS poll_title,
   p.created_at,
   p.expires_at,
+  p.subject_id,
+  p.grade_level,
 
   COALESCE(v.view_count, 0) AS view_count,
 
-  -- Check if the logged-in user already voted
   CASE WHEN uv.user_id IS NOT NULL THEN true ELSE false END AS has_voted,
   uv.option_id AS user_selected_option,
 
@@ -738,19 +739,27 @@ LEFT JOIN (
   GROUP BY pv.option_id
 ) pvc ON pvc.option_id = po.id
 
--- 👇 Add user-specific vote check
 LEFT JOIN (
   SELECT pv.poll_id, pv.option_id, pv.user_id
   FROM poll_votes pv
   WHERE pv.user_id = $2
 ) uv ON uv.poll_id = p.id
 
-WHERE p.expires_at IS NULL OR p.expires_at > $1
+WHERE (p.expires_at IS NULL OR p.expires_at > $1)
+`;
+
+    // add filter for subject
+    const pollParams = [new Date(), userId];
+    if (subject) {
+      pollParams.push(subject);
+      pollQuery += ` AND p.subject_id = $${pollParams.length}`;
+    }
+
+    pollQuery += `
 GROUP BY p.id, v.view_count, uv.user_id, uv.option_id
+`;
 
-    `;
-
-    const pollRes = await pool.query(pollQuery, [new Date(), userId]);
+    const pollRes = await pool.query(pollQuery, pollParams);
     const polls = pollRes.rows.map(p => ({
       ...p,
       data_type: "poll",

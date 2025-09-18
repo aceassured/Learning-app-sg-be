@@ -6,17 +6,17 @@ import pool from "../../database.js";
 
 export const admincreatePoll = async (req, res) => {
   try {
-    const { question, allow_multiple = false, expires_at = null, options } = req.body;
+    const { question, allow_multiple = false, expires_at = null, options, subject_id, grade_level } = req.body;
     const adminId = req.userId;; // assuming req.user is set after auth & role check
 
-    if (!question || !options || options.length < 2) {
+    if (!question || !options || options.length < 2 || !subject_id || !grade_level ) {
       return res.status(400).json({ message: "Question and at least 2 options required" });
     }
 
     // Insert poll
     const pollResult = await pool.query(
-      `INSERT INTO polls (question, allow_multiple, expires_at) VALUES ($1,$2,$3) RETURNING *`,
-      [question, allow_multiple, expires_at]
+      `INSERT INTO polls (question, allow_multiple, expires_at, subject_id, grade_level ) VALUES ($1,$2,$3,$4,$5) RETURNING *`,
+      [question, allow_multiple, expires_at, subject_id, grade_level ]
     );
 
     const poll = pollResult.rows[0];
