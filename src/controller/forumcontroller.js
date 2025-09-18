@@ -825,3 +825,47 @@ export const addView = async (req, res) => {
     return res.status(500).json({ ok: false, message: "Server error" });
   }
 };
+
+// get notes files.............
+
+export const getNotesfromTopics = async (req, res) => {
+  try {
+    const { topic_id } = req.body;
+
+    if (!topic_id) {
+      return res.status(400).json({ message: "topic_id is required" });
+    }
+
+    // ✅ Check if topic exists
+    const topicCheckQuery = `SELECT id FROM topics WHERE id = $1 LIMIT 1`;
+    const topicCheck = await pool.query(topicCheckQuery, [topic_id]);
+
+    if (topicCheck.rowCount === 0) {
+      return res.status(404).json({ message: "Topic not found" });
+    }
+
+    // ✅ Fetch notes for the topic
+    const notesQuery = `
+      SELECT ff.url
+      FROM forum_posts fp
+      JOIN forum_files ff ON ff.post_id = fp.id
+      WHERE fp.topic_id = $1
+        AND fp.type_of_upload = 'Notes'
+        AND ff.url IS NOT NULL
+    `;
+
+    const { rows } = await pool.query(notesQuery, [topic_id]);
+
+    return res.status(200).json({
+      success: true,
+      data: rows, // array of objects with { url }
+    });
+
+  } catch (error) {
+    console.error("Error fetching notes:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error",
+    });
+  }
+};

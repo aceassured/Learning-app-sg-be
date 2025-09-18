@@ -423,27 +423,17 @@ export const reviewSession = async (req, res) => {
 
 export const getTopics = async (req, res) => {
   try {
-    let { subject_id } = req.body;
-    const userId = req.userId;
+    const { subject_id, grade_id } = req.body;
 
-    // ✅ Validate subject_id array
-    if (!Array.isArray(subject_id) || subject_id.length === 0) {
-      return res.status(400).json({ message: "subject_id must be a non-empty array" });
+    // Validate input
+    if (!grade_id || !subject_id) {
+      return res.status(400).json({ message: "Both grade_id and subject_id are required" });
     }
 
-    subject_id = subject_id.map((id) => parseInt(id, 10)).filter(Boolean);
+    const gradeIdInt = parseInt(grade_id, 10);
+    const subjectIdInt = parseInt(subject_id, 10);
 
-    // ✅ Get user's grade_id
-    const userQuery = `SELECT grade_id FROM users WHERE id = $1 LIMIT 1`;
-    const userResult = await pool.query(userQuery, [userId]);
-
-    if (userResult.rowCount === 0) {
-      return res.status(404).json({ message: "User not found" });
-    }
-
-    const grade_id = userResult.rows[0].grade_id;
-
-    // ✅ Fetch topics based on user's grade_id and subject_id[]
+    // Fetch topics for given grade_id and subject_id
     const query = `
       SELECT 
         t.id, 
@@ -456,15 +446,16 @@ export const getTopics = async (req, res) => {
       JOIN subjects s ON t.subject_id = s.id
       JOIN grades g ON t.grade_id = g.id
       WHERE t.grade_id = $1
-        AND t.subject_id = ANY($2::int[])
+        AND t.subject_id = $2
       ORDER BY s.subject, t.topic;
     `;
 
-    const { rows } = await pool.query(query, [grade_id, subject_id]);
+    const { rows } = await pool.query(query, [gradeIdInt, subjectIdInt]);
 
     return res.status(200).json({
       success: true,
-      grade_id,
+      grade_id: gradeIdInt,
+      subject_id: subjectIdInt,
       data: rows,
     });
 
@@ -476,6 +467,7 @@ export const getTopics = async (req, res) => {
     });
   }
 };
+
 
 
 
@@ -702,3 +694,4 @@ export const startRevisionQuiz = async (req, res) => {
     return res.status(500).json({ ok: false, message: "Server error" });
   }
 };
+
