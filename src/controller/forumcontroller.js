@@ -869,7 +869,7 @@ export const getNotesfromTopics = async (req, res) => {
 
     // ✅ Fetch notes for the topic
     const notesQuery = `
-      SELECT ff.url
+      SELECT ff.*
       FROM forum_posts fp
       JOIN forum_files ff ON ff.post_id = fp.id
       WHERE fp.topic_id = $1
