@@ -16,7 +16,8 @@ import { adminEdit, adminRegister, adminResetPassword, commonLogin, confirmPassw
   checkSocialUser,
   socialRegister,
   linkSocialAccount,
-  adminCommonlogin} from '../controller/usercontroller.js';
+  adminCommonlogin,
+  getAllSubjectnew} from '../controller/usercontroller.js';
 import { deleteForum, deleteUser } from '../controller/forumcontroller.js';
 import { admingetTopics, getTopics } from '../controller/quizcontroller.js';
 
@@ -65,6 +66,7 @@ router.put("/changeUserRole",changeUserRole)
 router.delete("/deleteAdminUser",deleteAdminUser)
 router.get("/getAllUsers",getAllUsers);
 router.get("/getallsubject",getAllSubject);
+router.post("/subject",getAllSubjectnew);
 router.get("/getallgrades",getAllGrade);
 router.post('/gettopics',auth,  getTopics);
 router.post('/admingettopics', admingetTopics);

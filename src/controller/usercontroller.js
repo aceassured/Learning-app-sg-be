@@ -1467,13 +1467,18 @@ export const getAllUsers = async (req, res) => {
 };
 
 
-export const getAllSubject = async (req, res) => {
+export const getAllSubjectnew = async (req, res) => {
+  const { grade_id } = req.body;
+
   const client = await pool.connect();
   try {
     const { rows: allSubjects } = await client.query(
-      `SELECT *
-       FROM subjects 
-       ORDER BY subject ASC`
+      `SELECT s.*, g.grade_level
+       FROM subjects s
+       JOIN grades g ON s.grade_id = g.id
+       WHERE s.grade_id = $1
+       ORDER BY s.subject ASC`,
+      [grade_id]
     );
 
     return res.status(200).json({
@@ -1491,6 +1496,28 @@ export const getAllSubject = async (req, res) => {
   }
 };
 
+export const getAllSubject = async (req, res) => {
+  const client = await pool.connect();
+
+  try {
+    const { rows: allSubjects } = await client.query(
+      `SELECT * FROM subjects ORDER BY subject ASC`
+    );
+
+    return res.status(200).json({
+      success: true,
+      data: allSubjects,
+    });
+  } catch (error) {
+    console.error("Get subjects error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error",
+    });
+  } finally {
+    client.release();
+  }
+};
 
 export const getAllGrade = async (req, res) => {
   const client = await pool.connect();
@@ -2436,13 +2463,13 @@ export const socialLogin = async (req, res) => {
 
     // Generate JWT token
     const token = jwt.sign({ userId: user.id }, JWT_SECRET, { expiresIn: "7d" });
-    const {selected_subjects:_, ...userData } = user
+    const { selected_subjects: _, ...userData } = user
     return res.json({
       status: true,
       message: "Social login successful",
-      data:{
-      ...userData,
-      selected_subjects:selectedSubjectsNames,
+      data: {
+        ...userData,
+        selected_subjects: selectedSubjectsNames,
       },
       token,
       redirect: "home"
@@ -2644,3 +2671,294 @@ export const adminCommonlogin = async (req, res) => {
     res.status(500).json({ status: false, message: "Server error" });
   }
 };
+
+export const seedTopics = async (req, res) => {
+  const client = await pool.connect();
+  try {
+    // fetch all subjects with grade info
+    const { rows: subjects } = await client.query(`
+      SELECT s.id AS subject_id, s.subject, g.id AS grade_id, g.grade_level
+      FROM subjects s
+      JOIN grades g ON g.id = s.grade_id
+      ORDER BY g.id, s.id
+    `);
+
+    // predefined topics per subject (grade-aware)
+    const topicsMap = {
+      Mathematics: [
+        "Numbers and Counting",
+        "Basic Addition",
+        "Subtraction Practice",
+        "Shapes Recognition",
+        "Simple Word Problems",
+      ],
+      "Mathematics Basics": [
+        "Counting Objects",
+        "Addition with Pictures",
+        "Subtraction with Fingers",
+        "Recognizing Shapes",
+        "Comparing Numbers",
+      ],
+      "Simple Mathematics": [
+        "Multiplication Tables",
+        "Division Basics",
+        "Fractions Introduction",
+        "Word Problems",
+        "Geometry Shapes",
+      ],
+      "Advanced Mathematics": [
+        "Differentiation",
+        "Integration Basics",
+        "Probability",
+        "Statistics Graphs",
+        "Complex Numbers",
+      ],
+      English: [
+        "Alphabet Practice",
+        "Phonics Sounds",
+        "Basic Vocabulary",
+        "Simple Sentences",
+        "Reading Short Stories",
+      ],
+      "English Phonics": [
+        "Vowel Sounds",
+        "Consonant Blends",
+        "Rhyming Words",
+        "Sight Words",
+        "Short Sentences Reading",
+      ],
+      "Reading Skills": [
+        "Comprehension",
+        "Story Summarizing",
+        "Character Analysis",
+        "Reading Aloud",
+        "Creative Writing",
+      ],
+      Science: [
+        "Living and Nonliving",
+        "Our Senses",
+        "Plants Around Us",
+        "Animals Around Us",
+        "Weather Changes",
+      ],
+      "Fun Science": [
+        "Magnet Experiments",
+        "Floating and Sinking",
+        "Mixing Colors",
+        "Simple Machines",
+        "Day and Night",
+      ],
+      "Nature Studies": [
+        "Types of Plants",
+        "Forest Animals",
+        "Water Cycle",
+        "Rocks and Soil",
+        "Bird Migration",
+      ],
+      "General Science": [
+        "Matter and States",
+        "Forces and Motion",
+        "Human Body Systems",
+        "Electricity Basics",
+        "Solar System",
+      ],
+      "Physics Fundamentals": [
+        "Newton’s Laws",
+        "Energy Types",
+        "Gravity",
+        "Work and Power",
+        "Sound and Light",
+      ],
+      "Intro to Physics": [
+        "Speed and Velocity",
+        "Heat and Temperature",
+        "Pressure",
+        "Magnetism",
+        "Light Reflection",
+      ],
+      "Chemistry Basics": [
+        "Atoms and Molecules",
+        "Periodic Table",
+        "Chemical Reactions",
+        "Acids and Bases",
+        "Mixtures and Compounds",
+      ],
+      "Intro to Chemistry": [
+        "States of Matter",
+        "Simple Elements",
+        "Periodic Trends",
+        "Solutions",
+        "Lab Safety",
+      ],
+      History: [
+        "Early Civilizations",
+        "Ancient Egypt",
+        "Greek Myths",
+        "Roman Empire",
+        "Medieval Kings",
+      ],
+      "World History": [
+        "Industrial Revolution",
+        "World War I",
+        "World War II",
+        "Cold War",
+        "Globalization",
+      ],
+      "Modern History": [
+        "French Revolution",
+        "American Independence",
+        "World War Events",
+        "Indian Freedom",
+        "Modern Leaders",
+      ],
+      Geography: [
+        "Continents and Oceans",
+        "Maps and Directions",
+        "Mountains",
+        "Rivers",
+        "Deserts",
+      ],
+      "Physical Geography": [
+        "Plate Tectonics",
+        "Volcanoes",
+        "Earthquakes",
+        "Climate Zones",
+        "Natural Disasters",
+      ],
+      "Geography Maps": [
+        "Map Reading",
+        "Latitude and Longitude",
+        "Climate Maps",
+        "Population Maps",
+        "Economic Maps",
+      ],
+      "Environmental Science": [
+        "Pollution",
+        "Renewable Energy",
+        "Ecosystem",
+        "Conservation",
+        "Climate Change",
+      ],
+      // add more subjects if needed
+    };
+
+    const insertValues = [];
+    const now = new Date();
+
+    subjects.forEach((sub) => {
+      const topics = topicsMap[sub.subject] || [
+        "Introduction",
+        "Core Concepts",
+        "Applications",
+        "Case Studies",
+        "Practice Questions",
+      ];
+
+      topics.slice(0, 5).forEach((topic) => {
+        insertValues.push(
+          client.query(
+            `INSERT INTO topics (subject_id, topic, created_at, updated_at, grade_level, grade_id)
+             VALUES ($1, $2, $3, $4, $5, $6)`,
+            [sub.subject_id, topic, now, now, sub.grade_level, sub.grade_id]
+          )
+        );
+      });
+    });
+
+    await Promise.all(insertValues);
+
+    return res.status(201).json({
+      success: true,
+      message: "Topics seeded successfully",
+      count: insertValues.length,
+    });
+  } catch (err) {
+    console.error("Seeding topics error:", err);
+    return res.status(500).json({
+      success: false,
+      message: "Error seeding topics",
+    });
+  } finally {
+    client.release();
+  }
+};
+
+// seedTopics()
+
+
+const generateOptions = () => {
+  return [
+    { id: 1, text: "Option A" },
+    { id: 2, text: "Option B" },
+    { id: 3, text: "Option C" },
+    { id: 4, text: "Option D" },
+  ];
+};
+
+export const seedQuestions = async (req, res) => {
+  const client = await pool.connect();
+
+  try {
+    // ✅ Get all grades
+    const { rows: grades } = await client.query("SELECT id, grade_level FROM grades");
+
+    for (const grade of grades) {
+      // ✅ Get subjects under each grade
+      const { rows: subjects } = await client.query(
+        "SELECT id, subject FROM subjects WHERE grade_id=$1",
+        [grade.id]
+      );
+
+      for (const subject of subjects) {
+        // ✅ Get topics under each subject
+        const { rows: topics } = await client.query(
+          "SELECT id, topic FROM topics WHERE subject_id=$1",
+          [subject.id]
+        );
+
+        for (const topic of topics) {
+          // ✅ Insert 100 questions per topic
+          for (let i = 1; i <= 100; i++) {
+            const options = generateOptions();
+            const correctOption = options[Math.floor(Math.random() * 4)].id;
+
+            await client.query(
+              `INSERT INTO questions 
+                (subject, question_text, options, correct_option_id, created_at, 
+                 difficulty_level, grade_level, question_type, question_url, topic_id, 
+                 answer_explanation, answer_file_url, topics)
+               VALUES ($1,$2,$3,$4,NOW(),$5,$6,$7,$8,$9,$10,$11,$12)`,
+              [
+                subject.subject,                                  // subject name
+                `Sample Question ${i} for ${topic.topic}`,        // question_text
+                JSON.stringify(options),                          // options
+                correctOption,                                    // correct option
+                "Easy",                                           // difficulty_level
+                grade.grade_level,                                // grade level string
+                "MCQ",                                            // question_type
+                null,                                             // question_url
+                topic.id,                                         // topic_id
+                "This is a sample explanation.",                  // explanation
+                null,                                             // answer file url
+                topic.topic                                       // topic name
+              ]
+            );
+          }
+        }
+      }
+    }
+
+    return res.status(201).json({
+      success: true,
+      message: "100 questions inserted for each topic under each subject & grade",
+    });
+    console.log("inserted")
+  } catch (error) {
+    console.error("Seed questions error:", error);
+    return res.status(500).json({ success: false, message: "Internal Server Error" });
+  } finally {
+    client.release();
+  }
+};
+
+// seedQuestions()
