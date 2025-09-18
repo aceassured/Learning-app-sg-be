@@ -696,52 +696,66 @@ export const getForumAndPollFeed = async (req, res) => {
     // 2) Fetch Polls (single query with json_agg)
     // =======================
     const pollQuery = `
-      SELECT 
-        p.id,
-        p.question AS poll_title,
-        p.created_at,
-        p.expires_at,
+SELECT 
+  p.id,
+  p.question AS poll_title,
+  p.created_at,
+  p.expires_at,
 
-        COALESCE(v.view_count, 0) AS view_count,
+  COALESCE(v.view_count, 0) AS view_count,
 
-        COALESCE(
-          JSON_AGG(
-            DISTINCT JSONB_BUILD_OBJECT(
-              'id', po.id,
-              'option_text', po.option_text,
-              'vote_count', COALESCE(pvc.vote_count, 0),
-              'voters', COALESCE(pvc.voters, '[]')
-            )
-          ) FILTER (WHERE po.id IS NOT NULL),
-          '[]'
-        ) AS options
+  -- Check if the logged-in user already voted
+  CASE WHEN uv.user_id IS NOT NULL THEN true ELSE false END AS has_voted,
+  uv.option_id AS user_selected_option,
 
-      FROM polls p
-      LEFT JOIN (
-        SELECT poll_id, COUNT(*) AS view_count
-        FROM poll_views
-        GROUP BY poll_id
-      ) v ON v.poll_id = p.id
+  COALESCE(
+    JSON_AGG(
+      DISTINCT JSONB_BUILD_OBJECT(
+        'id', po.id,
+        'option_text', po.option_text,
+        'vote_count', COALESCE(pvc.vote_count, 0),
+        'voters', COALESCE(pvc.voters, '[]')
+      )
+    ) FILTER (WHERE po.id IS NOT NULL),
+    '[]'
+  ) AS options
 
-      LEFT JOIN poll_options po ON po.poll_id = p.id
-      LEFT JOIN (
-        SELECT 
-          pv.option_id,
-          COUNT(pv.id) AS vote_count,
-          json_agg(json_build_object('id', u.id, 'name', u.name)) AS voters
-        FROM poll_votes pv
-        LEFT JOIN users u ON u.id = pv.user_id
-        GROUP BY pv.option_id
-      ) pvc ON pvc.option_id = po.id
+FROM polls p
+LEFT JOIN (
+  SELECT poll_id, COUNT(*) AS view_count
+  FROM poll_views
+  GROUP BY poll_id
+) v ON v.poll_id = p.id
 
-      WHERE p.expires_at IS NULL OR p.expires_at > $1
-      GROUP BY p.id, v.view_count
+LEFT JOIN poll_options po ON po.poll_id = p.id
+LEFT JOIN (
+  SELECT 
+    pv.option_id,
+    COUNT(pv.id) AS vote_count,
+    json_agg(json_build_object('id', u.id, 'name', u.name)) AS voters
+  FROM poll_votes pv
+  LEFT JOIN users u ON u.id = pv.user_id
+  GROUP BY pv.option_id
+) pvc ON pvc.option_id = po.id
+
+-- 👇 Add user-specific vote check
+LEFT JOIN (
+  SELECT pv.poll_id, pv.option_id, pv.user_id
+  FROM poll_votes pv
+  WHERE pv.user_id = $2
+) uv ON uv.poll_id = p.id
+
+WHERE p.expires_at IS NULL OR p.expires_at > $1
+GROUP BY p.id, v.view_count, uv.user_id, uv.option_id
+
     `;
 
-    const pollRes = await pool.query(pollQuery, [new Date()]);
+    const pollRes = await pool.query(pollQuery, [new Date(), userId]);
     const polls = pollRes.rows.map(p => ({
       ...p,
-      data_type: "poll"
+      data_type: "poll",
+      has_voted: p.has_voted || false,
+      user_selected_option: p.user_selected_option || null
     }));
 
     // =======================

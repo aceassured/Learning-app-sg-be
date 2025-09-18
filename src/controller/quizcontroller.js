@@ -607,7 +607,6 @@ export const startMiniQuiz = async (req, res) => {
     return res.status(500).json({ ok: false, message: "Server error" });
   }
 };
-
 // revision quiz..........
 
 export const startRevisionQuiz = async (req, res) => {
