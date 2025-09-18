@@ -18,20 +18,19 @@ export const getHomeData = async (req, res) => {
 
     const weekDatesRes = await pool.query(
       `SELECT activity_date, correct_count, incorrect_count 
-   FROM user_activity
-   WHERE user_id = $1 
-     AND activity_date >= date_trunc('week', current_date)
-   ORDER BY activity_date`,
+       FROM user_activity
+       WHERE user_id = $1 
+         AND activity_date >= date_trunc('week', current_date)
+       ORDER BY activity_date`,
       [userId]
     );
 
-
+    // build week map
     const weekMap = {};
     weekDatesRes.rows.forEach(r => {
       weekMap[r.activity_date.toISOString().slice(0, 10)] = r;
     });
 
-    let streak = 0;
     let consecutive = 0;
     for (let i = 6; i >= 0; i--) {
       const date = new Date();
@@ -48,11 +47,52 @@ export const getHomeData = async (req, res) => {
 
     const monthRes = await pool.query(
       `SELECT SUM(correct_count) as correct, SUM(incorrect_count) as incorrect
-       FROM user_activity WHERE user_id = $1 AND date_trunc('month', activity_date) = date_trunc('month', current_date)`, [userId]
+       FROM user_activity 
+       WHERE user_id = $1 
+         AND date_trunc('month', activity_date) = date_trunc('month', current_date)`,
+      [userId]
     );
 
     const month = monthRes.rows[0] || { correct: 0, incorrect: 0 };
     const completedThisMonth = +(month.correct || 0) + +(month.incorrect || 0);
+
+    // ----------------------------
+    // 🔥 Calculate Full Streak Count
+    // ----------------------------
+    const streakRes = await pool.query(
+      `SELECT DISTINCT activity_date
+       FROM user_activity
+       WHERE user_id = $1 
+         AND (correct_count + incorrect_count) > 0
+       ORDER BY activity_date DESC`,
+      [userId]
+    );
+
+    let streakCount = 0;
+    if (streakRes.rows.length > 0) {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+
+      let currentDate = new Date(today);
+
+      for (let r of streakRes.rows) {
+        const activityDate = new Date(r.activity_date);
+        activityDate.setHours(0, 0, 0, 0);
+
+        if (activityDate.getTime() === currentDate.getTime()) {
+          streakCount++;
+          // move to previous day
+          currentDate.setDate(currentDate.getDate() - 1);
+        } else if (activityDate.getTime() === currentDate.getTime() - 24 * 60 * 60 * 1000) {
+          // also works if exactly yesterday
+          streakCount++;
+          currentDate.setDate(currentDate.getDate() - 1);
+        } else {
+          // gap → break streak
+          break;
+        }
+      }
+    }
 
     res.json({
       ok: true,
@@ -60,7 +100,8 @@ export const getHomeData = async (req, res) => {
       week: weekDatesRes.rows,
       all7: all7 ? 7 : 0,
       consecutive,
-      monthly: { completed: completedThisMonth, target: 25 }
+      monthly: { completed: completedThisMonth, target: 25 },
+      streakCount // 👈 added streak count
     });
   } catch (err) {
     console.error(err);
