@@ -484,7 +484,7 @@ export const getonlyForumNotes = async (req, res) => {
 
 export const createPost = async (req, res) => {
   try {
-    const { grade_level, content, subject_tag, type_of_upload, author_type, forum_title, topic_id} = req.body;
+    const { grade_level, content, subject_tag, type_of_upload, author_type, forum_title, topic_id } = req.body;
     const authorId = req.userId;
 
     let postRes;
@@ -500,7 +500,7 @@ export const createPost = async (req, res) => {
       postRes = await pool.query(
         `INSERT INTO forum_posts (admin_id, grade_level, content, subject_tag, type_of_upload, forum_title, topic_id) 
          VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
-        [authorId, grade_level, content, subject_tag, type_of_upload,  forum_title, topic_id]
+        [authorId, grade_level, content, subject_tag, type_of_upload, forum_title, topic_id]
       );
     } else {
       return res.status(400).json({ ok: false, message: "Invalid author_type" });
@@ -580,34 +580,54 @@ export const deleteUser = async (req, res) => {
 
 export const addLike = async (req, res) => {
   try {
-    const { postId } = req.body;
+    const { id, data_type } = req.body; 
+    // id = forum_post_id or poll_id depending on data_type
     const userId = req.userId;
 
-    if (!postId || !userId) {
-      return res
-        .status(400)
-        .json({ success: false, message: "postId and userId are required" });
+    if (!id || !userId || !data_type) {
+      return res.status(400).json({
+        success: false,
+        message: "id, userId, and data_type are required",
+      });
     }
 
-    // Try to insert like → duplicates will throw error
-    const result = await pool.query(
-      `INSERT INTO forum_likes (post_id, user_id)
-       VALUES ($1, $2)
-       RETURNING *`,
-      [postId, userId]
-    );
+    let query;
+    if (data_type === "forum") {
+      query = {
+        text: `INSERT INTO forum_likes (post_id, user_id)
+               VALUES ($1, $2)
+               RETURNING *`,
+        values: [id, userId],
+      };
+    } else if (data_type === "poll") {
+      query = {
+        text: `INSERT INTO poll_likes (poll_id, user_id)
+               VALUES ($1, $2)
+               RETURNING *`,
+        values: [id, userId],
+      };
+    } else {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid data_type. Must be 'forum' or 'poll'",
+      });
+    }
+
+    const result = await pool.query(query);
 
     return res.status(201).json({
       success: true,
-      message: "Post liked successfully",
+      message: `${data_type} liked successfully`,
       data: result.rows[0],
+      data_type,
     });
   } catch (error) {
     if (error.code === "23505") {
       // Unique violation → already liked
-      return res
-        .status(409)
-        .json({ success: false, message: "You already liked this post" });
+      return res.status(409).json({
+        success: false,
+        message: `You already liked this ${req.body.data_type}`,
+      });
     }
 
     console.error("❌ addLike error:", error);
@@ -640,26 +660,51 @@ export const removeLike = async (req, res) => {
 // ✅ Add Comment
 export const addComment = async (req, res) => {
   try {
-    const userId = req.userId
-    const { postId, content } = req.body;
+    const userId = req.userId;
+    const { id, content, data_type } = req.body;
+    // id = forum_post_id or poll_id depending on data_type
 
-    if (!postId || !userId || !content) {
-      return res.status(400).json({ success: false, message: "postId, userId, and content are required" });
+    if (!id || !userId || !content || !data_type) {
+      return res.status(400).json({
+        success: false,
+        message: "id, userId, content, and data_type are required"
+      });
     }
 
-    const { rows } = await pool.query(
-      `INSERT INTO forum_comments (post_id, user_id, content)
-       VALUES ($1, $2, $3)
-       RETURNING *`,
-      [postId, userId, content]
-    );
+    let query;
+    if (data_type === "forum") {
+      query = {
+        text: `INSERT INTO forum_comments (post_id, user_id, content)
+               VALUES ($1, $2, $3)
+               RETURNING *`,
+        values: [id, userId, content]
+      };
+    } else if (data_type === "poll") {
+      query = {
+        text: `INSERT INTO poll_comments (poll_id, user_id, comment)
+               VALUES ($1, $2, $3)
+               RETURNING *`,
+        values: [id, userId, content]
+      };
+    } else {
+      return res.status(400).json({ success: false, message: "Invalid data_type. Must be 'forum' or 'poll'" });
+    }
 
-    return res.status(201).json({ success: true, message: "Comment added", comment: rows[0] });
+    const { rows } = await pool.query(query);
+
+    return res.status(201).json({
+      success: true,
+      message: "Comment added successfully",
+      comment: rows[0],
+      data_type
+    });
+
   } catch (error) {
     console.error("❌ addComment error:", error);
     return res.status(500).json({ success: false, message: "Internal server error" });
   }
 };
+
 
 // ✅ Delete Comment
 export const deleteComment = async (req, res) => {

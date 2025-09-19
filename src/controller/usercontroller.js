@@ -2572,7 +2572,7 @@ export const updateGradesubject = async (req, res) => {
       grade_level,
       selected_subjects,
       grade_id,
-      is_social_completion // Add this flag to know if it's social user completing profile
+      is_social_completion // Flag for social users completing profile
     } = req.body;
 
     if (!email) {
@@ -2587,7 +2587,7 @@ export const updateGradesubject = async (req, res) => {
       });
     }
 
-    // ✅ Update user in DB
+    // ✅ Update user and return with grade_value
     const userRes = await pool.query(
       `UPDATE users 
        SET grade_level = $1, 
@@ -2595,33 +2595,40 @@ export const updateGradesubject = async (req, res) => {
            grade_id = $3
        WHERE email = $4
        RETURNING id, email, name, grade_level, selected_subjects, grade_id, 
-                daily_reminder_time, questions_per_day, school_name, phone,
-                provider, social_id, is_social_login`,
-      [
-        grade_level,
-        selected_subjects,
-        grade_id,
-        email
-      ]
+                 daily_reminder_time, questions_per_day, school_name, phone,
+                 provider, social_id, is_social_login`,
+      [grade_level, selected_subjects, grade_id, email]
     );
 
     if (userRes.rows.length === 0) {
       return res.status(404).json({ status: false, message: "User not found" });
     }
 
-    const user = userRes.rows[0];
+    let user = userRes.rows[0];
 
+    // ✅ Fetch grade_value
+    const gradeRes = await pool.query(
+      `SELECT grade_level FROM grades WHERE id = $1 LIMIT 1`,
+      [user.grade_id]
+    );
+
+    const grade_value = gradeRes.rows.length > 0 ? gradeRes.rows[0].grade_level : null;
+
+    // ✅ Generate JWT token
     const token = jwt.sign({ userId: user.id }, JWT_SECRET, { expiresIn: "7d" });
 
     return res.json({
       status: true,
-      message: `${is_social_completion ? 'Social registration' : 'User profile'} updated successfully`,
-      user,
+      message: `${is_social_completion ? "Social registration" : "User profile"} updated successfully`,
+      user: {
+        ...user,
+        grade_value, // ✅ add grade_value
+      },
       token,
-      redirect: "home"
+      redirect: "home",
     });
   } catch (err) {
-    console.error(err);
+    console.error("updateGradesubject error:", err);
     res.status(500).json({ status: false, message: "Server error" });
   }
 };
