@@ -295,8 +295,8 @@ export const savedForumAndPolls = async (req, res) => {
 
 export const getonlyForumNotes = async (req, res) => {
   try {
-    const userId = req.userId; // optional if you want to track views by user
-    const { id } = req.body; // can be forum post id or poll id
+    const userId = req.userId; // from JWT middleware
+    const { id } = req.body; // forum_post_id or poll_id
 
     if (!id) {
       return res.status(400).json({ ok: false, error: "ID is required" });
@@ -308,6 +308,7 @@ export const getonlyForumNotes = async (req, res) => {
     const forumQuery = `
       SELECT 
         p.id,
+        p.forum_title AS forum_title,
         p.content,
         s.subject,
         g.grade_level,
@@ -352,7 +353,9 @@ export const getonlyForumNotes = async (req, res) => {
 
         COALESCE(l.like_count, 0) AS like_count,
         COALESCE(c.comment_count, 0) AS comment_count,
-        COALESCE(v.view_count, 0) AS view_count
+        COALESCE(v.view_count, 0) AS view_count,
+
+        CASE WHEN usf.id IS NOT NULL THEN true ELSE false END AS is_forum_saved
 
       FROM forum_posts p
       LEFT JOIN users u ON u.id = p.user_id
@@ -381,16 +384,19 @@ export const getonlyForumNotes = async (req, res) => {
         GROUP BY forum_post_id
       ) v ON v.forum_post_id = p.id
 
+      LEFT JOIN user_saved_forums usf 
+        ON usf.forum_post_id = p.id AND usf.user_id = $2
+
       WHERE p.id = $1
       GROUP BY 
         p.id, s.subject, g.grade_level,
         u.id, a.id, 
         l.like_count, 
         c.comment_count, 
-        v.view_count
+        v.view_count, usf.id
     `;
 
-    const forumRes = await pool.query(forumQuery, [id]);
+    const forumRes = await pool.query(forumQuery, [id, userId]);
 
     if (forumRes.rows.length > 0) {
       return res.json({
@@ -405,16 +411,21 @@ export const getonlyForumNotes = async (req, res) => {
     // =====================
     const pollRes = await pool.query(
       `SELECT 
-         p.*,
-         COALESCE(v.view_count, 0) AS view_count
+         p.id,
+         p.question AS poll_title,
+         p.created_at,
+         COALESCE(v.view_count, 0) AS view_count,
+         CASE WHEN usp.id IS NOT NULL THEN true ELSE false END AS is_poll_saved
        FROM polls p
        LEFT JOIN (
          SELECT poll_id, COUNT(*) AS view_count
          FROM poll_views
          GROUP BY poll_id
        ) v ON v.poll_id = p.id
+       LEFT JOIN user_saved_polls usp 
+         ON usp.poll_id = p.id AND usp.user_id = $2
        WHERE p.id = $1`,
-      [id]
+      [id, userId]
     );
 
     if (pollRes.rows.length === 0) {
@@ -426,29 +437,35 @@ export const getonlyForumNotes = async (req, res) => {
       `SELECT 
          po.id, 
          po.option_text,
-         COALESCE(COUNT(pv.id), 0) AS vote_count,
-         COALESCE(
-           json_agg(
-             json_build_object('id', u.id, 'name', u.name)
-           ) FILTER (WHERE u.id IS NOT NULL),
-           '[]'
-         ) AS voters
+         COALESCE(COUNT(pv.id), 0) AS vote_count
        FROM poll_options po
        LEFT JOIN poll_votes pv ON po.id = pv.option_id
-       LEFT JOIN users u ON pv.user_id = u.id
        WHERE po.poll_id = $1
        GROUP BY po.id, po.option_text
        ORDER BY po.id`,
       [id]
     );
 
+    // Check if current user voted
+    const voteRes = await pool.query(
+      `SELECT option_id 
+       FROM poll_votes 
+       WHERE poll_id = $1 AND user_id = $2
+       LIMIT 1`,
+      [id, userId]
+    );
+
+    const hasVoted = voteRes.rows.length > 0;
+    const userSelectedOption = hasVoted ? voteRes.rows[0].option_id : null;
+
     const pollData = {
       ...pollRes.rows[0],
       options: optionsRes.rows.map((o) => ({
         ...o,
         vote_count: Number(o.vote_count),
-        voters: o.voters,
       })),
+      has_voted: hasVoted,
+      user_selected_option: userSelectedOption,
     };
 
     return res.json({
