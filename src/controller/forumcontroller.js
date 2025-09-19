@@ -166,7 +166,7 @@ export const savedForumAndPolls = async (req, res) => {
     }
 
     const q = `
-      -- Fetch saved forums
+      -- ✅ Fetch saved forums
       SELECT 
         'forum' AS data_type,
         f.id,
@@ -205,7 +205,7 @@ export const savedForumAndPolls = async (req, res) => {
 
       UNION ALL
 
-      -- Fetch saved polls
+      -- ✅ Fetch saved polls
       SELECT
         'poll' AS data_type,
         p.id,
@@ -216,8 +216,8 @@ export const savedForumAndPolls = async (req, res) => {
         COALESCE(pv.view_count, 0) AS view_count,
         COALESCE(pvc.vote_count, 0) AS like_count, -- treat votes as "likes"
         COALESCE(po.options, '[]') AS files       -- reuse "files" column to hold options
-      FROM polls p
-      JOIN poll_votes uv ON uv.poll_id = p.id AND uv.user_id = $1  -- assuming saved polls = voted polls
+      FROM user_saved_polls usp
+      JOIN polls p ON p.id = usp.poll_id
       LEFT JOIN (
         SELECT poll_id, COUNT(*) AS view_count
         FROM poll_views
@@ -240,6 +240,7 @@ export const savedForumAndPolls = async (req, res) => {
         FROM poll_options
         GROUP BY poll_id
       ) po ON po.poll_id = p.id
+      WHERE usp.user_id = $1
 
       ORDER BY created_at DESC
     `;
@@ -252,6 +253,7 @@ export const savedForumAndPolls = async (req, res) => {
     res.status(500).json({ ok: false, error: "Server error" });
   }
 };
+
 
 
 // get only particular forum notes.......
@@ -690,51 +692,89 @@ export const getAlllikesandComments = async (req, res) => {
 // save forum......
 
 
-export const saveForum = async (req, res) => {
+export const saveForumOrPoll = async (req, res) => {
   try {
     const userId = req.userId;
-    const { forumpost_id } = req.body;
+    const { type, id } = req.body; 
+    // type = "forum" | "poll"
+    // id   = forum_post_id OR poll_id
 
-    if (!forumpost_id) {
-      return res.status(400).json({ ok: false, message: "forumpost_id required" });
+    if (!type || !id) {
+      return res.status(400).json({ ok: false, message: "type and id are required" });
     }
 
-    const { rows } = await pool.query(
-      "SELECT id FROM forum_posts WHERE id = $1",
-      [forumpost_id]
-    );
-
-    const forum = rows[0];
-    if (!forum) {
-      return res.status(401).json({ status: false, message: "Forum not found.", });
-    }
-
-    // Check if already saved
-    const checkRes = await pool.query(
-      `SELECT id FROM user_saved_forums WHERE user_id=$1 AND forum_post_id=$2`,
-      [userId, forumpost_id]
-    );
-
-    if (checkRes.rows.length > 0) {
-      // Already saved → unsave
-      await pool.query(
-        `DELETE FROM user_saved_forums WHERE user_id=$1 AND forum_post_id=$2`,
-        [userId, forumpost_id]
+    if (type === "forum") {
+      // ✅ Check if forum exists
+      const { rows } = await pool.query(
+        "SELECT id FROM forum_posts WHERE id=$1",
+        [id]
       );
-      return res.json({ ok: true, saved: false, message: "Forum unsaved" });
-    } else {
-      // Not saved → save
-      await pool.query(
-        `INSERT INTO user_saved_forums (user_id, forum_post_id) VALUES ($1, $2)`,
-        [userId, forumpost_id]
+      if (!rows.length) {
+        return res.status(404).json({ ok: false, message: "Forum not found" });
+      }
+
+      // ✅ Check if already saved
+      const check = await pool.query(
+        "SELECT id FROM user_saved_forums WHERE user_id=$1 AND forum_post_id=$2",
+        [userId, id]
       );
-      return res.json({ ok: true, saved: true, message: "Forum saved" });
+
+      if (check.rows.length) {
+        await pool.query(
+          "DELETE FROM user_saved_forums WHERE user_id=$1 AND forum_post_id=$2",
+          [userId, id]
+        );
+        return res.json({ ok: true, saved: false, type: "forum", message: "Forum unsaved" });
+      } else {
+        await pool.query(
+          "INSERT INTO user_saved_forums (user_id, forum_post_id) VALUES ($1,$2)",
+          [userId, id]
+        );
+        return res.json({ ok: true, saved: true, type: "forum", message: "Forum saved" });
+      }
+    } 
+
+    else if (type === "poll") {
+      // ✅ Check if poll exists
+      const { rows } = await pool.query(
+        "SELECT id FROM polls WHERE id=$1",
+        [id]
+      );
+      if (!rows.length) {
+        return res.status(404).json({ ok: false, message: "Poll not found" });
+      }
+
+      // ✅ Check if already saved
+      const check = await pool.query(
+        "SELECT id FROM user_saved_polls WHERE user_id=$1 AND poll_id=$2",
+        [userId, id]
+      );
+
+      if (check.rows.length) {
+        await pool.query(
+          "DELETE FROM user_saved_polls WHERE user_id=$1 AND poll_id=$2",
+          [userId, id]
+        );
+        return res.json({ ok: true, saved: false, type: "poll", message: "Poll unsaved" });
+      } else {
+        await pool.query(
+          "INSERT INTO user_saved_polls (user_id, poll_id) VALUES ($1,$2)",
+          [userId, id]
+        );
+        return res.json({ ok: true, saved: true, type: "poll", message: "Poll saved" });
+      }
     }
+
+    else {
+      return res.status(400).json({ ok: false, message: "Invalid type. Use 'forum' or 'poll'." });
+    }
+
   } catch (error) {
-    console.error("saveForum error:", error);
+    console.error("saveForumOrPoll error:", error);
     return res.status(500).json({ ok: false, message: "Server error" });
   }
 };
+
 
 
 // get forum and polls data.......
