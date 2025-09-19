@@ -160,9 +160,21 @@ export const listPosts = async (req, res) => {
 export const savedForumAndPolls = async (req, res) => {
   try {
     const userId = req.userId; // from auth middleware
+const search = req.body?.search || null;
+
 
     if (!userId) {
       return res.status(400).json({ ok: false, error: "User ID is required" });
+    }
+
+    const params = [userId];
+    let forumSearchCondition = "";
+    let pollSearchCondition = "";
+
+    if (search) {
+      params.push(`%${search}%`);
+      forumSearchCondition = `AND f.forum_title ILIKE $${params.length}`;
+      pollSearchCondition = `AND p.question ILIKE $${params.length}`;
     }
 
     const q = `
@@ -171,12 +183,14 @@ export const savedForumAndPolls = async (req, res) => {
         'forum' AS data_type,
         f.id,
         f.content,
+        f.forum_title,
         f.subject_tag,
         f.grade_level,
         f.created_at,
         COALESCE(fvc.view_count, 0) AS view_count,
         COALESCE(fl.like_count, 0) AS like_count,
-        COALESCE(ff.files, '[]') AS files
+        COALESCE(ff.files, '[]') AS files,
+        COALESCE(u.name, a.name) AS author_name
       FROM user_saved_forums usf
       JOIN forum_posts f ON f.id = usf.forum_post_id
       LEFT JOIN (
@@ -201,7 +215,10 @@ export const savedForumAndPolls = async (req, res) => {
         FROM forum_files
         GROUP BY post_id
       ) ff ON ff.post_id = f.id
+      LEFT JOIN users u ON u.id = f.user_id
+      LEFT JOIN admins a ON a.id = f.admin_id
       WHERE usf.user_id = $1
+      ${forumSearchCondition}
 
       UNION ALL
 
@@ -210,12 +227,14 @@ export const savedForumAndPolls = async (req, res) => {
         'poll' AS data_type,
         p.id,
         p.question AS content,
-        NULL AS subject_tag,
+        NULL AS forum_title,
+        p.subject_id AS subject_tag,
         p.grade_level,
         p.created_at,
         COALESCE(pv.view_count, 0) AS view_count,
         COALESCE(pvc.vote_count, 0) AS like_count, -- treat votes as "likes"
-        COALESCE(po.options, '[]') AS files       -- reuse "files" column to hold options
+        COALESCE(po.options, '[]') AS files,
+        NULL AS author_name
       FROM user_saved_polls usp
       JOIN polls p ON p.id = usp.poll_id
       LEFT JOIN (
@@ -241,11 +260,12 @@ export const savedForumAndPolls = async (req, res) => {
         GROUP BY poll_id
       ) po ON po.poll_id = p.id
       WHERE usp.user_id = $1
+      ${pollSearchCondition}
 
       ORDER BY created_at DESC
     `;
 
-    const r = await pool.query(q, [userId]);
+    const r = await pool.query(q, params);
 
     res.json({ ok: true, saved_items: r.rows });
   } catch (error) {
@@ -253,6 +273,7 @@ export const savedForumAndPolls = async (req, res) => {
     res.status(500).json({ ok: false, error: "Server error" });
   }
 };
+
 
 
 
