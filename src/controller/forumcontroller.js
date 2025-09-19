@@ -641,21 +641,55 @@ export const addLike = async (req, res) => {
 // ✅ Remove Like
 export const removeLike = async (req, res) => {
   try {
-    const { postId } = req.body;
+    const { id, data_type } = req.body; 
+    // id = forum_post_id or poll_id depending on data_type
     const userId = req.userId;
 
-    if (!postId || !userId) {
-      return res.status(400).json({ success: false, message: "postId and userId are required" });
+    if (!id || !userId || !data_type) {
+      return res.status(400).json({
+        success: false,
+        message: "id, userId, and data_type are required",
+      });
     }
 
-    await pool.query(`DELETE FROM forum_likes WHERE post_id=$1 AND user_id=$2`, [postId, userId]);
+    let query;
+    if (data_type === "forum") {
+      query = {
+        text: `DELETE FROM forum_likes WHERE post_id=$1 AND user_id=$2`,
+        values: [id, userId],
+      };
+    } else if (data_type === "poll") {
+      query = {
+        text: `DELETE FROM poll_likes WHERE poll_id=$1 AND user_id=$2`,
+        values: [id, userId],
+      };
+    } else {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid data_type. Must be 'forum' or 'poll'",
+      });
+    }
 
-    return res.status(200).json({ success: true, message: "Like removed successfully" });
+    const result = await pool.query(query);
+
+    if (result.rowCount === 0) {
+      return res.status(404).json({
+        success: false,
+        message: `Like not found for this ${data_type}`,
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: `${data_type} like removed successfully`,
+      data_type,
+    });
   } catch (error) {
     console.error("❌ removeLike error:", error);
     return res.status(500).json({ success: false, message: "Internal server error" });
   }
 };
+
 
 // ✅ Add Comment
 export const addComment = async (req, res) => {
