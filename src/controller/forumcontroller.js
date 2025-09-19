@@ -1063,7 +1063,7 @@ export const addView = async (req, res) => {
 
 export const getNotesfromTopics = async (req, res) => {
   try {
-    const { topic_id } = req.body;
+    const { topic_id, search } = req.body;
 
     if (!topic_id) {
       return res.status(400).json({ message: "topic_id is required" });
@@ -1077,8 +1077,8 @@ export const getNotesfromTopics = async (req, res) => {
       return res.status(404).json({ message: "Topic not found" });
     }
 
-    // ✅ Fetch notes for the topic
-    const notesQuery = `
+    // ✅ Fetch notes for the topic with optional search
+    let notesQuery = `
       SELECT ff.*
       FROM forum_posts fp
       JOIN forum_files ff ON ff.post_id = fp.id
@@ -1086,12 +1086,19 @@ export const getNotesfromTopics = async (req, res) => {
         AND fp.type_of_upload = 'Notes'
         AND ff.url IS NOT NULL
     `;
+    const values = [topic_id];
 
-    const { rows } = await pool.query(notesQuery, [topic_id]);
+    if (search) {
+      notesQuery += ` AND ff.filename ILIKE $2`;
+      values.push(`%${search}%`);
+    }
+
+    const { rows } = await pool.query(notesQuery, values);
 
     return res.status(200).json({
       success: true,
-      data: rows, // array of objects with { url }
+      search: search || null,
+      data: rows, // array of objects with { url, filename, etc. }
     });
 
   } catch (error) {
@@ -1102,6 +1109,7 @@ export const getNotesfromTopics = async (req, res) => {
     });
   }
 };
+
 
 
 // notes access stored.......

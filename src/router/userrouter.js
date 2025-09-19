@@ -17,7 +17,9 @@ import { adminEdit, adminRegister, adminResetPassword, commonLogin, confirmPassw
   socialRegister,
   linkSocialAccount,
   adminCommonlogin,
-  getAllSubjectnew} from '../controller/usercontroller.js';
+  getAllSubjectnew,
+  userResetPassword,
+  userconfirmPassword} from '../controller/usercontroller.js';
 import { deleteForum, deleteUser } from '../controller/forumcontroller.js';
 import { admingetTopics, getTopics } from '../controller/quizcontroller.js';
 
@@ -51,8 +53,10 @@ router.post("/usercommonlogin", commonLogin)
 router.get("/adminusers", auth, getUserdetails)
 router.get("/admindetail", auth, getAdmindetails)
 router.post("/resetpassword", adminResetPassword)
+router.post("/userresetpassword", userResetPassword)
 router.post("/verifyotp", verifyOtp)
 router.put("/confirmpassword", confirmPassword)
+router.put("/userconfirmpassword", userconfirmPassword)
 router.put("/adminedit",auth, upload.single("file"), adminEdit)
 router.put("/edit", auth, upload.single("profile_photo"), userEdit);
 router.post("/questionadd",upload.fields([{ name: "file", maxCount: 1 },{ name: "fileanswer", maxCount: 1 }]),newQuestionsadd);
@@ -68,7 +72,7 @@ router.get("/getAllUsers",getAllUsers);
 router.get("/getallsubject",getAllSubject);
 router.post("/subject",getAllSubjectnew);
 router.get("/getallgrades",getAllGrade);
-router.post('/gettopics',auth,  getTopics);
+router.post('/gettopics',getTopics);
 router.post('/admingettopics', admingetTopics);
 router.post('/uservotepoll', auth, userVoteforpoll);
 

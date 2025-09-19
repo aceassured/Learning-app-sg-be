@@ -1468,18 +1468,26 @@ export const getAllUsers = async (req, res) => {
 
 
 export const getAllSubjectnew = async (req, res) => {
-  const { grade_id } = req.body;
+  const { grade_id, search } = req.body; // ✅ added search
 
   const client = await pool.connect();
   try {
-    const { rows: allSubjects } = await client.query(
-      `SELECT s.*, g.grade_level
-       FROM subjects s
-       JOIN grades g ON s.grade_id = g.id
-       WHERE s.grade_id = $1
-       ORDER BY s.subject ASC`,
-      [grade_id]
-    );
+    let query = `
+      SELECT s.*, g.grade_level
+      FROM subjects s
+      JOIN grades g ON s.grade_id = g.id
+      WHERE s.grade_id = $1
+    `;
+    const values = [grade_id];
+
+    if (search) {
+      query += ` AND s.subject ILIKE $2`;
+      values.push(`%${search}%`);
+    }
+
+    query += ` ORDER BY s.subject ASC`;
+
+    const { rows: allSubjects } = await client.query(query, values);
 
     return res.status(200).json({
       success: true,
@@ -1495,6 +1503,7 @@ export const getAllSubjectnew = async (req, res) => {
     client.release();
   }
 };
+
 
 export const getAllSubject = async (req, res) => {
   const client = await pool.connect();
@@ -2962,3 +2971,121 @@ export const seedQuestions = async (req, res) => {
 };
 
 // seedQuestions()
+
+
+
+export const userResetPassword = async (req, res) => {
+  try {
+    const { email } = req.body;
+
+    if (!email) {
+      return res.status(400).json({
+        success: false,
+        message: "Email is required",
+      });
+    }
+
+    const { rows: existingAdmin } = await pool.query(
+      `SELECT id, email FROM users WHERE email = $1`,
+      [email]
+    );
+
+    if (existingAdmin.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found",
+      });
+    }
+
+    const admin = existingAdmin[0];
+
+    const otp = crypto.randomInt(100000, 999999).toString();
+    const expiryTime = new Date(Date.now() + 2 * 60 * 1000);
+
+    await pool.query(
+      `UPDATE users SET otp = $1, otp_expire_time = $2 WHERE id = $3`,
+      [otp, expiryTime, admin.id]
+    );
+
+    const transporter = nodemailer.createTransport({
+      service: "gmail",
+      auth: {
+        user: process.env.EMAIL_USER,
+        pass: process.env.EMAIL_PASS,
+      },
+    });
+
+    const mailOptions = {
+      from: `"Support" <${process.env.EMAIL_USER}>`,
+      to: email,
+      subject: "User Password Reset OTP",
+      html: `
+        <h2>Password Reset Request</h2>
+        <p>Your OTP for password reset is: <b>${otp}</b></p>
+        <p>This OTP will expire in <b>2 minutes</b>.</p>
+      `,
+    };
+
+    await transporter.sendMail(mailOptions);
+
+    return res.status(200).json({
+      success: true,
+      message: "OTP sent successfully to your email",
+    });
+  } catch (error) {
+    console.error("❌ User reset password error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error",
+    });
+  }
+};
+
+
+// confirm password.........
+
+export const userconfirmPassword = async (req, res) => {
+  try {
+    const { email, password } = req.body;
+
+    if (!email || !password) {
+      return res.status(400).json({
+        success: false,
+        message: "Email and new password are required",
+      });
+    }
+
+    const result = await pool.query(
+      "SELECT id FROM users WHERE email = $1",
+      [email]
+    );
+
+    if (result.rowCount === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found",
+      });
+    }
+
+    const admin = result.rows[0];
+
+    const salt = await bcrypt.genSalt(10);
+    const hashedPassword = await bcrypt.hash(password, salt);
+
+    await pool.query(
+      "UPDATE users SET password = $1, updated_at = NOW() WHERE id = $2",
+      [hashedPassword, admin.id]
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: "Password updated successfully",
+    });
+  } catch (error) {
+    console.error("❌ Confirm password error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error",
+    });
+  }
+};

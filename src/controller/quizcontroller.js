@@ -423,7 +423,7 @@ export const reviewSession = async (req, res) => {
 
 export const getTopics = async (req, res) => {
   try {
-    const { subject_id, grade_id } = req.body;
+    const { subject_id, grade_id, search } = req.body;
 
     // Validate input
     if (!grade_id || !subject_id) {
@@ -433,8 +433,8 @@ export const getTopics = async (req, res) => {
     const gradeIdInt = parseInt(grade_id, 10);
     const subjectIdInt = parseInt(subject_id, 10);
 
-    // Fetch topics for given grade_id and subject_id
-    const query = `
+    // Build query
+    let query = `
       SELECT 
         t.id, 
         t.topic, 
@@ -447,15 +447,24 @@ export const getTopics = async (req, res) => {
       JOIN grades g ON t.grade_id = g.id
       WHERE t.grade_id = $1
         AND t.subject_id = $2
-      ORDER BY s.subject, t.topic;
     `;
 
-    const { rows } = await pool.query(query, [gradeIdInt, subjectIdInt]);
+    const values = [gradeIdInt, subjectIdInt];
+
+    if (search) {
+      query += ` AND t.topic ILIKE $3`;
+      values.push(`%${search}%`);
+    }
+
+    query += ` ORDER BY s.subject, t.topic;`;
+
+    const { rows } = await pool.query(query, values);
 
     return res.status(200).json({
       success: true,
       grade_id: gradeIdInt,
       subject_id: subjectIdInt,
+      search: search || null,
       data: rows,
     });
 
