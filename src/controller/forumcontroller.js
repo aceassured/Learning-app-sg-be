@@ -157,27 +157,42 @@ export const listPosts = async (req, res) => {
   }
 };
 
+export const savedForumAndPolls = async ( req, res ) =>{
+
+  try {
+    
+    const { id } = req.body
+    const userId = req.userId; 
+
+    
+  } catch (error) {
+    
+  }
+}
 
 // get only particular forum notes.......
 
 export const getonlyForumNotes = async (req, res) => {
   try {
-    const { id } = req.body; // id = forum post id
+    const userId = req.userId; // optional if you want to track views by user
+    const { id } = req.body; // can be forum post id or poll id
 
     if (!id) {
-      return res.status(400).json({ ok: false, error: "Post ID is required" });
+      return res.status(400).json({ ok: false, error: "ID is required" });
     }
 
-    const q = `
+    // =====================
+    // 1) Try Forum First
+    // =====================
+    const forumQuery = `
       SELECT 
         p.id,
         p.content,
-        p.subject_tag,
+        s.subject,
+        g.grade_level,
         p.type_of_upload,
-        p.grade_level,
         p.created_at,
 
-        -- Aggregate attached files
         COALESCE(
           JSON_AGG(
             DISTINCT JSONB_BUILD_OBJECT(
@@ -189,7 +204,6 @@ export const getonlyForumNotes = async (req, res) => {
           '[]'
         ) AS files,
 
-        -- Aggregate comments
         COALESCE(
           JSON_AGG(
             DISTINCT JSONB_BUILD_OBJECT(
@@ -204,7 +218,6 @@ export const getonlyForumNotes = async (req, res) => {
           '[]'
         ) AS comments,
 
-        -- Author details
         COALESCE(u.id, a.id) AS author_id,
         COALESCE(u.name, a.name) AS author_name,
         COALESCE(u.profile_photo_url, a.profile_photo_url) AS profile_photo_url,
@@ -216,9 +229,9 @@ export const getonlyForumNotes = async (req, res) => {
           WHEN a.id IS NOT NULL THEN 'admin'
         END AS author_type,
 
-        -- Counts
         COALESCE(l.like_count, 0) AS like_count,
-        COALESCE(c.comment_count, 0) AS comment_count
+        COALESCE(c.comment_count, 0) AS comment_count,
+        COALESCE(v.view_count, 0) AS view_count
 
       FROM forum_posts p
       LEFT JOIN users u ON u.id = p.user_id
@@ -226,36 +239,109 @@ export const getonlyForumNotes = async (req, res) => {
       LEFT JOIN forum_files ff ON ff.post_id = p.id
       LEFT JOIN forum_comments fc ON fc.post_id = p.id
       LEFT JOIN users cu ON cu.id = fc.user_id
+      LEFT JOIN subjects s ON s.id = p.subject_tag
+      LEFT JOIN grades g ON g.id = p.grade_level
+
       LEFT JOIN (
         SELECT post_id, COUNT(*) AS like_count
         FROM forum_likes
         GROUP BY post_id
       ) l ON l.post_id = p.id
+
       LEFT JOIN (
         SELECT post_id, COUNT(*) AS comment_count
         FROM forum_comments
         GROUP BY post_id
       ) c ON c.post_id = p.id
+
+      LEFT JOIN (
+        SELECT forum_post_id, COUNT(*) AS view_count
+        FROM forum_views
+        GROUP BY forum_post_id
+      ) v ON v.forum_post_id = p.id
+
       WHERE p.id = $1
       GROUP BY 
-        p.id, 
+        p.id, s.subject, g.grade_level,
         u.id, a.id, 
         l.like_count, 
-        c.comment_count
+        c.comment_count, 
+        v.view_count
     `;
 
-    const r = await pool.query(q, [id]);
+    const forumRes = await pool.query(forumQuery, [id]);
 
-    if (r.rows.length === 0) {
-      return res.status(404).json({ ok: false, error: "Post not found" });
+    if (forumRes.rows.length > 0) {
+      return res.json({
+        ok: true,
+        data_type: "forum",
+        data: forumRes.rows[0],
+      });
     }
 
-    res.json({ ok: true, post: r.rows[0] });
+    // =====================
+    // 2) Try Poll
+    // =====================
+    const pollRes = await pool.query(
+      `SELECT 
+         p.*,
+         COALESCE(v.view_count, 0) AS view_count
+       FROM polls p
+       LEFT JOIN (
+         SELECT poll_id, COUNT(*) AS view_count
+         FROM poll_views
+         GROUP BY poll_id
+       ) v ON v.poll_id = p.id
+       WHERE p.id = $1`,
+      [id]
+    );
+
+    if (pollRes.rows.length === 0) {
+      return res.status(404).json({ ok: false, error: "No forum or poll found" });
+    }
+
+    // Fetch poll options with votes
+    const optionsRes = await pool.query(
+      `SELECT 
+         po.id, 
+         po.option_text,
+         COALESCE(COUNT(pv.id), 0) AS vote_count,
+         COALESCE(
+           json_agg(
+             json_build_object('id', u.id, 'name', u.name)
+           ) FILTER (WHERE u.id IS NOT NULL),
+           '[]'
+         ) AS voters
+       FROM poll_options po
+       LEFT JOIN poll_votes pv ON po.id = pv.option_id
+       LEFT JOIN users u ON pv.user_id = u.id
+       WHERE po.poll_id = $1
+       GROUP BY po.id, po.option_text
+       ORDER BY po.id`,
+      [id]
+    );
+
+    const pollData = {
+      ...pollRes.rows[0],
+      options: optionsRes.rows.map((o) => ({
+        ...o,
+        vote_count: Number(o.vote_count),
+        voters: o.voters,
+      })),
+    };
+
+    return res.json({
+      ok: true,
+      data_type: "poll",
+      data: pollData,
+    });
+
   } catch (err) {
-    console.error("Error fetching post:", err);
+    console.error("getForumOrPollById error:", err);
     res.status(500).json({ ok: false, error: "Server error" });
   }
 };
+
 
 
 export const createPost = async (req, res) => {
