@@ -2999,7 +2999,7 @@ export const userResetPassword = async (req, res) => {
 
     const admin = existingAdmin[0];
 
-    const otp = crypto.randomInt(100000, 999999).toString();
+    const otp = crypto.randomInt(10000, 99999).toString();
     const expiryTime = new Date(Date.now() + 2 * 60 * 1000);
 
     await pool.query(
