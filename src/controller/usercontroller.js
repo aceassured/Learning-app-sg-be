@@ -57,28 +57,23 @@ export const Commonlogin = async (req, res) => {
       return res.status(400).json({ status: false, message: "Email and password are required" });
     }
 
-    // const existingUser = await pool.query(
-    //   "SELECT id, name, email, password, selected_subjects FROM users WHERE email = $1",
-    //   [email]
-    // );
-
-    // const exisitingUserRuesult = existingUser.rows[0]
-    // if (!exisitingUserRuesult) {
-    //   return res.status(404).json({
-    //     status: false,
-    //     message: "User not found. Please sign up to continue.",
-    //   });
-
-    // }
-    // ✅ Fetch user by email
+    // ✅ Fetch user with grade join
     const { rows } = await pool.query(
-      "SELECT * FROM users WHERE email = $1",
+      `SELECT 
+         u.*,
+         g.grade_level AS grade_value
+       FROM users u
+       LEFT JOIN grades g ON g.id = u.grade_id
+       WHERE u.email = $1`,
       [email]
     );
 
     const user = rows[0];
     if (!user) {
-      return res.status(401).json({ status: false, message: "User not found. Please sign up to continue.", });
+      return res.status(401).json({
+        status: false,
+        message: "User not found. Please sign up to continue.",
+      });
     }
 
     // ✅ Compare password with hashed password
@@ -114,14 +109,16 @@ export const Commonlogin = async (req, res) => {
       data: {
         ...userData,
         selected_subjects: selectedSubjectsNames,
+        grade_value: user.grade_value || null, // return grade_level name
       },
-      token
+      token,
     });
   } catch (err) {
     console.error("Login error:", err);
     res.status(500).json({ status: false, message: "Server error" });
   }
 };
+
 
 export const register = async (req, res) => {
   try {
@@ -2424,14 +2421,17 @@ export const socialLogin = async (req, res) => {
       });
     }
 
-    // Find user by social credentials OR by email with this provider
+    // Find user and also join grade value
     const userRes = await pool.query(
-      `SELECT id, email, name, grade_level, selected_subjects, grade_id, 
-              daily_reminder_time, questions_per_day, school_name, phone, 
-              provider, social_id, is_social_login, profile_photo_url
-       FROM users 
-       WHERE (email = $1 AND social_id = $2 AND provider = $3) 
-          OR (email = $1 AND provider = $3)`,
+      `SELECT u.id, u.email, u.name, u.grade_level, u.selected_subjects, 
+              u.grade_id, g.grade_value,
+              u.daily_reminder_time, u.questions_per_day, u.school_name, 
+              u.phone, u.provider, u.social_id, u.is_social_login, 
+              u.profile_photo_url
+       FROM users u
+       LEFT JOIN grades g ON g.id = u.grade_id
+       WHERE (u.email = $1 AND u.social_id = $2 AND u.provider = $3) 
+          OR (u.email = $1 AND u.provider = $3)`,
       [email, social_id, provider]
     );
 
@@ -2442,9 +2442,9 @@ export const socialLogin = async (req, res) => {
       });
     }
 
-
     const user = userRes.rows[0];
 
+    // Fetch subject details if user has selected subjects
     let selectedSubjectsNames = [];
     if (user.selected_subjects && user.selected_subjects.length > 0) {
       const { rows: subjectRows } = await pool.query(
@@ -2460,8 +2460,7 @@ export const socialLogin = async (req, res) => {
       }));
     }
 
-
-    // If social_id doesn't match, update it (this handles the case where user was linked)
+    // If social_id doesn’t match, update it
     if (user.social_id !== social_id) {
       await pool.query(
         `UPDATE users SET social_id = $1 WHERE id = $2`,
@@ -2470,27 +2469,32 @@ export const socialLogin = async (req, res) => {
       user.social_id = social_id;
     }
 
-    // Generate JWT token
+    // Generate JWT
     const token = jwt.sign({ userId: user.id }, JWT_SECRET, { expiresIn: "7d" });
-    const { selected_subjects: _, ...userData } = user
+
+    // Remove raw selected_subjects from response
+    const { selected_subjects: _, ...userData } = user;
+
     return res.json({
       status: true,
       message: "Social login successful",
       data: {
         ...userData,
+        grade_value: user.grade_value,  // ✅ included here
         selected_subjects: selectedSubjectsNames,
       },
       token,
       redirect: "home"
     });
   } catch (error) {
-    console.error('Social login error:', error);
+    console.error("Social login error:", error);
     res.status(500).json({
       status: false,
       message: "Server error"
     });
   }
 };
+
 
 // 3. Social registration API (creates user without OTP)
 export const socialRegister = async (req, res) => {
