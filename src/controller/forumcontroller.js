@@ -160,8 +160,7 @@ export const listPosts = async (req, res) => {
 export const savedForumAndPolls = async (req, res) => {
   try {
     const userId = req.userId; // from auth middleware
-const search = req.body?.search || null;
-
+    const search = req.body?.search || null;
 
     if (!userId) {
       return res.status(400).json({ ok: false, error: "User ID is required" });
@@ -190,7 +189,13 @@ const search = req.body?.search || null;
         COALESCE(fvc.view_count, 0) AS view_count,
         COALESCE(fl.like_count, 0) AS like_count,
         COALESCE(ff.files, '[]') AS files,
-        COALESCE(u.name, a.name) AS author_name
+        COALESCE(u.name, a.name) AS author_name,
+        CASE 
+          WHEN u.id IS NOT NULL THEN 'user'
+          WHEN a.id IS NOT NULL THEN 'admin'
+        END AS author_type,
+        false AS has_voted,
+        NULL AS user_selected_option
       FROM user_saved_forums usf
       JOIN forum_posts f ON f.id = usf.forum_post_id
       LEFT JOIN (
@@ -234,7 +239,10 @@ const search = req.body?.search || null;
         COALESCE(pv.view_count, 0) AS view_count,
         COALESCE(pvc.vote_count, 0) AS like_count, -- treat votes as "likes"
         COALESCE(po.options, '[]') AS files,
-        NULL AS author_name
+        NULL AS author_name,
+        NULL AS author_type,
+        CASE WHEN uv.user_id IS NOT NULL THEN true ELSE false END AS has_voted,
+        uv.option_id AS user_selected_option
       FROM user_saved_polls usp
       JOIN polls p ON p.id = usp.poll_id
       LEFT JOIN (
@@ -259,6 +267,11 @@ const search = req.body?.search || null;
         FROM poll_options
         GROUP BY poll_id
       ) po ON po.poll_id = p.id
+      LEFT JOIN (
+        SELECT poll_id, option_id, user_id
+        FROM poll_votes
+        WHERE user_id = $1
+      ) uv ON uv.poll_id = p.id
       WHERE usp.user_id = $1
       ${pollSearchCondition}
 
@@ -273,6 +286,7 @@ const search = req.body?.search || null;
     res.status(500).json({ ok: false, error: "Server error" });
   }
 };
+
 
 
 
@@ -716,7 +730,7 @@ export const getAlllikesandComments = async (req, res) => {
 export const saveForumOrPoll = async (req, res) => {
   try {
     const userId = req.userId;
-    const { type, id } = req.body; 
+    const { type, id } = req.body;
     // type = "forum" | "poll"
     // id   = forum_post_id OR poll_id
 
@@ -753,7 +767,7 @@ export const saveForumOrPoll = async (req, res) => {
         );
         return res.json({ ok: true, saved: true, type: "forum", message: "Forum saved" });
       }
-    } 
+    }
 
     else if (type === "poll") {
       // ✅ Check if poll exists
@@ -926,6 +940,9 @@ export const getForumAndPollFeed = async (req, res) => {
     // =======================
     // 2) Fetch Polls (single query with json_agg)
     // =======================
+    // =======================
+    // 2) Fetch Polls (single query with json_agg)
+    // =======================
     let pollQuery = `
 SELECT 
   p.id,
@@ -939,6 +956,8 @@ SELECT
 
   CASE WHEN uv.user_id IS NOT NULL THEN true ELSE false END AS has_voted,
   uv.option_id AS user_selected_option,
+
+  CASE WHEN usp.user_id IS NOT NULL THEN true ELSE false END AS is_poll_saved,
 
   COALESCE(
     JSON_AGG(
@@ -976,10 +995,12 @@ LEFT JOIN (
   WHERE pv.user_id = $2
 ) uv ON uv.poll_id = p.id
 
+LEFT JOIN user_saved_polls usp
+  ON usp.poll_id = p.id AND usp.user_id = $2
+
 WHERE (p.expires_at IS NULL OR p.expires_at > $1)
 `;
 
-    // add filter for subject
     const pollParams = [new Date(), userId];
     if (subject) {
       pollParams.push(subject);
@@ -987,8 +1008,9 @@ WHERE (p.expires_at IS NULL OR p.expires_at > $1)
     }
 
     pollQuery += `
-GROUP BY p.id, v.view_count, uv.user_id, uv.option_id
+GROUP BY p.id, v.view_count, uv.user_id, uv.option_id, usp.user_id
 `;
+
 
     const pollRes = await pool.query(pollQuery, pollParams);
     const polls = pollRes.rows.map(p => ({
