@@ -1034,12 +1034,12 @@ export const getForumAndPollFeed = async (req, res) => {
     }));
 
     // =======================
-    // 2) Fetch Polls (single query with json_agg)
+    // 2) Fetch Polls
     // =======================
-    // =======================
-    // 2) Fetch Polls (single query with json_agg)
-    // =======================
-    let pollQuery = `
+// =======================
+// 2) Fetch Polls
+// =======================
+let pollQuery = `
 SELECT 
   p.id,
   p.question AS poll_title,
@@ -1054,6 +1054,24 @@ SELECT
   uv.option_id AS user_selected_option,
 
   CASE WHEN usp.user_id IS NOT NULL THEN true ELSE false END AS is_poll_saved,
+
+  COALESCE(l.like_count, 0) AS like_count,
+  COALESCE(c.comment_count, 0) AS comment_count,
+  CASE WHEN ul.user_id IS NOT NULL THEN true ELSE false END AS is_liked_by_user,
+
+  COALESCE(
+    JSON_AGG(
+      DISTINCT JSONB_BUILD_OBJECT(
+        'id', pc.id,
+        'comment', pc.comment,   -- ✅ fixed
+        'created_at', pc.created_at,
+        'user_id', cu.id,
+        'user_name', cu.name,
+        'profile_photo_url', cu.profile_photo_url
+      )
+    ) FILTER (WHERE pc.id IS NOT NULL),
+    '[]'
+  ) AS comments,
 
   COALESCE(
     JSON_AGG(
@@ -1094,27 +1112,46 @@ LEFT JOIN (
 LEFT JOIN user_saved_polls usp
   ON usp.poll_id = p.id AND usp.user_id = $2
 
+LEFT JOIN (
+  SELECT poll_id, COUNT(*) AS like_count
+  FROM poll_likes
+  GROUP BY poll_id
+) l ON l.poll_id = p.id
+
+LEFT JOIN poll_likes ul 
+  ON ul.poll_id = p.id AND ul.user_id = $2
+
+LEFT JOIN (
+  SELECT poll_id, COUNT(*) AS comment_count
+  FROM poll_comments
+  GROUP BY poll_id
+) c ON c.poll_id = p.id
+
+LEFT JOIN poll_comments pc ON pc.poll_id = p.id
+LEFT JOIN users cu ON cu.id = pc.user_id
+
 WHERE (p.expires_at IS NULL OR p.expires_at > $1)
 `;
 
-    const pollParams = [new Date(), userId];
-    if (subject) {
-      pollParams.push(subject);
-      pollQuery += ` AND p.subject_id = $${pollParams.length}`;
-    }
+// ✅ keep params array
+const pollParams = [new Date(), userId];
+if (subject) {
+  pollParams.push(subject);
+  pollQuery += ` AND p.subject_id = $${pollParams.length}`;
+}
 
-    pollQuery += `
-GROUP BY p.id, v.view_count, uv.user_id, uv.option_id, usp.user_id
+pollQuery += `
+GROUP BY p.id, v.view_count, uv.user_id, uv.option_id, usp.user_id, l.like_count, c.comment_count, ul.user_id
 `;
 
+const pollRes = await pool.query(pollQuery, pollParams);
+const polls = pollRes.rows.map(p => ({
+  ...p,
+  data_type: "poll",
+  has_voted: p.has_voted || false,
+  user_selected_option: p.user_selected_option || null
+}));
 
-    const pollRes = await pool.query(pollQuery, pollParams);
-    const polls = pollRes.rows.map(p => ({
-      ...p,
-      data_type: "poll",
-      has_voted: p.has_voted || false,
-      user_selected_option: p.user_selected_option || null
-    }));
 
     // =======================
     // 3) Merge + Sort
