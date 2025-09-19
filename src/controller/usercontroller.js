@@ -2417,14 +2417,14 @@ export const socialLogin = async (req, res) => {
     if (!email || !social_id || !provider) {
       return res.status(400).json({
         status: false,
-        message: "Email, social_id, and provider are required"
+        message: "Email, social_id, and provider are required",
       });
     }
 
-    // Find user and also join grade value
+    // Find user and join with grades to get grade_value
     const userRes = await pool.query(
       `SELECT u.id, u.email, u.name, u.grade_level, u.selected_subjects, 
-              u.grade_id, g.grade_value,
+              u.grade_id, g.grade_level as grade_value,
               u.daily_reminder_time, u.questions_per_day, u.school_name, 
               u.phone, u.provider, u.social_id, u.is_social_login, 
               u.profile_photo_url
@@ -2438,13 +2438,13 @@ export const socialLogin = async (req, res) => {
     if (userRes.rows.length === 0) {
       return res.status(404).json({
         status: false,
-        message: "User not found"
+        message: "User not found",
       });
     }
 
     const user = userRes.rows[0];
 
-    // Fetch subject details if user has selected subjects
+    // Fetch subject details if selected
     let selectedSubjectsNames = [];
     if (user.selected_subjects && user.selected_subjects.length > 0) {
       const { rows: subjectRows } = await pool.query(
@@ -2469,8 +2469,10 @@ export const socialLogin = async (req, res) => {
       user.social_id = social_id;
     }
 
-    // Generate JWT
-    const token = jwt.sign({ userId: user.id }, JWT_SECRET, { expiresIn: "7d" });
+    // Generate JWT token
+    const token = jwt.sign({ userId: user.id }, JWT_SECRET, {
+      expiresIn: "7d",
+    });
 
     // Remove raw selected_subjects from response
     const { selected_subjects: _, ...userData } = user;
@@ -2480,21 +2482,20 @@ export const socialLogin = async (req, res) => {
       message: "Social login successful",
       data: {
         ...userData,
-        grade_value: user.grade_value,  // ✅ included here
+        grade_value: user.grade_value, // ✅ joined from grades
         selected_subjects: selectedSubjectsNames,
       },
       token,
-      redirect: "home"
+      redirect: "home",
     });
   } catch (error) {
     console.error("Social login error:", error);
     res.status(500).json({
       status: false,
-      message: "Server error"
+      message: "Server error",
     });
   }
 };
-
 
 // 3. Social registration API (creates user without OTP)
 export const socialRegister = async (req, res) => {
