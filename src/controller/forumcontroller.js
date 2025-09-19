@@ -157,18 +157,102 @@ export const listPosts = async (req, res) => {
   }
 };
 
-export const savedForumAndPolls = async ( req, res ) =>{
-
+export const savedForumAndPolls = async (req, res) => {
   try {
-    
-    const { id } = req.body
-    const userId = req.userId; 
+    const userId = req.userId; // from auth middleware
 
-    
+    if (!userId) {
+      return res.status(400).json({ ok: false, error: "User ID is required" });
+    }
+
+    const q = `
+      -- Fetch saved forums
+      SELECT 
+        'forum' AS data_type,
+        f.id,
+        f.content,
+        f.subject_tag,
+        f.grade_level,
+        f.created_at,
+        COALESCE(fvc.view_count, 0) AS view_count,
+        COALESCE(fl.like_count, 0) AS like_count,
+        COALESCE(ff.files, '[]') AS files
+      FROM user_saved_forums usf
+      JOIN forum_posts f ON f.id = usf.forum_post_id
+      LEFT JOIN (
+        SELECT forum_post_id, COUNT(*) AS view_count
+        FROM forum_views
+        GROUP BY forum_post_id
+      ) fvc ON fvc.forum_post_id = f.id
+      LEFT JOIN (
+        SELECT post_id, COUNT(*) AS like_count
+        FROM forum_likes
+        GROUP BY post_id
+      ) fl ON fl.post_id = f.id
+      LEFT JOIN (
+        SELECT post_id,
+          JSON_AGG(
+            JSON_BUILD_OBJECT(
+              'id', id,
+              'url', url,
+              'filename', filename
+            )
+          ) AS files
+        FROM forum_files
+        GROUP BY post_id
+      ) ff ON ff.post_id = f.id
+      WHERE usf.user_id = $1
+
+      UNION ALL
+
+      -- Fetch saved polls
+      SELECT
+        'poll' AS data_type,
+        p.id,
+        p.question AS content,
+        NULL AS subject_tag,
+        p.grade_level,
+        p.created_at,
+        COALESCE(pv.view_count, 0) AS view_count,
+        COALESCE(pvc.vote_count, 0) AS like_count, -- treat votes as "likes"
+        COALESCE(po.options, '[]') AS files       -- reuse "files" column to hold options
+      FROM polls p
+      JOIN poll_votes uv ON uv.poll_id = p.id AND uv.user_id = $1  -- assuming saved polls = voted polls
+      LEFT JOIN (
+        SELECT poll_id, COUNT(*) AS view_count
+        FROM poll_views
+        GROUP BY poll_id
+      ) pv ON pv.poll_id = p.id
+      LEFT JOIN (
+        SELECT poll_id, COUNT(*) AS vote_count
+        FROM poll_votes
+        GROUP BY poll_id
+      ) pvc ON pvc.poll_id = p.id
+      LEFT JOIN (
+        SELECT poll_id,
+          JSON_AGG(
+            JSON_BUILD_OBJECT(
+              'id', id,
+              'option_text', option_text,
+              'vote_count', (SELECT COUNT(*) FROM poll_votes WHERE poll_votes.option_id = poll_options.id)
+            )
+          ) AS options
+        FROM poll_options
+        GROUP BY poll_id
+      ) po ON po.poll_id = p.id
+
+      ORDER BY created_at DESC
+    `;
+
+    const r = await pool.query(q, [userId]);
+
+    res.json({ ok: true, saved_items: r.rows });
   } catch (error) {
-    
+    console.error("Error fetching saved forums and polls:", error);
+    res.status(500).json({ ok: false, error: "Server error" });
   }
-}
+};
+
 
 // get only particular forum notes.......
 
