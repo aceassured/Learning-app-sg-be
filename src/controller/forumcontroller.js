@@ -467,7 +467,7 @@ export const getonlyForumNotes = async (req, res) => {
 
 export const createPost = async (req, res) => {
   try {
-    const { grade_level, content, subject_tag, type_of_upload, author_type } = req.body;
+    const { grade_level, content, subject_tag, type_of_upload, author_type, forum_title, topic } = req.body;
     const authorId = req.userId;
 
     let postRes;
@@ -475,9 +475,9 @@ export const createPost = async (req, res) => {
 
     if (author_type === "user") {
       postRes = await pool.query(
-        `INSERT INTO forum_posts (user_id, grade_level, content, subject_tag, type_of_upload) 
+        `INSERT INTO forum_posts (user_id, grade_level, content, subject_tag, type_of_upload, forum_title) 
          VALUES ($1, $2, $3, $4, $5) RETURNING *`,
-        [authorId, grade_level, content, subject_tag, type_of_upload]
+        [authorId, grade_level, content, subject_tag, type_of_upload, forum_title]
       );
     } else if (author_type === "admin") {
       postRes = await pool.query(
