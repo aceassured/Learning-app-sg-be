@@ -1,4 +1,5 @@
 import pool from "../../database.js";
+import { sendNotificationToUser } from "../services/onesignal.js";
 
 // helper: get today's quiz status
 
@@ -388,6 +389,9 @@ export const submitAnswers = async (req, res) => {
           incorrect_count = user_activity.incorrect_count + $3`,
       [userId, correctCount, incorrectCount]
     );
+
+    const message = `You completed your quiz! Score: ${correctCount}/${answers.length}`;
+    sendNotificationToUser(userId, message);
 
     res.json({ ok: true, score: correctCount, total: answers.length, data: quizsessionData.rows[0], });
   } catch (err) {
