@@ -3101,3 +3101,24 @@ export const userconfirmPassword = async (req, res) => {
     });
   }
 };
+
+
+// user player id save for onesignal.......
+
+export const playerIdSave = async (req, res) => {
+  const { playerId } = req.body;
+    const userId = req.params.id || req.userId;
+  
+  try {
+    await pool.query(
+      `INSERT INTO user_push_tokens (user_id, player_id)
+       VALUES ($1, $2)
+       ON CONFLICT (player_id) DO UPDATE SET user_id = EXCLUDED.user_id`,
+      [userId, playerId]
+    );
+    res.json({ success: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "DB error" });
+  }
+}

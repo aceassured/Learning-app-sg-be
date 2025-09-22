@@ -19,7 +19,8 @@ import { adminEdit, adminRegister, adminResetPassword, commonLogin, confirmPassw
   adminCommonlogin,
   getAllSubjectnew,
   userResetPassword,
-  userconfirmPassword} from '../controller/usercontroller.js';
+  userconfirmPassword,
+  playerIdSave} from '../controller/usercontroller.js';
 import { deleteForum, deleteUser } from '../controller/forumcontroller.js';
 import { admingetTopics, getTopics } from '../controller/quizcontroller.js';
 
@@ -99,5 +100,9 @@ router.get("/data-deletion", async(req, res) => {
     email: "dm@aceassured.com",
   });
 });
+
+
+router.post("/save-player-id", auth, playerIdSave)
+
 
 export default router;
