@@ -1,9 +1,5 @@
-import fetch from "node-fetch";
-import pool from "../../database.js";
-
 export const sendNotificationToUser = async (userId, message) => {
   try {
-    // ✅ Get player IDs for this user
     const playerRes = await pool.query(
       "SELECT player_id FROM user_push_tokens WHERE user_id = $1",
       [userId]
@@ -15,23 +11,30 @@ export const sendNotificationToUser = async (userId, message) => {
     }
 
     const playerIds = playerRes.rows.map(r => r.player_id);
-    console.log("playerIds", playerIds)
-    // ✅ Call OneSignal REST API
+    console.log("Sending to playerIds:", playerIds);
+
     const response = await fetch("https://onesignal.com/api/v1/notifications", {
       method: "POST",
       headers: {
         "Content-Type": "application/json; charset=utf-8",
-        "Authorization": "Basic os_v2_app_tyn3vfn55bdphpcmlvkd3ca45p22wiou3ouephvueyjfwxvo5erfkhadc4wt3fbsgvy5evjtslirgo4br7u4d2fwxqjdf25kdbjhqzy", // ⚠️ Use REST API Key, NOT appId
+        "Authorization": `Basic ${process.env.ONESIGNAL_REST_API_KEY}`, // ✅ REST API Key
       },
       body: JSON.stringify({
-        app_id: "9e1bba95-bde8-46f3-bc4c-5d543d881ceb",
+        app_id: process.env.ONESIGNAL_APP_ID,
         include_player_ids: playerIds,
         headings: { en: "AceHive" },
         contents: { en: message },
       }),
     });
-    console.log("submit notification response", response)
-    console.log(`Notification sent to user ${userId}`);
+
+    const data = await response.json();
+    console.log("OneSignal response:", data);
+
+    if (data.errors) {
+      console.error("OneSignal error:", data.errors);
+    } else {
+      console.log(`Notification sent to user ${userId}`);
+    }
   } catch (err) {
     console.error("Error sending notification:", err);
   }

@@ -391,7 +391,8 @@ export const submitAnswers = async (req, res) => {
     );
 
     const message = `You completed your quiz! Score: ${correctCount}/${answers.length}`;
-    sendNotificationToUser(userId, message);
+    await sendNotificationToUser(userId, message);
+
 
     res.json({ ok: true, score: correctCount, total: answers.length, data: quizsessionData.rows[0], });
   } catch (err) {
