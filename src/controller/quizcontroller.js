@@ -391,7 +391,11 @@ export const submitAnswers = async (req, res) => {
     );
 
     const message = `You completed your quiz! Score: ${correctCount}/${answers.length}`;
-    await sendNotificationToUser(userId, message);
+    // After getting OneSignal User ID
+    setTimeout(async () => {
+      await sendNotificationToUser(userId, "Test notification");
+    }, 4000); // 2s delay ensures OneSignal server registration
+
 
 
     res.json({ ok: true, score: correctCount, total: answers.length, data: quizsessionData.rows[0], });
