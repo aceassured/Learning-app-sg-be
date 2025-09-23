@@ -3,12 +3,12 @@ import pool from "../../database.js";
 export const sendNotificationToUser = async (userId, message) => {
   try {
     const playerRes = await pool.query(
-      "SELECT player_id FROM user_push_tokens WHERE user_id = $1",
+      "SELECT player_id FROM user_push_tokens WHERE user_id = $1 AND subscribed = true",
       [userId]
     );
 
     if (!playerRes.rowCount) {
-      console.log(`No playerId found for user ${userId}`);
+      console.log(`No subscribed playerId found for user ${userId}`);
       return;
     }
 
@@ -19,7 +19,7 @@ export const sendNotificationToUser = async (userId, message) => {
       method: "POST",
       headers: {
         "Content-Type": "application/json; charset=utf-8",
-        "Authorization": `Basic ${process.env.ONESIGNAL_REST_API_KEY}`, // ✅ REST API Key
+        "Authorization": `Basic ${process.env.ONESIGNAL_REST_API_KEY}`,
       },
       body: JSON.stringify({
         app_id: process.env.ONESIGNAL_APP_ID,
@@ -32,12 +32,11 @@ export const sendNotificationToUser = async (userId, message) => {
     const data = await response.json();
     console.log("OneSignal response:", data);
 
-    if (data.errors) {
-      console.error("OneSignal error:", data.errors);
-    } else {
-      console.log(`Notification sent to user ${userId}`);
+    if (data.errors?.includes('All included players are not subscribed')) {
+      console.log("Some players are unsubscribed, consider removing them from DB");
     }
   } catch (err) {
     console.error("Error sending notification:", err);
   }
 };
+
