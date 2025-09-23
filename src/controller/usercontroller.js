@@ -3107,18 +3107,35 @@ export const userconfirmPassword = async (req, res) => {
 
 export const playerIdSave = async (req, res) => {
   const { playerId } = req.body;
-    const userId = req.params.id || req.userId;
-  
+  const userId = req.params.id || req.userId;
+
   try {
-    await pool.query(
-      `INSERT INTO user_push_tokens (user_id, player_id)
-       VALUES ($1, $2)
-       ON CONFLICT (player_id) DO UPDATE SET user_id = EXCLUDED.user_id`,
-      [userId, playerId]
+    // Check existing Player ID for this user
+    const existing = await pool.query(
+      "SELECT player_id FROM user_push_tokens WHERE user_id = $1",
+      [userId]
     );
+
+    if (existing.rowCount === 0) {
+      // No record, insert new
+      await pool.query(
+        "INSERT INTO user_push_tokens (user_id, player_id, subscribed, created_at) VALUES ($1, $2, true, now())",
+        [userId, playerId]
+      );
+    } else {
+      const oldPlayerId = existing.rows[0].player_id;
+      if (oldPlayerId !== playerId) {
+        // Update old Player ID
+        await pool.query(
+          "UPDATE user_push_tokens SET player_id=$1, subscribed=true WHERE user_id=$2",
+          [playerId, userId]
+        );
+      }
+    }
+
     res.json({ success: true });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "DB error" });
   }
-}
+};
