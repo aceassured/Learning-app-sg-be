@@ -15,9 +15,9 @@ export const sendNotificationToUser = async (userId, message) => {
     }
 
     const playerIds = playerRes.rows.map(r => r.player_id);
-
+    console.log("playerIds", playerIds)
     // ✅ Call OneSignal REST API
-    await fetch("https://onesignal.com/api/v1/notifications", {
+    const response = await fetch("https://onesignal.com/api/v1/notifications", {
       method: "POST",
       headers: {
         "Content-Type": "application/json; charset=utf-8",
@@ -30,7 +30,7 @@ export const sendNotificationToUser = async (userId, message) => {
         contents: { en: message },
       }),
     });
-
+    console.log("submit notification response", response)
     console.log(`Notification sent to user ${userId}`);
   } catch (err) {
     console.error("Error sending notification:", err);
