@@ -1,3 +1,5 @@
+import pool from "../../database.js";
+
 export const sendNotificationToUser = async (userId, message) => {
   try {
     const playerRes = await pool.query(
