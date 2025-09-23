@@ -26,6 +26,7 @@ export const sendNotificationToUser = async (userId, message) => {
       body: JSON.stringify({
         app_id: "9e1bba95-bde8-46f3-bc4c-5d543d881ceb",
         include_player_ids: playerIds,
+        headings: { en: "AceHive" },
         contents: { en: message },
       }),
     });
