@@ -1139,6 +1139,10 @@ if (subject) {
   pollParams.push(subject);
   pollQuery += ` AND p.subject_id = $${pollParams.length}`;
 }
+if (search) {
+  pollParams.push(`%${search}%`);
+  pollQuery += ` AND p.question ILIKE $${pollParams.length}`;
+}
 
 pollQuery += `
 GROUP BY p.id, v.view_count, uv.user_id, uv.option_id, usp.user_id, l.like_count, c.comment_count, ul.user_id

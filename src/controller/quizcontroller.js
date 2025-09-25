@@ -1,5 +1,7 @@
 import pool from "../../database.js";
-import { sendNotificationToUser } from "../services/onesignal.js";
+import { io } from "../../index.js";
+import { NotificationService } from "../services/notificationService.js";
+import { sendNotification } from "../utils/sendNotification.js";
 
 // helper: get today's quiz status
 
@@ -320,6 +322,89 @@ export const startQuiz = async (req, res) => {
 
 // submit answers for a session (array of {question_id, selected_option_id})
 
+// export const submitAnswers = async (req, res) => {
+//   try {
+//     const userId = req.userId;
+//     const { session_id, answers } = req.body;
+
+//     if (!session_id || !Array.isArray(answers)) {
+//       return res.status(400).json({ ok: false, message: 'Invalid payload' });
+//     }
+
+//     const sessionRes = await pool.query(
+//       'SELECT * FROM user_quiz_sessions WHERE id=$1 AND user_id=$2',
+//       [session_id, userId]
+//     );
+//     const session = sessionRes.rows[0];
+//     if (!session) {
+//       return res.status(404).json({ ok: false, message: 'Session not found' });
+//     }
+
+//     let correctCount = 0;
+//     for (const ans of answers) {
+//       const qRes = await pool.query(
+//         'SELECT correct_option_id FROM questions WHERE id=$1',
+//         [ans.question_id]
+//       );
+//       if (!qRes.rowCount) continue;
+
+//       const correct = qRes.rows[0].correct_option_id;
+//       const is_correct = (correct === ans.selected_option_id);
+//       if (is_correct) correctCount++;
+
+//       await pool.query(
+//         `INSERT INTO user_answers (session_id, question_id, selected_option_id, is_correct, answered_at)
+//          VALUES ($1, $2, $3, $4, now())
+//          ON CONFLICT (session_id, question_id)
+//          DO UPDATE SET 
+//             selected_option_id = EXCLUDED.selected_option_id,
+//             is_correct = EXCLUDED.is_correct,
+//             answered_at = now()`,
+//         [session_id, ans.question_id, ans.selected_option_id, is_correct]
+//       );
+
+//       await pool.query(
+//         `INSERT INTO user_answered_questions (user_id, question_id, answered_at)
+//          VALUES ($1, $2, now())
+//          ON CONFLICT (user_id, question_id) DO NOTHING`,
+//         [userId, ans.question_id]
+//       );
+//     }
+
+//     const quizsessionData = await pool.query(
+//       `UPDATE user_quiz_sessions 
+//        SET finished_at = now(), score = $1 
+//        WHERE id = $2 RETURNING *`,
+//       [correctCount, session_id]
+//     );
+
+//     const incorrectCount = answers.length - correctCount;
+//     await pool.query(
+//       `INSERT INTO user_activity (user_id, activity_date, correct_count, incorrect_count)
+//        VALUES ($1, current_date, $2, $3)
+//        ON CONFLICT (user_id, activity_date)
+//        DO UPDATE SET 
+//           correct_count = user_activity.correct_count + $2, 
+//           incorrect_count = user_activity.incorrect_count + $3`,
+//       [userId, correctCount, incorrectCount]
+//     );
+
+//     // Send notification using the updated function
+//     const message = `🎯 Quiz completed! You scored ${correctCount}/${answers.length}. ${correctCount >= answers.length * 0.8 ? 'Excellent work! 🌟' : 'Keep practicing! 💪'}`;
+
+//     res.json({ 
+//       ok: true, 
+//       score: correctCount, 
+//       total: answers.length, 
+//       data: quizsessionData.rows[0] 
+//     });
+//   } catch (err) {
+//     console.error(err);
+//     res.status(500).json({ ok: false, message: 'Server error' });
+//   }
+// };
+
+
 export const submitAnswers = async (req, res) => {
   try {
     const userId = req.userId;
@@ -350,27 +435,24 @@ export const submitAnswers = async (req, res) => {
       const is_correct = (correct === ans.selected_option_id);
       if (is_correct) correctCount++;
 
-      // ✅ Save answer
       await pool.query(
         `INSERT INTO user_answers (session_id, question_id, selected_option_id, is_correct, answered_at)
-     VALUES ($1, $2, $3, $4, now())
-     ON CONFLICT (session_id, question_id)
-     DO UPDATE SET 
-        selected_option_id = EXCLUDED.selected_option_id,
-        is_correct = EXCLUDED.is_correct,
-        answered_at = now()`,
+         VALUES ($1, $2, $3, $4, now())
+         ON CONFLICT (session_id, question_id)
+         DO UPDATE SET 
+            selected_option_id = EXCLUDED.selected_option_id,
+            is_correct = EXCLUDED.is_correct,
+            answered_at = now()`,
         [session_id, ans.question_id, ans.selected_option_id, is_correct]
       );
 
-      // ✅ Mark question as "seen" by this user
       await pool.query(
         `INSERT INTO user_answered_questions (user_id, question_id, answered_at)
-     VALUES ($1, $2, now())
-     ON CONFLICT (user_id, question_id) DO NOTHING`,
+         VALUES ($1, $2, now())
+         ON CONFLICT (user_id, question_id) DO NOTHING`,
         [userId, ans.question_id]
       );
     }
-
 
     const quizsessionData = await pool.query(
       `UPDATE user_quiz_sessions 
@@ -390,20 +472,30 @@ export const submitAnswers = async (req, res) => {
       [userId, correctCount, incorrectCount]
     );
 
-    const message = `You completed your quiz! Score: ${correctCount}/${answers.length}`;
-    // After getting OneSignal User ID
-    setTimeout(async () => {
-      await sendNotificationToUser(userId, "Test notification");
-    }, 4000); // 2s delay ensures OneSignal server registration
+    // 🎯 Generate quiz completion notifications
+    await NotificationService.generateQuizCompletionNotifications(userId, session_id);
 
+    const percentage = Math.round((correctCount / answers.length) * 100);
+    const message = `🎯 Quiz completed! You scored ${correctCount}/${answers.length} (${percentage}%). ${
+      percentage >= 80 ? 'Excellent work! 🌟' : 
+      percentage >= 60 ? 'Good job! Keep practicing! 💪' : 
+      'Keep studying and try again! 📚'
+    }`;
 
-
-    res.json({ ok: true, score: correctCount, total: answers.length, data: quizsessionData.rows[0], });
+    res.json({ 
+      ok: true, 
+      score: correctCount, 
+      total: answers.length, 
+      percentage: percentage,
+      data: quizsessionData.rows[0],
+      message: message
+    });
   } catch (err) {
     console.error(err);
     res.status(500).json({ ok: false, message: 'Server error' });
   }
 };
+
 
 
 // quiz review: return questions + user answers for a session

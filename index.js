@@ -8,10 +8,12 @@ import quizRouter from "./src/router/quizrouter.js";
 import forumRouter from "./src/router/forumrouter.js";
 import progressStates from "./src/router/progressRoutes.js";
 import adminRouter from "./src/router/adminrouter.js";
+import notificationRouter from "./src/router/notificationRouter.js"; // Add this
 import fs from "fs";
 import { exec } from "child_process";
 import http from "http";
 import { Server } from "socket.io";
+import auth from "./src/middleware/auth.js";
 
 dotenv.config({ quiet: true });
 
@@ -40,11 +42,13 @@ const corsOptions = {
 
 app.use(cors(corsOptions));
 
+// Routes
 app.use("/api/user", userRouter);
 app.use("/api/quiz", quizRouter);
 app.use("/api/forum", forumRouter);
 app.use("/api/progress", progressStates);
 app.use("/api/admin", adminRouter);
+app.use("/api/notifications", notificationRouter); // Add notifications route
 
 app.get("/", async (req, res) => {
   try {
@@ -56,8 +60,7 @@ app.get("/", async (req, res) => {
 
 // --- SOCKET.IO SETUP ---
 const server = http.createServer(app);
-
-const io = new Server(server, {
+export const io = new Server(server, {
   cors: {
     origin: corsOptions.origin,
     methods: ["GET", "POST"],
@@ -66,29 +69,28 @@ const io = new Server(server, {
 });
 
 // Store online users: userId -> socketId
-let onlineUsers = {};
+global.onlineUsers = {}; // Make it global so controller can access it
 
 io.on("connection", (socket) => {
   console.log("✅ User connected:", socket.id);
 
   socket.on("register", (userId) => {
-    onlineUsers[userId] = socket.id;
+    socket.userId = userId;
+    global.onlineUsers[userId] = socket.id;
     console.log(`📡 User ${userId} registered with socket ${socket.id}`);
   });
 
   socket.on("disconnect", () => {
     console.log("❌ User disconnected:", socket.id);
-    for (let userId in onlineUsers) {
-      if (onlineUsers[userId] === socket.id) {
-        delete onlineUsers[userId];
-      }
+    if (socket.userId) {
+      delete global.onlineUsers[socket.userId];
     }
   });
 });
 
-// --- API: Send Notification ---
+// Legacy API endpoints (keeping for backward compatibility)
 app.post("/api/send-notification", async (req, res) => {
-  const { userId, message, type } = req.body;
+  const { userId, message, type, subject } = req.body;
 
   if (!userId || !message) {
     return res.status(400).json({ error: "userId and message are required" });
@@ -96,14 +98,22 @@ app.post("/api/send-notification", async (req, res) => {
 
   try {
     const query = `
-      INSERT INTO notifications (user_id, message, type)
-      VALUES ($1, $2, $3) RETURNING *`;
-    const values = [userId, message, type || "general"];
+      INSERT INTO notifications (user_id, message, type, subject, is_read, is_viewed) 
+      VALUES ($1, $2, $3, $4, false, false) 
+      RETURNING *
+    `;
+    const values = [userId, message, type || "general", subject || null];
     const result = await pool.query(query, values);
-    const notification = result.rows[0];
 
-    if (onlineUsers[userId]) {
-      io.to(onlineUsers[userId]).emit("notification", notification);
+    const notification = {
+      ...result.rows[0],
+      read: false,
+      viewed: false,
+      time_section: 'today'
+    };
+
+    if (global.onlineUsers[userId]) {
+      io.to(global.onlineUsers[userId]).emit("notification", notification);
       console.log(`📨 Sent real-time notification to user ${userId}`);
     }
 
@@ -111,6 +121,65 @@ app.post("/api/send-notification", async (req, res) => {
   } catch (error) {
     console.error("❌ Error sending notification:", error);
     res.status(500).json({ error: "Failed to send notification" });
+  }
+});
+
+// Legacy get notifications endpoint
+app.get("/api/notifications", async (req, res) => {
+  const userId = req.query.userId;
+  
+  if (!userId) return res.status(400).json({ error: "Missing userId" });
+
+  try {
+    const result = await pool.query(
+      `SELECT 
+        id, 
+        user_id, 
+        message, 
+        type, 
+        subject, 
+        is_read, 
+        is_viewed, 
+        created_at,
+        CASE 
+          WHEN created_at >= CURRENT_DATE THEN 'today'
+          WHEN created_at >= CURRENT_DATE - INTERVAL '7 days' THEN 'thisWeek'
+          ELSE 'earlier'
+        END as time_section
+       FROM notifications 
+       WHERE user_id = $1 
+       ORDER BY created_at DESC`,
+      [userId]
+    );
+
+    const notifications = result.rows.map(notification => ({
+      ...notification,
+      read: notification.is_read,
+      viewed: notification.is_viewed
+    }));
+
+    const unreadCount = notifications.filter(n => !n.is_read).length;
+
+    res.json({ notifications, unreadCount });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to fetch notifications" });
+  }
+});
+
+// Legacy mark as read endpoint
+app.put("/api/notifications/mark-as-read", async (req, res) => {
+  const { userId, ids } = req.body;
+  
+  try {
+    await pool.query(
+      "UPDATE notifications SET is_read = true WHERE user_id=$1 AND id = ANY($2::int[])",
+      [userId, ids]
+    );
+    res.json({ success: true });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: "Failed to mark as read" });
   }
 });
 

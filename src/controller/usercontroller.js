@@ -7,7 +7,7 @@ import bcrypt from "bcrypt"
 import crypto from "crypto";
 import nodemailer from "nodemailer";
 import { uploadBufferToVercel } from "../utils/vercel-blob.js";
-
+import { NotificationService } from "../services/notificationService.js";
 const JWT_SECRET = process.env.JWT_SECRET || 'dev_secret';
 
 export const login = async (req, res) => {
@@ -48,6 +48,76 @@ export const login = async (req, res) => {
     res.status(500).json({ ok: false, message: 'Server error' });
   }
 };
+
+// export const Commonlogin = async (req, res) => {
+//   try {
+//     const { email, password } = req.body;
+
+//     if (!email || !password) {
+//       return res.status(400).json({ status: false, message: "Email and password are required" });
+//     }
+
+//     // ✅ Fetch user with grade join
+//     const { rows } = await pool.query(
+//       `SELECT 
+//          u.*,
+//          g.grade_level AS grade_value
+//        FROM users u
+//        LEFT JOIN grades g ON g.id = u.grade_id
+//        WHERE u.email = $1`,
+//       [email]
+//     );
+
+//     const user = rows[0];
+//     if (!user) {
+//       return res.status(401).json({
+//         status: false,
+//         message: "User not found. Please sign up to continue.",
+//       });
+//     }
+
+//     // ✅ Compare password with hashed password
+//     const isMatch = await bcrypt.compare(password, user.password);
+//     if (!isMatch) {
+//       return res.status(401).json({ status: false, message: "Invalid credentials" });
+//     }
+
+//     // ✅ Fetch subject details only if selected_subjects exist
+//     let selectedSubjectsNames = [];
+//     if (user.selected_subjects && user.selected_subjects.length > 0) {
+//       const { rows: subjectRows } = await pool.query(
+//         `SELECT id, icon, subject 
+//          FROM subjects 
+//          WHERE id = ANY($1::int[])`,
+//         [user.selected_subjects.map(Number)]
+//       );
+//       selectedSubjectsNames = subjectRows.map((r) => ({
+//         id: r.id,
+//         subject: r.subject,
+//         icon: r.icon,
+//       }));
+//     }
+
+//     // ✅ Generate JWT token
+//     const token = jwt.sign({ userId: user.id }, JWT_SECRET, { expiresIn: "7d" });
+
+//     // ✅ Return response without password
+//     const { password: _, ...userData } = user;
+
+//     return res.json({
+//       status: true,
+//       data: {
+//         ...userData,
+//         selected_subjects: selectedSubjectsNames,
+//         grade_value: user.grade_value || null, // return grade_level name
+//       },
+//       token,
+//     });
+//   } catch (err) {
+//     console.error("Login error:", err);
+//     res.status(500).json({ status: false, message: "Server error" });
+//   }
+// };
 
 export const Commonlogin = async (req, res) => {
   try {
@@ -101,6 +171,16 @@ export const Commonlogin = async (req, res) => {
     // ✅ Generate JWT token
     const token = jwt.sign({ userId: user.id }, JWT_SECRET, { expiresIn: "7d" });
 
+    // 🎯 Generate smart notifications after successful login
+    // Run in background to avoid delaying login response
+    setTimeout(async () => {
+      try {
+        await NotificationService.generateLoginNotifications(user.id);
+      } catch (error) {
+        console.error("Error generating login notifications:", error);
+      }
+    }, 1000); // 1 second delay
+
     // ✅ Return response without password
     const { password: _, ...userData } = user;
 
@@ -118,6 +198,7 @@ export const Commonlogin = async (req, res) => {
     res.status(500).json({ status: false, message: "Server error" });
   }
 };
+
 
 
 export const register = async (req, res) => {
@@ -2410,6 +2491,93 @@ export const linkSocialAccount = async (req, res) => {
 
 
 // 2. Social login API
+// export const socialLogin = async (req, res) => {
+//   try {
+//     const { email, social_id, provider } = req.body;
+
+//     if (!email || !social_id || !provider) {
+//       return res.status(400).json({
+//         status: false,
+//         message: "Email, social_id, and provider are required",
+//       });
+//     }
+
+//     // Find user and join with grades to get grade_value
+//     const userRes = await pool.query(
+//       `SELECT u.id, u.email, u.name, u.grade_level, u.selected_subjects, 
+//               u.grade_id, g.grade_level as grade_value,
+//               u.daily_reminder_time, u.questions_per_day, u.school_name, 
+//               u.phone, u.provider, u.social_id, u.is_social_login, 
+//               u.profile_photo_url
+//        FROM users u
+//        LEFT JOIN grades g ON g.id = u.grade_id
+//        WHERE (u.email = $1 AND u.social_id = $2 AND u.provider = $3) 
+//           OR (u.email = $1 AND u.provider = $3)`,
+//       [email, social_id, provider]
+//     );
+
+//     if (userRes.rows.length === 0) {
+//       return res.status(404).json({
+//         status: false,
+//         message: "User not found",
+//       });
+//     }
+
+//     const user = userRes.rows[0];
+
+//     // Fetch subject details if selected
+//     let selectedSubjectsNames = [];
+//     if (user.selected_subjects && user.selected_subjects.length > 0) {
+//       const { rows: subjectRows } = await pool.query(
+//         `SELECT id, icon, subject 
+//          FROM subjects 
+//          WHERE id = ANY($1::int[])`,
+//         [user.selected_subjects.map(Number)]
+//       );
+//       selectedSubjectsNames = subjectRows.map((r) => ({
+//         id: r.id,
+//         subject: r.subject,
+//         icon: r.icon,
+//       }));
+//     }
+
+//     // If social_id doesn’t match, update it
+//     if (user.social_id !== social_id) {
+//       await pool.query(
+//         `UPDATE users SET social_id = $1 WHERE id = $2`,
+//         [social_id, user.id]
+//       );
+//       user.social_id = social_id;
+//     }
+
+//     // Generate JWT token
+//     const token = jwt.sign({ userId: user.id }, JWT_SECRET, {
+//       expiresIn: "7d",
+//     });
+
+//     // Remove raw selected_subjects from response
+//     const { selected_subjects: _, ...userData } = user;
+
+//     return res.json({
+//       status: true,
+//       message: "Social login successful",
+//       data: {
+//         ...userData,
+//         grade_value: user.grade_value, // ✅ joined from grades
+//         selected_subjects: selectedSubjectsNames,
+//       },
+//       token,
+//       redirect: "home",
+//     });
+//   } catch (error) {
+//     console.error("Social login error:", error);
+//     res.status(500).json({
+//       status: false,
+//       message: "Server error",
+//     });
+//   }
+// };
+
 export const socialLogin = async (req, res) => {
   try {
     const { email, social_id, provider } = req.body;
@@ -2460,7 +2628,7 @@ export const socialLogin = async (req, res) => {
       }));
     }
 
-    // If social_id doesn’t match, update it
+    // If social_id doesn't match, update it
     if (user.social_id !== social_id) {
       await pool.query(
         `UPDATE users SET social_id = $1 WHERE id = $2`,
@@ -2473,6 +2641,16 @@ export const socialLogin = async (req, res) => {
     const token = jwt.sign({ userId: user.id }, JWT_SECRET, {
       expiresIn: "7d",
     });
+
+    // 🎯 Generate smart notifications after successful social login
+    // Run in background to avoid delaying login response
+    setTimeout(async () => {
+      try {
+        await NotificationService.generateLoginNotifications(user.id);
+      } catch (error) {
+        console.error("Error generating social login notifications:", error);
+      }
+    }, 1000); // 1 second delay
 
     // Remove raw selected_subjects from response
     const { selected_subjects: _, ...userData } = user;
