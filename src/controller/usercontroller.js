@@ -16,7 +16,6 @@ import {
   verifyAuthenticationResponse,
 } from '@simplewebauthn/server';
 import { SendMailClient } from "zeptomail";
-``
 
 
 // Environment variables
@@ -321,51 +320,14 @@ export const generateBiometricRegistration = async (req, res) => {
 export const verifyBiometricRegistration = async (req, res) => {
   try {
     const { email, credential } = req.body;
-    console.log('🔐 Verifying biometric registration for:', email);
+    console.log('🔐 [VERIFY] Starting verification for:', email);
+    console.log('🔐 [VERIFY] Credential received:', !!credential);
 
-    if (!email || !credential) {
-      return res.status(400).json({ 
-        success: false, 
-        message: "Email and credential are required" 
-      });
-    }
-
-    // Get user and challenge
-    const { rows } = await pool.query(
-      'SELECT id, email, name, biometric_challenge FROM users WHERE email = $1',
-      [email]
-    );
-
-    if (rows.length === 0) {
-      return res.status(404).json({
-        success: false,
-        message: "User not found",
-      });
-    }
-
-    const user = rows[0];
-
-    if (!user.biometric_challenge) {
-      console.log('❌ No challenge found for user:', user.id);
-      return res.status(400).json({
-        success: false,
-        message: "No registration challenge found. Please start the registration process again.",
-      });
-    }
-
-    console.log('🔍 Verifying with ORIGIN:', ORIGIN, 'RP_ID:', RP_ID);
-
-    // Verify the registration
-    const verification = await verifyRegistrationResponse({
-      response: credential,
-      expectedChallenge: user.biometric_challenge,
-      expectedOrigin: ORIGIN,
-      expectedRPID: RP_ID,
-    });
-
-    console.log('✅ Verification result:', verification.verified);
+    // ... rest of your existing code ...
 
     if (verification.verified) {
+      console.log('🎉 [VERIFY] Verification successful, updating database...');
+      
       // Store the credential
       const credentialId = Buffer.from(verification.registrationInfo.credentialID);
       const publicKey = Buffer.from(verification.registrationInfo.credentialPublicKey);
@@ -386,15 +348,21 @@ export const verifyBiometricRegistration = async (req, res) => {
         ]
       );
 
-      console.log('🎉 Biometric registration completed for user:', user.id);
-      console.log('🆔 Credential ID stored:', credentialId.toString('base64'));
+      console.log('🎉 [VERIFY] Database updated successfully for user:', user.id);
+      
+      // Verify the update worked
+      const { rows: checkRows } = await pool.query(
+        'SELECT biometric_enabled FROM users WHERE id = $1',
+        [user.id]
+      );
+      console.log('✅ [VERIFY] Final biometric_enabled status:', checkRows[0]?.biometric_enabled);
 
       res.json({
         success: true,
         message: "Biometric authentication enabled successfully",
       });
     } else {
-      console.log('❌ Registration verification failed');
+      console.log('❌ [VERIFY] Registration verification failed');
       res.status(400).json({
         success: false,
         message: "Biometric registration verification failed",
@@ -402,7 +370,7 @@ export const verifyBiometricRegistration = async (req, res) => {
     }
 
   } catch (error) {
-    console.error('❌ Verify biometric registration error:', error);
+    console.error('❌ [VERIFY] Error:', error);
     res.status(500).json({ 
       success: false, 
       message: 'Server error: ' + error.message 
