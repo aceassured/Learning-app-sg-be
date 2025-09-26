@@ -20,7 +20,11 @@ import { adminEdit, adminRegister, adminResetPassword, commonLogin, confirmPassw
   getAllSubjectnew,
   userResetPassword,
   userconfirmPassword,
-  playerIdSave} from '../controller/usercontroller.js';
+  playerIdSave,
+  generateBiometricRegistration,
+  verifyBiometricRegistration,
+  generateBiometricAuth,
+  bioMetricLogin} from '../controller/usercontroller.js';
 import { deleteForum, deleteUser } from '../controller/forumcontroller.js';
 import { admingetTopics, getTopics } from '../controller/quizcontroller.js';
 
@@ -104,5 +108,11 @@ router.get("/data-deletion", async(req, res) => {
 
 router.post("/save-player-id", auth, playerIdSave)
 
+
+// Biometric authentication routes
+router.post('/generate-biometric-registration', generateBiometricRegistration);
+router.post('/verify-biometric-registration', verifyBiometricRegistration);
+router.post('/generate-biometric-auth', generateBiometricAuth); // No email required
+router.post('/biometric-login', bioMetricLogin); // No email required
 
 export default router;
