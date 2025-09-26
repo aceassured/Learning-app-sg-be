@@ -69,7 +69,6 @@ router.post("/questionadd",upload.fields([{ name: "file", maxCount: 1 },{ name: 
 router.get("/allquestions", getAllquestions)
 router.get("/home", homeApi)
 router.delete("/deletequestion", deleteQuestions)
-router.delete("/deleteforum", deleteForum)
 router.delete("/deleteuser", deleteUser)
 router.post("/addNewUser",addNewUser)
 router.put("/changeUserRole",changeUserRole)
