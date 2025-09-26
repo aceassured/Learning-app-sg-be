@@ -317,7 +317,7 @@ export const getonlyForumNotes = async (req, res) => {
 
         -- ✅ Add topic info
         p.topic_id,
-        t.topic_name,
+        t.topic AS topic_name,
 
         COALESCE(
           JSON_AGG(
@@ -394,7 +394,7 @@ export const getonlyForumNotes = async (req, res) => {
 
       WHERE p.id = $1
       GROUP BY 
-        p.id, s.subject, g.grade_level, t.topic_name, p.topic_id,
+        p.id, s.subject, g.grade_level, t.topic, p.topic_id,
         u.id, a.id, 
         l.like_count, 
         c.comment_count, 
