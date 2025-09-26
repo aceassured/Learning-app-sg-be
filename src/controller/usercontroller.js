@@ -15,7 +15,9 @@ import {
   generateAuthenticationOptions,
   verifyAuthenticationResponse,
 } from '@simplewebauthn/server';
+import { SendMailClient } from "zeptomail";
 ``
+
 
 // Environment variables
 const ORIGIN = process.env.ORIGIN || 'https://ace-hive-production-fe.vercel.app';
@@ -709,6 +711,13 @@ export const userregisterApi = async (req, res) => {
 
 const generateOtp = () => Math.floor(10000 + Math.random() * 90000).toString();
 
+
+const client = new SendMailClient({
+  url: 'api.zeptomail.in/',
+  token: "Zoho-enczapikey PHtE6r1cEbzi3TYt8kNSsfWxEMahNI99+elvKlZFstsXA/MEGk0D+d0ukmLlrBp/UaZGRvPNzd5rtL3PsejXc2bpMm9MCmqyqK3sx/VYSPOZsbq6x00fs1kdfkDVXYHucNBq3SzfvNvbNA=="
+
+});
+
 export const userJustregisterApi = async (req, res) => {
   try {
     const { email, name, password, confirmPassword } = req.body;
@@ -749,22 +758,22 @@ export const userJustregisterApi = async (req, res) => {
       [user.id]
     );
 
-    // ✅ Setup nodemailer
-    const transporter = nodemailer.createTransport({
-      service: "gmail", // or other provider
-      auth: {
-        user: process.env.EMAIL_USER,
-        pass: process.env.EMAIL_PASS,
-      },
-    });
+    // // ✅ Setup nodemailer
+    // const transporter = nodemailer.createTransport({
+    //   service: "gmail", // or other provider
+    //   auth: {
+    //     user: process.env.EMAIL_USER,
+    //     pass: process.env.EMAIL_PASS,
+    //   },
+    // });
 
-    // ✅ Send OTP email
-    await transporter.sendMail({
-      from: process.env.EMAIL_USER,
-      to: email,
-      subject: "Your OTP Code",
-      text: `Your OTP code is ${otp}. It is valid for 10 minutes.`,
-    });
+    // // ✅ Send OTP email
+    // await transporter.sendMail({
+    //   from: process.env.EMAIL_USER,
+    //   to: email,
+    //   subject: "Your OTP Code",
+    //   text: `Your OTP code is ${otp}. It is valid for 10 minutes.`,
+    // });
 
     return res.json({
       status: true,
