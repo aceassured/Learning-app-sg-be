@@ -320,19 +320,67 @@ export const generateBiometricRegistration = async (req, res) => {
 export const verifyBiometricRegistration = async (req, res) => {
   try {
     const { email, credential } = req.body;
-    console.log('🔐 [VERIFY] Starting verification for:', email);
-    console.log('🔐 [VERIFY] Credential received:', !!credential);
+    console.log('🔐 [VERIFY] Starting verification for email:', email);
+    console.log('🔐 [VERIFY] Received credential:', !!credential);
+    console.log('🔐 [VERIFY] Credential type:', credential?.type);
+    console.log('🔐 [VERIFY] Credential id length:', credential?.id?.length);
 
-    // ... rest of your existing code ...
+    if (!email || !credential) {
+      console.log('❌ [VERIFY] Missing email or credential');
+      return res.status(400).json({ 
+        success: false, 
+        message: "Email and credential are required" 
+      });
+    }
+
+    // Get user and challenge
+    const { rows } = await pool.query(
+      'SELECT id, email, name, biometric_challenge FROM users WHERE email = $1',
+      [email]
+    );
+
+    if (rows.length === 0) {
+      console.log('❌ [VERIFY] User not found for email:', email);
+      return res.status(404).json({
+        success: false,
+        message: "User not found",
+      });
+    }
+
+    const user = rows[0];
+    console.log('👤 [VERIFY] Found user ID:', user.id);
+
+    if (!user.biometric_challenge) {
+      console.log('❌ [VERIFY] No challenge found for user:', user.id);
+      return res.status(400).json({
+        success: false,
+        message: "No registration challenge found. Please start the registration process again.",
+      });
+    }
+
+    console.log('🔍 [VERIFY] Challenge exists, verifying with ORIGIN:', ORIGIN, 'RP_ID:', RP_ID);
+
+    // Verify the registration
+    const verification = await verifyRegistrationResponse({
+      response: credential,
+      expectedChallenge: user.biometric_challenge,
+      expectedOrigin: ORIGIN,
+      expectedRPID: RP_ID,
+    });
+
+    console.log('✅ [VERIFY] Verification completed, result:', verification.verified);
 
     if (verification.verified) {
-      console.log('🎉 [VERIFY] Verification successful, updating database...');
+      console.log('🎉 [VERIFY] Verification successful! Updating database...');
       
       // Store the credential
       const credentialId = Buffer.from(verification.registrationInfo.credentialID);
       const publicKey = Buffer.from(verification.registrationInfo.credentialPublicKey);
       
-      await pool.query(
+      console.log('💾 [VERIFY] Storing credential ID length:', credentialId.length);
+      console.log('💾 [VERIFY] Storing public key length:', publicKey.length);
+      
+      const updateResult = await pool.query(
         `UPDATE users SET 
          biometric_credential_id = $1,
          biometric_public_key = $2,
@@ -348,19 +396,30 @@ export const verifyBiometricRegistration = async (req, res) => {
         ]
       );
 
-      console.log('🎉 [VERIFY] Database updated successfully for user:', user.id);
-      
+      console.log('✅ [VERIFY] Database update completed, rows affected:', updateResult.rowCount);
+
       // Verify the update worked
       const { rows: checkRows } = await pool.query(
-        'SELECT biometric_enabled FROM users WHERE id = $1',
+        'SELECT biometric_enabled, biometric_credential_id IS NOT NULL as has_cred FROM users WHERE id = $1',
         [user.id]
       );
-      console.log('✅ [VERIFY] Final biometric_enabled status:', checkRows[0]?.biometric_enabled);
+      
+      console.log('🔍 [VERIFY] Final verification - biometric_enabled:', checkRows[0]?.biometric_enabled);
+      console.log('🔍 [VERIFY] Final verification - has_credential:', checkRows[0]?.has_cred);
 
-      res.json({
-        success: true,
-        message: "Biometric authentication enabled successfully",
-      });
+      if (checkRows[0]?.biometric_enabled) {
+        console.log('🎉 [VERIFY] SUCCESS: Biometric registration completed for user:', user.id);
+        res.json({
+          success: true,
+          message: "Biometric authentication enabled successfully",
+        });
+      } else {
+        console.log('❌ [VERIFY] Database update failed - biometric_enabled still false');
+        res.status(500).json({
+          success: false,
+          message: "Database update failed",
+        });
+      }
     } else {
       console.log('❌ [VERIFY] Registration verification failed');
       res.status(400).json({
@@ -370,10 +429,11 @@ export const verifyBiometricRegistration = async (req, res) => {
     }
 
   } catch (error) {
-    console.error('❌ [VERIFY] Error:', error);
+    console.error('❌ [VERIFY] Complete error:', error);
+    console.error('❌ [VERIFY] Error stack:', error.stack);
     res.status(500).json({ 
       success: false, 
-      message: 'Server error: ' + error.message 
+      message: 'Server error during verification: ' + error.message 
     });
   }
 };
@@ -381,40 +441,61 @@ export const verifyBiometricRegistration = async (req, res) => {
 // 3. Generate biometric authentication options (UPDATED)
 export const generateBiometricAuth = async (req, res) => {
   try {
-    console.log('🔐 Generating biometric auth options...');
+    console.log('🔐 [AUTH] Generating biometric auth options...');
 
-    // Get all users with biometric enabled
+    // Get all users with biometric enabled - with more detailed query
     const { rows } = await pool.query(
-      'SELECT id, email, biometric_credential_id FROM users WHERE biometric_enabled = TRUE AND biometric_credential_id IS NOT NULL'
+      `SELECT id, email, biometric_credential_id, biometric_enabled, 
+              LENGTH(biometric_credential_id) as cred_length 
+       FROM users 
+       WHERE biometric_enabled = TRUE AND biometric_credential_id IS NOT NULL`
     );
 
-    console.log('👥 Found', rows.length, 'biometric-enabled users');
+    console.log('👥 [AUTH] Found', rows.length, 'biometric-enabled users');
+    
+    // Log each user for debugging
+    rows.forEach((user, index) => {
+      console.log(`👤 [AUTH] User ${index + 1}: ID=${user.id}, email=${user.email}, enabled=${user.biometric_enabled}, cred_length=${user.cred_length}`);
+    });
 
     if (rows.length === 0) {
+      console.log('⚠️ [AUTH] No biometric users found');
+      
+      // Check if any users have biometric data at all
+      const { rows: debugRows } = await pool.query(
+        `SELECT id, email, biometric_enabled, 
+                biometric_credential_id IS NOT NULL as has_cred,
+                biometric_challenge IS NOT NULL as has_challenge
+         FROM users 
+         ORDER BY id DESC LIMIT 5`
+      );
+      
+      console.log('🔍 [AUTH] Debug - Recent users biometric status:');
+      debugRows.forEach(user => {
+        console.log(`  User ${user.id}: enabled=${user.biometric_enabled}, has_cred=${user.has_cred}, has_challenge=${user.has_challenge}`);
+      });
+      
       return res.json({
         success: false,
         message: "No users have biometric authentication set up.",
       });
     }
 
-    // Log credential IDs for debugging
-    rows.forEach((user, index) => {
-      console.log(`User ${index + 1} credential ID:`, user.biometric_credential_id.toString('base64'));
-    });
-
     // Create allowCredentials array
     const allowCredentials = rows.map(user => ({
       id: user.biometric_credential_id,
       type: 'public-key',
-      transports: ['internal', 'hybrid', 'usb', 'ble', 'nfc'], // All transport methods
+      transports: ['internal', 'hybrid', 'usb', 'ble', 'nfc'],
     }));
+
+    console.log('🔑 [AUTH] Created allowCredentials array with', allowCredentials.length, 'entries');
 
     // Generate authentication options
     const options = await generateAuthenticationOptions({
       rpID: RP_ID,
       allowCredentials,
-      userVerification: 'preferred', // More compatible
-      timeout: 60000, // 60 seconds
+      userVerification: 'preferred',
+      timeout: 60000,
     });
 
     // Store challenge for all biometric users
@@ -427,7 +508,7 @@ export const generateBiometricAuth = async (req, res) => {
 
     await Promise.all(updatePromises);
 
-    console.log('✅ Auth options generated with challenge:', options.challenge);
+    console.log('✅ [AUTH] Auth options generated with challenge length:', options.challenge.length);
 
     res.json({
       success: true,
@@ -435,7 +516,7 @@ export const generateBiometricAuth = async (req, res) => {
     });
 
   } catch (error) {
-    console.error('❌ Generate biometric auth error:', error);
+    console.error('❌ [AUTH] Generate biometric auth error:', error);
     res.status(500).json({ 
       success: false, 
       message: 'Failed to generate authentication options: ' + error.message 
