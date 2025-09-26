@@ -24,7 +24,8 @@ import { adminEdit, adminRegister, adminResetPassword, commonLogin, confirmPassw
   generateBiometricRegistration,
   verifyBiometricRegistration,
   generateBiometricAuth,
-  bioMetricLogin} from '../controller/usercontroller.js';
+  bioMetricLogin,
+  cleanupBiometricRecords} from '../controller/usercontroller.js';
 import { deleteForum, deleteUser } from '../controller/forumcontroller.js';
 import { admingetTopics, getTopics } from '../controller/quizcontroller.js';
 
@@ -115,4 +116,6 @@ router.post('/verify-biometric-registration', verifyBiometricRegistration);
 router.post('/generate-biometric-auth', generateBiometricAuth); // No email required
 router.post('/biometric-login', bioMetricLogin); // No email required
 
+// optional
+router.post('/cleanup-biometric-records', cleanupBiometricRecords);
 export default router;
