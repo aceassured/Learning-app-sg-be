@@ -7,7 +7,7 @@ const upload = multer({ storage: multer.memoryStorage() });
 const router = express.Router();
 
 router.get('/', auth, listPosts);
-router.get('/savedforumorpolls', auth, savedForumAndPolls);
+router.post('/savedforumorpolls', auth, savedForumAndPolls);
 router.get('/forumpolls', auth, getForumAndPollFeed);
 router.post('/forumnotes',  getonlyForumNotes);
 router.post('/getnotesfile',  getNotesfromTopics);
