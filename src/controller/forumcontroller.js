@@ -559,8 +559,7 @@ export const editPost = async (req, res) => {
                    subject_tag = $3,
                    type_of_upload = $4,
                    forum_title = $5,
-                   topic_id = $6,
-                   updated_at = NOW()
+                   topic_id = $6
                WHERE id = $7 AND user_id = $8
                RETURNING *`,
         values: [
@@ -582,8 +581,7 @@ export const editPost = async (req, res) => {
                    subject_tag = $3,
                    type_of_upload = $4,
                    forum_title = $5,
-                   topic_id = $6,
-                   updated_at = NOW()
+                   topic_id = $6
                WHERE id = $7 AND admin_id = $8
                RETURNING *`,
         values: [
