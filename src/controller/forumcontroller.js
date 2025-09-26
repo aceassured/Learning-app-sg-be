@@ -526,6 +526,106 @@ export const createPost = async (req, res) => {
 };
 
 
+export const editPost = async (req, res) => {
+  try {
+    const authorId = req.userId;
+    const {
+      post_id,
+      grade_level,
+      content,
+      subject_tag,
+      type_of_upload,
+      forum_title,
+      topic_id,
+      author_type,
+    } = req.body;
+
+    if (!post_id || !author_type) {
+      return res.status(400).json({ ok: false, message: "post_id and author_type are required" });
+    }
+
+    let query;
+    if (author_type === "user") {
+      query = {
+        text: `UPDATE forum_posts
+               SET grade_level = $1,
+                   content = $2,
+                   subject_tag = $3,
+                   type_of_upload = $4,
+                   forum_title = $5,
+                   topic_id = $6,
+                   updated_at = NOW()
+               WHERE id = $7 AND user_id = $8
+               RETURNING *`,
+        values: [
+          grade_level,
+          content,
+          subject_tag,
+          type_of_upload,
+          forum_title,
+          topic_id,
+          post_id,
+          authorId,
+        ],
+      };
+    } else if (author_type === "admin") {
+      query = {
+        text: `UPDATE forum_posts
+               SET grade_level = $1,
+                   content = $2,
+                   subject_tag = $3,
+                   type_of_upload = $4,
+                   forum_title = $5,
+                   topic_id = $6,
+                   updated_at = NOW()
+               WHERE id = $7 AND admin_id = $8
+               RETURNING *`,
+        values: [
+          grade_level,
+          content,
+          subject_tag,
+          type_of_upload,
+          forum_title,
+          topic_id,
+          post_id,
+          authorId,
+        ],
+      };
+    } else {
+      return res.status(400).json({ ok: false, message: "Invalid author_type" });
+    }
+
+    const postRes = await pool.query(query);
+    if (postRes.rows.length === 0) {
+      return res.status(404).json({
+        ok: false,
+        message: "Post not found or you are not authorized to edit this post",
+      });
+    }
+
+    const post = postRes.rows[0];
+
+    // ✅ Handle file updates (optional: delete old files if needed)
+    if (req.files && req.files.length) {
+      // First, delete old files if you want to fully replace them
+      await pool.query(`DELETE FROM forum_files WHERE post_id = $1`, [post.id]);
+
+      for (const f of req.files) {
+        const url = await uploadBufferToVercel(f.buffer, f.originalname);
+        await pool.query(
+          `INSERT INTO forum_files (post_id, url, filename) VALUES ($1, $2, $3)`,
+          [post.id, url, f.originalname]
+        );
+      }
+    }
+
+    res.json({ ok: true, message: "Post updated successfully", post });
+  } catch (err) {
+    console.error("❌ editPost error:", err);
+    res.status(500).json({ ok: false, message: "Server error" });
+  }
+};
+
 
 // delete froum .........
 
@@ -735,6 +835,63 @@ export const addComment = async (req, res) => {
 
   } catch (error) {
     console.error("❌ addComment error:", error);
+    return res.status(500).json({ success: false, message: "Internal server error" });
+  }
+};
+
+
+export const editComment = async (req, res) => {
+  try {
+    const userId = req.userId;
+    const { comment_id, content, data_type } = req.body;
+
+    if (!comment_id || !content || !data_type) {
+      return res.status(400).json({
+        success: false,
+        message: "comment_id, content, and data_type are required",
+      });
+    }
+
+    let query;
+    if (data_type === "forum") {
+      query = {
+        text: `UPDATE forum_comments
+               SET content = $1, updated_at = NOW()
+               WHERE id = $2 AND user_id = $3
+               RETURNING *`,
+        values: [content, comment_id, userId],
+      };
+    } else if (data_type === "poll") {
+      query = {
+        text: `UPDATE poll_comments
+               SET comment = $1, updated_at = NOW()
+               WHERE id = $2 AND user_id = $3
+               RETURNING *`,
+        values: [content, comment_id, userId],
+      };
+    } else {
+      return res
+        .status(400)
+        .json({ success: false, message: "Invalid data_type. Must be 'forum' or 'poll'" });
+    }
+
+    const { rows } = await pool.query(query);
+
+    if (rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "Comment not found or you are not authorized to edit this comment",
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Comment updated successfully",
+      comment: rows[0],
+      data_type,
+    });
+  } catch (error) {
+    console.error("❌ editComment error:", error);
     return res.status(500).json({ success: false, message: "Internal server error" });
   }
 };
