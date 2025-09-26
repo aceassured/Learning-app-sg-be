@@ -635,15 +635,15 @@ export const editPost = async (req, res) => {
 
 export const deleteForum = async (req, res) => {
   try {
-    const { id } = req.body;
+    const { post_id } = req.body;
 
-    if (!id) {
+    if (!post_id) {
       return res.status(400).json({ ok: false, message: "Post ID is required" });
     }
 
-    await pool.query(`DELETE FROM forum_files WHERE post_id = $1`, [id]);
+    await pool.query(`DELETE FROM forum_files WHERE post_id = $1`, [post_id]);
 
-    const result = await pool.query(`DELETE FROM forum_posts WHERE id = $1 RETURNING *`, [id]);
+    const result = await pool.query(`DELETE FROM forum_posts WHERE id = $1 RETURNING *`, [post_id]);
 
     if (result.rowCount === 0) {
       return res.status(404).json({ ok: false, message: "Forum post not found" });
