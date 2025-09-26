@@ -856,7 +856,7 @@ export const editComment = async (req, res) => {
     if (data_type === "forum") {
       query = {
         text: `UPDATE forum_comments
-               SET content = $1, updated_at = NOW()
+               SET content = $1,
                WHERE id = $2 AND user_id = $3
                RETURNING *`,
         values: [content, comment_id, userId],
@@ -864,7 +864,7 @@ export const editComment = async (req, res) => {
     } else if (data_type === "poll") {
       query = {
         text: `UPDATE poll_comments
-               SET comment = $1, updated_at = NOW()
+               SET comment = $1,
                WHERE id = $2 AND user_id = $3
                RETURNING *`,
         values: [content, comment_id, userId],
