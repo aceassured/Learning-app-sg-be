@@ -315,6 +315,10 @@ export const getonlyForumNotes = async (req, res) => {
         p.type_of_upload,
         p.created_at,
 
+        -- ✅ Add topic info
+        p.topic_id,
+        t.topic_name,
+
         COALESCE(
           JSON_AGG(
             DISTINCT JSONB_BUILD_OBJECT(
@@ -365,6 +369,7 @@ export const getonlyForumNotes = async (req, res) => {
       LEFT JOIN users cu ON cu.id = fc.user_id
       LEFT JOIN subjects s ON s.id = p.subject_tag
       LEFT JOIN grades g ON g.id = p.grade_level
+      LEFT JOIN topics t ON t.id = p.topic_id   -- ✅ join topics
 
       LEFT JOIN (
         SELECT post_id, COUNT(*) AS like_count
@@ -389,7 +394,7 @@ export const getonlyForumNotes = async (req, res) => {
 
       WHERE p.id = $1
       GROUP BY 
-        p.id, s.subject, g.grade_level,
+        p.id, s.subject, g.grade_level, t.topic_name, p.topic_id,
         u.id, a.id, 
         l.like_count, 
         c.comment_count, 
@@ -479,6 +484,7 @@ export const getonlyForumNotes = async (req, res) => {
     res.status(500).json({ ok: false, error: "Server error" });
   }
 };
+
 
 
 
