@@ -8,14 +8,16 @@ import crypto from "crypto";
 import nodemailer from "nodemailer";
 import { uploadBufferToVercel } from "../utils/vercel-blob.js";
 import { NotificationService } from "../services/notificationService.js";
-const JWT_SECRET = process.env.JWT_SECRET || 'dev_secret';
 import { 
   generateRegistrationOptions,
   verifyRegistrationResponse,
   generateAuthenticationOptions,
   verifyAuthenticationResponse,
 } from '@simplewebauthn/server';
+import { isoBase64URL } from "@simplewebauthn/server/helpers";
 import { SendMailClient } from "zeptomail";
+
+const JWT_SECRET = process.env.JWT_SECRET || 'dev_secret';
 
 
 // Environment variables
@@ -2629,6 +2631,24 @@ export const getAllquestions = async (req, res) => {
   }
 };
 
+
+export const getParticularquestions = async (req, res) => {
+  try {
+    const { question_id } = req.body
+    
+    const query = `SELECT * FROM questions WHERE id = $1;`;
+    const result = await pool.query(query, [question_id]);
+
+    return res.status(200).json({
+      message: "Questions fetched successfully",
+      total: result.rows.length,
+      questions: result.rows,
+    });
+  } catch (error) {
+    console.error("Error fetching questions:", error);
+    return res.status(500).json({ message: "Internal Server Error" });
+  }
+};
 
 export const deleteQuestions = async (req, res) => {
   try {
