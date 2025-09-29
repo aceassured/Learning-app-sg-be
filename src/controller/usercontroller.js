@@ -190,9 +190,11 @@ export const Commonlogin = async (req, res) => {
     const { rows } = await pool.query(
       `SELECT 
          u.*,
-         g.grade_level AS grade_value
+         g.grade_level AS grade_value,
+         us.quiz_time_seconds
        FROM users u
        LEFT JOIN grades g ON g.id = u.grade_id
+       LEFT JOIN user_settings us ON us.user_id = u.id
        WHERE u.email = $1`,
       [email]
     );
