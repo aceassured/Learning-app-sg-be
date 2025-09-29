@@ -2230,7 +2230,7 @@ export const getAllTopic = async (req, res) => {
 
   try {
     const { rows: allSubjects } = await client.query(
-      `SELECT * FROM topics ORDER BY subject ASC`
+      `SELECT * FROM topics ORDER BY topic ASC`
     );
 
     return res.status(200).json({
