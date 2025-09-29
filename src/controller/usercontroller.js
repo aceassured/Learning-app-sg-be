@@ -2225,6 +2225,28 @@ export const getAllSubject = async (req, res) => {
     client.release();
   }
 };
+export const getAllTopic = async (req, res) => {
+  const client = await pool.connect();
+
+  try {
+    const { rows: allSubjects } = await client.query(
+      `SELECT * FROM topics ORDER BY subject ASC`
+    );
+
+    return res.status(200).json({
+      success: true,
+      data: allSubjects,
+    });
+  } catch (error) {
+    console.error("Get topics error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error",
+    });
+  } finally {
+    client.release();
+  }
+};
 
 export const getAllGrade = async (req, res) => {
   const client = await pool.connect();
