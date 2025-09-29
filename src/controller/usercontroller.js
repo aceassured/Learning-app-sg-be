@@ -3955,3 +3955,87 @@ export const playerIdSave = async (req, res) => {
     res.status(500).json({ error: "DB error" });
   }
 };
+
+export const updatequestion = async (req, res) => {
+  try {
+    const {
+      question_id,
+      question_text,
+      options,
+      correct_option_id,
+      subject_id,
+      grade_id,
+      topic_id,
+      question_type,
+      answer_explanation,
+    } = req.body;
+
+    if (!question_id) {
+      return res.status(400).json({ status: false, message: "question_id is required" });
+    }
+
+    // ✅ Fetch grade, subject, topic names
+    const gradeRes = await pool.query("SELECT grade_level FROM grades WHERE id = $1", [grade_id]);
+    const subjectRes = await pool.query("SELECT subject FROM subjects WHERE id = $1", [subject_id]);
+    const topicRes = await pool.query("SELECT topic FROM topics WHERE id = $1", [topic_id]);
+
+    const grade_level = gradeRes.rows[0]?.grade_level || null;
+    const subject = subjectRes.rows[0]?.subject || null;
+    const topic = topicRes.rows[0]?.topic || null;
+
+    // ✅ Handle file uploads (optional)
+    let question_url = null;
+    let answer_file_url = null;
+
+    if (req.files?.question_url) {
+      const file = req.files.question_url[0]; // assuming multer
+      question_url = await uploadBufferToVercel(file.buffer, file.originalname);
+    }
+
+    if (req.files?.answer_file_url) {
+      const file = req.files.answer_file_url[0];
+      answer_file_url = await uploadBufferToVercel(file.buffer, file.originalname);
+    }
+
+    // ✅ Update question
+    await pool.query(
+      `UPDATE questions
+       SET 
+         question_text = $1,
+         options = $2,
+         correct_option_id = $3,
+         subject_id = $4,
+         grade_id = $5,
+         topic_id = $6,
+         question_type = $7,
+         question_url = COALESCE($8, question_url),
+         answer_explanation = $9,
+         answer_file_url = COALESCE($10, answer_file_url),
+         grade_level = $11,
+         subject = $12,
+         topics = $13
+       WHERE id = $14`,
+      [
+        question_text,
+        JSON.stringify(options), // store as JSON
+        correct_option_id,
+        subject_id,
+        grade_id,
+        topic_id,
+        question_type,
+        question_url,
+        answer_explanation,
+        answer_file_url,
+        grade_level,
+        subject,
+        topic,
+        question_id,
+      ]
+    );
+
+    res.json({ status: true, message: "Question updated successfully" });
+  } catch (error) {
+    console.error("Update Question Error:", error);
+    res.status(500).json({ status: false, message: "Server error" });
+  }
+};
