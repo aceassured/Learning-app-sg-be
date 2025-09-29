@@ -131,7 +131,21 @@ export const getUserById = async (id) => {
 
   const user = res.rows[0];
 
-  // Convert selected_subjects IDs to objects with id and subject
+  // ---- Get grade_value ----
+  let gradeValue = null;
+  if (user.grade_id) {
+    const gradeRes = await pool.query(
+      `SELECT grade_level
+       FROM grades 
+       WHERE id = $1`,
+      [user.grade_id]
+    );
+    if (gradeRes.rows[0]) {
+      gradeValue = gradeRes.rows[0].grade_level;
+    }
+  }
+
+  // ---- Get selected subjects ----
   let selectedSubjects = [];
   if (user.selected_subjects && user.selected_subjects.length > 0) {
     const { rows } = await pool.query(
@@ -144,5 +158,7 @@ export const getUserById = async (id) => {
   return {
     ...user,
     selected_subjects: selectedSubjects,
+    grade_value: gradeValue, // ✅ Added grade_value here
   };
 };
+
