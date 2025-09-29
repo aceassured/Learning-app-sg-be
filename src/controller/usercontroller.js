@@ -8,7 +8,7 @@ import crypto from "crypto";
 import nodemailer from "nodemailer";
 import { uploadBufferToVercel } from "../utils/vercel-blob.js";
 import { NotificationService } from "../services/notificationService.js";
-import { 
+import {
   generateRegistrationOptions,
   verifyRegistrationResponse,
   generateAuthenticationOptions,
@@ -27,11 +27,11 @@ const JWT_SECRET = process.env.JWT_SECRET || 'dev_secret';
 
 
 // Environment variables - UPDATED for development vs production
-const ORIGIN = process.env.NODE_ENV === 'development' 
+const ORIGIN = process.env.NODE_ENV === 'development'
   ? 'http://localhost:5173'  // Your local Vite dev server
   : (process.env.ORIGIN || 'https://ace-hive-production-fe.vercel.app');
 
-const RP_ID = process.env.NODE_ENV === 'development' 
+const RP_ID = process.env.NODE_ENV === 'development'
   ? 'localhost'  // For local development
   : (process.env.RP_ID || 'ace-hive-production-fe.vercel.app');
 
@@ -240,9 +240,9 @@ export const generateBiometricRegistration = async (req, res) => {
     console.log('🌍 Using ORIGIN:', ORIGIN, 'RP_ID:', RP_ID);
 
     if (!email) {
-      return res.status(400).json({ 
-        success: false, 
-        message: "Email is required" 
+      return res.status(400).json({
+        success: false,
+        message: "Email is required"
       });
     }
 
@@ -311,9 +311,9 @@ export const generateBiometricRegistration = async (req, res) => {
 
   } catch (error) {
     console.error('❌ Generate biometric registration error:', error);
-    res.status(500).json({ 
-      success: false, 
-      message: 'Failed to generate registration options: ' + error.message 
+    res.status(500).json({
+      success: false,
+      message: 'Failed to generate registration options: ' + error.message
     });
   }
 };
@@ -329,9 +329,9 @@ export const verifyBiometricRegistration = async (req, res) => {
 
     if (!email || !credential) {
       console.log('❌ [VERIFY] Missing email or credential');
-      return res.status(400).json({ 
-        success: false, 
-        message: "Email and credential are required" 
+      return res.status(400).json({
+        success: false,
+        message: "Email and credential are required"
       });
     }
 
@@ -374,14 +374,14 @@ export const verifyBiometricRegistration = async (req, res) => {
 
     if (verification.verified) {
       console.log('🎉 [VERIFY] Verification successful! Updating database...');
-      
+
       // Store the credential
       const credentialId = Buffer.from(verification.registrationInfo.credentialID);
       const publicKey = Buffer.from(verification.registrationInfo.credentialPublicKey);
-      
+
       console.log('💾 [VERIFY] Storing credential ID length:', credentialId.length);
       console.log('💾 [VERIFY] Storing public key length:', publicKey.length);
-      
+
       const updateResult = await pool.query(
         `UPDATE users SET 
          biometric_credential_id = $1,
@@ -405,7 +405,7 @@ export const verifyBiometricRegistration = async (req, res) => {
         'SELECT biometric_enabled, biometric_credential_id IS NOT NULL as has_cred FROM users WHERE id = $1',
         [user.id]
       );
-      
+
       console.log('🔍 [VERIFY] Final verification - biometric_enabled:', checkRows[0]?.biometric_enabled);
       console.log('🔍 [VERIFY] Final verification - has_credential:', checkRows[0]?.has_cred);
 
@@ -433,9 +433,9 @@ export const verifyBiometricRegistration = async (req, res) => {
   } catch (error) {
     console.error('❌ [VERIFY] Complete error:', error);
     console.error('❌ [VERIFY] Error stack:', error.stack);
-    res.status(500).json({ 
-      success: false, 
-      message: 'Server error during verification: ' + error.message 
+    res.status(500).json({
+      success: false,
+      message: 'Server error during verification: ' + error.message
     });
   }
 };
@@ -454,7 +454,7 @@ export const generateBiometricAuth = async (req, res) => {
     );
 
     console.log('👥 [AUTH] Found', rows.length, 'biometric-enabled users');
-    
+
     // Log each user for debugging
     rows.forEach((user, index) => {
       console.log(`👤 [AUTH] User ${index + 1}: ID=${user.id}, email=${user.email}, enabled=${user.biometric_enabled}, cred_length=${user.cred_length}`);
@@ -462,7 +462,7 @@ export const generateBiometricAuth = async (req, res) => {
 
     if (rows.length === 0) {
       console.log('⚠️ [AUTH] No biometric users found');
-      
+
       // Check if any users have biometric data at all
       const { rows: debugRows } = await pool.query(
         `SELECT id, email, biometric_enabled, 
@@ -471,12 +471,12 @@ export const generateBiometricAuth = async (req, res) => {
          FROM users 
          ORDER BY id DESC LIMIT 5`
       );
-      
+
       console.log('🔍 [AUTH] Debug - Recent users biometric status:');
       debugRows.forEach(user => {
         console.log(`  User ${user.id}: enabled=${user.biometric_enabled}, has_cred=${user.has_cred}, has_challenge=${user.has_challenge}`);
       });
-      
+
       return res.json({
         success: false,
         message: "No users have biometric authentication set up.",
@@ -501,7 +501,7 @@ export const generateBiometricAuth = async (req, res) => {
     });
 
     // Store challenge for all biometric users
-    const updatePromises = rows.map(user => 
+    const updatePromises = rows.map(user =>
       pool.query(
         'UPDATE users SET biometric_challenge = $1 WHERE id = $2',
         [options.challenge, user.id]
@@ -519,9 +519,9 @@ export const generateBiometricAuth = async (req, res) => {
 
   } catch (error) {
     console.error('❌ [AUTH] Generate biometric auth error:', error);
-    res.status(500).json({ 
-      success: false, 
-      message: 'Failed to generate authentication options: ' + error.message 
+    res.status(500).json({
+      success: false,
+      message: 'Failed to generate authentication options: ' + error.message
     });
   }
 };
@@ -533,9 +533,9 @@ export const bioMetricLogin = async (req, res) => {
     console.log('🔐 Processing biometric login...');
 
     if (!credential) {
-      return res.status(400).json({ 
-        success: false, 
-        message: "Credential is required" 
+      return res.status(400).json({
+        success: false,
+        message: "Credential is required"
       });
     }
 
@@ -553,7 +553,7 @@ export const bioMetricLogin = async (req, res) => {
       } else {
         credentialIdBuffer = Buffer.from(credential.id);
       }
-      
+
       console.log('🔍 Looking for credential ID:', credentialIdBuffer.toString('base64'));
     } catch (error) {
       console.error('❌ Credential ID conversion error:', error);
@@ -576,7 +576,7 @@ export const bioMetricLogin = async (req, res) => {
 
     if (rows.length === 0) {
       console.log('❌ No matching user found for credential ID');
-      
+
       // Debug: List all stored credential IDs
       const { rows: allCreds } = await pool.query(
         'SELECT id, email, biometric_credential_id FROM users WHERE biometric_enabled = TRUE'
@@ -585,7 +585,7 @@ export const bioMetricLogin = async (req, res) => {
       allCreds.forEach(user => {
         console.log(`- User ${user.id}: ${user.biometric_credential_id?.toString('base64') || 'NULL'}`);
       });
-      
+
       return res.status(404).json({
         success: false,
         message: "No matching biometric credential found",
@@ -656,13 +656,13 @@ export const bioMetricLogin = async (req, res) => {
       }, 1000);
 
       // Return response without sensitive data
-      const { 
-        password: _, 
-        biometric_challenge: __, 
-        biometric_credential_id: ___, 
-        biometric_public_key: ____, 
-        biometric_counter: _____, 
-        ...userData 
+      const {
+        password: _,
+        biometric_challenge: __,
+        biometric_credential_id: ___,
+        biometric_public_key: ____,
+        biometric_counter: _____,
+        ...userData
       } = user;
 
       console.log('🎉 Biometric login successful for user:', user.id);
@@ -687,9 +687,9 @@ export const bioMetricLogin = async (req, res) => {
 
   } catch (error) {
     console.error('❌ Biometric login error:', error);
-    res.status(500).json({ 
-      success: false, 
-      message: 'Server error: ' + error.message 
+    res.status(500).json({
+      success: false,
+      message: 'Server error: ' + error.message
     });
   }
 };
@@ -1529,6 +1529,10 @@ export const userEdit = async (req, res) => {
     }
     if (grade_level !== undefined) {
       userFields.push(`grade_level = $${paramIndex++}`);
+      userValues.push(grade_level);
+    }
+    if (grade_level !== undefined) {
+      userFields.push(`grade_id = $${paramIndex++}`);
       userValues.push(grade_level);
     }
     if (questions_per_day !== undefined) {
@@ -2635,7 +2639,7 @@ export const getAllquestions = async (req, res) => {
 export const getParticularquestions = async (req, res) => {
   try {
     const { question_id } = req.body
-    
+
     const query = `SELECT * FROM questions WHERE id = $1;`;
     const result = await pool.query(query, [question_id]);
 
