@@ -3956,6 +3956,8 @@ export const playerIdSave = async (req, res) => {
   }
 };
 
+// admin edit question.......
+
 export const updatequestion = async (req, res) => {
   try {
     const {
@@ -4036,6 +4038,106 @@ export const updatequestion = async (req, res) => {
     res.json({ status: true, message: "Question updated successfully" });
   } catch (error) {
     console.error("Update Question Error:", error);
+    res.status(500).json({ status: false, message: "Server error" });
+  }
+};
+
+// admin create subject and topics
+
+export const admincreateSubject = async (req, res) => {
+  try {
+    const { grade_id, subject, topics } = req.body; 
+    // topics is optional, expected as array of topic names: ["Topic 1", "Topic 2"]
+
+    if (!grade_id || !subject) {
+      return res.status(400).json({ status: false, message: "grade_id and subject are required" });
+    }
+
+    // ✅ Upload icon if provided
+    let iconUrl = null;
+    if (req.files?.icon) {
+      const file = req.files.icon[0]; // assuming multer
+      iconUrl = await uploadBufferToVercel(file.buffer, file.originalname);
+    }
+
+    // ✅ Insert subject
+    const subjectResult = await pool.query(
+      `INSERT INTO subjects (grade_id, subject, icon)
+       VALUES ($1, $2, $3)
+       RETURNING id, grade_id, subject, icon`,
+      [grade_id, subject, iconUrl]
+    );
+
+    const subjectId = subjectResult.rows[0].id;
+
+    // ✅ Fetch grade_level for topics
+    const gradeRes = await pool.query(`SELECT grade_level FROM grades WHERE id = $1`, [grade_id]);
+    const grade_level = gradeRes.rows[0]?.grade_level || null;
+
+    // ✅ Insert topics if provided
+    let insertedTopics = [];
+    if (topics && Array.isArray(topics) && topics.length > 0) {
+      for (let t of topics) {
+        const topicRes = await pool.query(
+          `INSERT INTO topics (grade_id, grade_level, subject_id, topic)
+           VALUES ($1, $2, $3, $4)
+           RETURNING id, grade_id, grade_level, subject_id, topic`,
+          [grade_id, grade_level, subjectId, t]
+        );
+        insertedTopics.push(topicRes.rows[0]);
+      }
+    }
+
+    res.json({
+      status: true,
+      message: "Subject created successfully",
+      data: {
+        subject: subjectResult.rows[0],
+        topics: insertedTopics
+      }
+    });
+
+  } catch (error) {
+    console.error("Create Subject Error:", error);
+    res.status(500).json({ status: false, message: "Server error" });
+  }
+};
+
+
+// admin create topics separeatly...
+
+export const admincreateTopic = async (req, res) => {
+  try {
+    const { grade_id, subject_id, topic } = req.body;
+
+    if (!grade_id || !subject_id || !topic) {
+      return res.status(400).json({ status: false, message: "grade_id, subject_id and topic are required" });
+    }
+
+    const gradeRes = await pool.query(
+      `SELECT grade_level FROM grades WHERE id = $1`,
+      [grade_id]
+    );
+    if (gradeRes.rows.length === 0) {
+      return res.status(404).json({ status: false, message: "Grade not found" });
+    }
+
+    const grade_level = gradeRes.rows[0].grade_level;
+
+    const result = await pool.query(
+      `INSERT INTO topics (grade_id, grade_level, subject_id, topic)
+       VALUES ($1, $2, $3, $4)
+       RETURNING id, grade_id, grade_level, subject_id, topic`,
+      [grade_id, grade_level, subject_id, topic]
+    );
+
+    res.json({
+      status: true,
+      message: "Topic created successfully",
+      data: result.rows[0],
+    });
+  } catch (error) {
+    console.error("Create Topic Error:", error);
     res.status(500).json({ status: false, message: "Server error" });
   }
 };
