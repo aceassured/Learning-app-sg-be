@@ -28,11 +28,11 @@ const JWT_SECRET = process.env.JWT_SECRET || 'dev_secret';
 
 
 // CRITICAL: Environment configuration
-const ORIGIN = process.env.NODE_ENV === 'development' 
+const ORIGIN = process.env.NODE_ENV === 'development'
   ? 'http://localhost:5173'
   : 'https://ace-hive-production-fe.vercel.app';
 
-const RP_ID = process.env.NODE_ENV === 'development' 
+const RP_ID = process.env.NODE_ENV === 'development'
   ? 'localhost'
   : 'ace-hive-production-fe.vercel.app';
 
@@ -242,9 +242,9 @@ export const generateBiometricRegistration = async (req, res) => {
     console.log('🔐 [REG] Starting biometric registration for:', email);
 
     if (!email) {
-      return res.status(400).json({ 
-        success: false, 
-        message: "Email is required" 
+      return res.status(400).json({
+        success: false,
+        message: "Email is required"
       });
     }
 
@@ -308,9 +308,9 @@ export const generateBiometricRegistration = async (req, res) => {
 
   } catch (error) {
     console.error('❌ [REG] Error:', error);
-    res.status(500).json({ 
-      success: false, 
-      message: 'Failed to generate registration options: ' + error.message 
+    res.status(500).json({
+      success: false,
+      message: 'Failed to generate registration options: ' + error.message
     });
   }
 };
@@ -322,9 +322,9 @@ export const verifyBiometricRegistration = async (req, res) => {
     console.log('🔐 [VERIFY] Starting verification for:', email);
 
     if (!email || !credential) {
-      return res.status(400).json({ 
-        success: false, 
-        message: "Email and credential are required" 
+      return res.status(400).json({
+        success: false,
+        message: "Email and credential are required"
       });
     }
 
@@ -432,9 +432,9 @@ export const verifyBiometricRegistration = async (req, res) => {
 
   } catch (error) {
     console.error('❌ [VERIFY] Complete error:', error);
-    res.status(500).json({ 
-      success: false, 
-      message: 'Server error during verification: ' + error.message 
+    res.status(500).json({
+      success: false,
+      message: 'Server error during verification: ' + error.message
     });
   }
 };
@@ -477,7 +477,7 @@ export const generateBiometricAuth = async (req, res) => {
 
     // Store challenge for all users
     await Promise.all(
-      rows.map(user => 
+      rows.map(user =>
         pool.query(
           'UPDATE users SET biometric_challenge = $1 WHERE id = $2',
           [options.challenge, user.id]
@@ -494,9 +494,9 @@ export const generateBiometricAuth = async (req, res) => {
 
   } catch (error) {
     console.error('❌ [AUTH] Error:', error);
-    res.status(500).json({ 
-      success: false, 
-      message: 'Failed to generate authentication options: ' + error.message 
+    res.status(500).json({
+      success: false,
+      message: 'Failed to generate authentication options: ' + error.message
     });
   }
 };
@@ -508,9 +508,9 @@ export const bioMetricLogin = async (req, res) => {
     console.log('🔐 [LOGIN] Processing biometric login...');
 
     if (!credential || !credential.id) {
-      return res.status(400).json({ 
-        success: false, 
-        message: "Valid credential is required" 
+      return res.status(400).json({
+        success: false,
+        message: "Valid credential is required"
       });
     }
 
@@ -595,13 +595,13 @@ export const bioMetricLogin = async (req, res) => {
       }
     }, 1000);
 
-    const { 
-      password: _, 
-      biometric_challenge: __, 
-      biometric_credential_id: ___, 
-      biometric_public_key: ____, 
-      biometric_counter: _____, 
-      ...userData 
+    const {
+      password: _,
+      biometric_challenge: __,
+      biometric_credential_id: ___,
+      biometric_public_key: ____,
+      biometric_counter: _____,
+      ...userData
     } = user;
 
     console.log('🎉 [LOGIN] Successful login for user:', user.id);
@@ -618,9 +618,9 @@ export const bioMetricLogin = async (req, res) => {
 
   } catch (error) {
     console.error('❌ [LOGIN] Error:', error);
-    res.status(500).json({ 
-      success: false, 
-      message: 'Server error: ' + error.message 
+    res.status(500).json({
+      success: false,
+      message: 'Server error: ' + error.message
     });
   }
 };
@@ -985,6 +985,10 @@ export const editProfile = async (req, res) => {
 
     if (updates.grade_level !== undefined)
       userFields.grade_level = parseInt(updates.grade_level, 10);
+
+    if (updates.grade_id !== undefined)
+      userFields.grade_id = parseInt(updates.grade_id, 10);
+
 
     if (updates.questions_per_day !== undefined)
       userFields.questions_per_day = parseInt(updates.questions_per_day, 10);
