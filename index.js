@@ -25,14 +25,7 @@ app.use(express.json());
 app.use(helmet());
 
 const corsOptions = {
-  origin: [
-    "https://learning-app-admin-fe.vercel.app",
-    "http://localhost:5173",
-    "http://localhost:3000",
-    "http://localhost:8000",
-    "http://localhost:8001",
-    "https://ace-hive-production-fe.vercel.app",
-  ],
+  origin: "https://ace-hive-production-fe.vercel.app", // ONLY your frontend
   methods: "GET,HEAD,PUT,PATCH,POST,DELETE",
   allowedHeaders: ["Content-Type", "Authorization", "auth"],
   credentials: true,
