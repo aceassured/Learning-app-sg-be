@@ -14,6 +14,7 @@ import {
   generateAuthenticationOptions,
   verifyAuthenticationResponse,
 } from '@simplewebauthn/server';
+
 import { SendMailClient } from "zeptomail";
 
 const JWT_SECRET = process.env.JWT_SECRET || 'dev_secret';
@@ -35,7 +36,7 @@ const RP_ID = process.env.NODE_ENV === 'development'
   ? 'localhost'
   : 'ace-hive-production-fe.vercel.app';
 
-const RP_NAME = 'AceHive';  
+const RP_NAME = 'AceHive';
 
 
 // Simple buffer conversion
@@ -349,7 +350,7 @@ export const generateBiometricRegistration = async (req, res) => {
   const options = generateRegistrationOptions({
     rpName: RP_NAME,
     rpID: RP_ID,
-    userID: Buffer.from(String(user.id)), // <-- FIXED
+    userID: generateUserIdBuffer(user.id), // must be a buffer
     userName: user.email,
     userDisplayName: user.name || user.email,
     attestationType: 'none',
@@ -362,6 +363,7 @@ export const generateBiometricRegistration = async (req, res) => {
       ? [{ id: base64urlToBuffer(user.biometric_credential_id), type: 'public-key' }]
       : [],
   });
+
 
   await pool.query("UPDATE users SET biometric_challenge=$1 WHERE id=$2", [options.challenge, user.id]);
 
