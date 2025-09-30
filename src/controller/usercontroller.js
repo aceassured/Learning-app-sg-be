@@ -349,7 +349,7 @@ export const generateBiometricRegistration = async (req, res) => {
   const options = generateRegistrationOptions({
     rpName: RP_NAME,
     rpID: RP_ID,
-    userID: String(user.id), // keep string
+    userID: Buffer.from(String(user.id)), // <-- FIXED
     userName: user.email,
     userDisplayName: user.name || user.email,
     attestationType: 'none',
@@ -367,6 +367,7 @@ export const generateBiometricRegistration = async (req, res) => {
 
   res.json({ success: true, options });
 };
+
 
 
 // 2. FIXED: Verify biometric registration
