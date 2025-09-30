@@ -26,7 +26,6 @@ app.use(helmet());
 
 const corsOptions = {
   origin: [
-    "https://learing-app-sg-fe.vercel.app",
     "https://learning-app-admin-fe.vercel.app",
     "http://localhost:5173",
     "http://localhost:3000",
