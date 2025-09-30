@@ -2,6 +2,10 @@ import fetch from 'node-fetch';
 import dotenv from 'dotenv';
 import { put } from '@vercel/blob';
 import { randomUUID } from "crypto";
+import unzipper from "unzipper";
+import XLSX from "xlsx";
+import fs from "fs";
+import path from "path";
 
 dotenv.config({ quiet: true });
 
@@ -23,6 +27,8 @@ export const uploadBufferToVercel = async (buffer, filename) => {
     throw new Error("Blob upload failed");
   }
 };
+
+const uploadedImagesCache = new Map();
 
 export const questionFileupload = async (req, res) => {
   try {

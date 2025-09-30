@@ -5,8 +5,9 @@ import { admincreateSubject, admincreateTopic, getAllTopic, getParticularquestio
 import multer from "multer";
 import { questionFileupload } from "../utils/vercel-blob.js";
 
-const upload = multer();
 
+const upload = multer();
+const uploadNew = multer({ dest: "uploads/" });
 const router = express.Router()
 
 
@@ -22,6 +23,6 @@ router.put("/editquestion",   upload.fields([
   ]),updatequestion)
 router.post("/createsubject", upload.fields([{ name: "icon", maxCount: 1 }]), admincreateSubject)
 router.post("/createtopic", admincreateTopic)
-router.post("/questionsupload", upload.single("zipFile"), questionFileupload)
+router.post("/questionsupload", uploadNew.single("zipFile"), questionFileupload)
 
 export default router
