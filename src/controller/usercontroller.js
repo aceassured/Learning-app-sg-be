@@ -35,7 +35,7 @@ const RP_ID = process.env.NODE_ENV === 'development'
   ? 'localhost'
   : 'ace-hive-production-fe.vercel.app';
 
-const RP_NAME = 'AceHive';
+const RP_NAME = 'AceHive';  
 
 
 // Simple buffer conversion
@@ -260,6 +260,83 @@ export const Commonlogin = async (req, res) => {
 
 
 // 1. Generate biometric registration
+// export const generateBiometricRegistration = async (req, res) => {
+//   try {
+//     const { email } = req.body;
+//     console.log('🔐 [REG] Starting biometric registration for:', email);
+
+//     if (!email) {
+//       return res.status(400).json({
+//         success: false,
+//         message: "Email is required"
+//       });
+//     }
+
+//     const { rows } = await pool.query(
+//       'SELECT id, email, name FROM users WHERE email = $1',
+//       [email]
+//     );
+
+//     if (rows.length === 0) {
+//       return res.status(404).json({
+//         success: false,
+//         message: "User not found. Please sign up first.",
+//       });
+//     }
+
+//     const user = rows[0];
+
+//     const { rows: existingCreds } = await pool.query(
+//       'SELECT biometric_enabled FROM users WHERE id = $1',
+//       [user.id]
+//     );
+
+//     if (existingCreds[0]?.biometric_enabled) {
+//       return res.status(400).json({
+//         success: false,
+//         message: "Biometric authentication is already enabled"
+//       });
+//     }
+
+//     const options = await generateRegistrationOptions({
+//       rpName: RP_NAME,
+//       rpID: RP_ID,
+//       userID: generateUserIdBuffer(user.id),
+//       userName: user.email,
+//       userDisplayName: user.name || user.email,
+//       attestationType: 'none',
+//       authenticatorSelection: {
+//         authenticatorAttachment: 'platform',
+//         userVerification: 'required',
+//         residentKey: 'required',
+//         requireResidentKey: true,
+//       },
+//       supportedAlgorithmIDs: [-7, -257],
+//       timeout: 60000,
+//     });
+
+//     await pool.query(
+//       'UPDATE users SET biometric_challenge = $1 WHERE id = $2',
+//       [options.challenge, user.id]
+//     );
+
+//     console.log('✅ [REG] Registration options generated');
+
+//     res.json({
+//       success: true,
+//       options,
+//     });
+
+//   } catch (error) {
+//     console.error('❌ [REG] Error:', error);
+//     res.status(500).json({
+//       success: false,
+//       message: 'Failed to generate registration options: ' + error.message
+//     });
+//   }
+// };
+
+// In generateBiometricRegistration function
 export const generateBiometricRegistration = async (req, res) => {
   try {
     const { email } = req.body;
@@ -298,6 +375,7 @@ export const generateBiometricRegistration = async (req, res) => {
       });
     }
 
+    // CRITICAL FIX: Add excludeCredentials to prevent duplicate saves
     const options = await generateRegistrationOptions({
       rpName: RP_NAME,
       rpID: RP_ID,
@@ -306,11 +384,12 @@ export const generateBiometricRegistration = async (req, res) => {
       userDisplayName: user.name || user.email,
       attestationType: 'none',
       authenticatorSelection: {
-        authenticatorAttachment: 'platform',
+        authenticatorAttachment: 'platform', // THIS PREVENTS GOOGLE PASSWORD MANAGER
         userVerification: 'required',
         residentKey: 'required',
         requireResidentKey: true,
       },
+      excludeCredentials: [], // Add this to prevent showing save dialog
       supportedAlgorithmIDs: [-7, -257],
       timeout: 60000,
     });
@@ -491,100 +570,6 @@ export const verifyBiometricRegistration = async (req, res) => {
   }
 };
 
-
-// 3. Generate authentication options - FIXED FOR REAL
-// 3. Generate authentication options - CORRECT FIX
-// export const generateBiometricAuth = async (req, res) => {
-//   try {
-//     console.log('🔐 [AUTH] Generating authentication options...');
-
-//     const { rows } = await pool.query(
-//       `SELECT id, email, biometric_credential_id 
-//        FROM users 
-//        WHERE biometric_enabled = TRUE 
-//        AND biometric_credential_id IS NOT NULL
-//        AND biometric_credential_id != ''`
-//     );
-
-//     console.log('👥 [AUTH] Found', rows.length, 'biometric users');
-
-//     if (rows.length === 0) {
-//       return res.json({
-//         success: false,
-//         message: "No users have biometric authentication set up.",
-//       });
-//     }
-
-//     // Build allowCredentials - keep credential IDs as base64url strings
-//     const allowCredentials = rows.map((user, index) => {
-//       try {
-//         const credId = user.biometric_credential_id;
-
-//         console.log(`🔍 [AUTH] User ${index + 1} (${user.email})`);
-//         console.log(`🔍 [AUTH] Credential ID type:`, typeof credId);
-//         console.log(`🔍 [AUTH] Credential ID (first 30 chars):`, credId?.substring(0, 30));
-
-//         // Validate it's a non-empty string
-//         if (!credId || typeof credId !== 'string' || credId.length === 0) {
-//           console.error(`❌ [AUTH] Invalid credential ID for user ${user.id}`);
-//           return null;
-//         }
-
-//         // Return credential with ID as base64url string
-//         // The library will handle the conversion internally
-//         return {
-//           id: credId,  // Keep as base64url string
-//           type: 'public-key',
-//           transports: ['internal', 'hybrid'],
-//         };
-//       } catch (error) {
-//         console.error(`❌ [AUTH] Error processing credential for user ${user.id}:`, error.message);
-//         return null;
-//       }
-//     }).filter(cred => cred !== null);
-
-//     console.log('✅ [AUTH] Valid credentials:', allowCredentials.length);
-
-//     if (allowCredentials.length === 0) {
-//       return res.json({
-//         success: false,
-//         message: "No valid credentials found. Please set up biometric login again.",
-//       });
-//     }
-
-//     const options = await generateAuthenticationOptions({
-//       rpID: RP_ID,
-//       allowCredentials,
-//       userVerification: 'required',
-//       timeout: 60000,
-//     });
-
-//     // Store challenge
-//     await Promise.all(
-//       rows.map(user =>
-//         pool.query(
-//           'UPDATE users SET biometric_challenge = $1 WHERE id = $2',
-//           [options.challenge, user.id]
-//         )
-//       )
-//     );
-
-//     console.log('✅ [AUTH] Authentication options generated successfully');
-
-//     res.json({
-//       success: true,
-//       options,
-//     });
-
-//   } catch (error) {
-//     console.error('❌ [AUTH] Error:', error);
-//     console.error('❌ [AUTH] Stack:', error.stack);
-//     res.status(500).json({
-//       success: false,
-//       message: 'Failed to generate authentication options: ' + error.message
-//     });
-//   }
-// };
 
 // 3. Generate authentication options - FIXED
 export const generateBiometricAuth = async (req, res) => {
