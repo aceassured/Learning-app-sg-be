@@ -6,7 +6,7 @@ import unzipper from "unzipper";
 import XLSX from "xlsx";
 import fs from "fs";
 import path from "path";
-
+import pool from '../../database.js';
 dotenv.config({ quiet: true });
 
 
