@@ -495,6 +495,7 @@ export const verifyBiometricRegistration = async (req, res) => {
 
 
 // 3. Generate authentication options
+// 3. Generate authentication options - FIXED
 export const generateBiometricAuth = async (req, res) => {
   try {
     console.log('🔐 [AUTH] Generating authentication options...');
@@ -516,29 +517,53 @@ export const generateBiometricAuth = async (req, res) => {
       });
     }
 
-    // FIXED: Properly handle credential ID conversion
+    // FIXED: Properly handle credential ID conversion with type checking
     const allowCredentials = rows.map((user, index) => {
       try {
         const credId = user.biometric_credential_id;
 
-        console.log(`🔍 [AUTH] User ${index + 1} credential ID type:`, typeof credId);
-        console.log(`🔍 [AUTH] User ${index + 1} credential ID value:`, credId);
+        console.log(`🔍 [AUTH] User ${index + 1} (${user.email}) credential ID type:`, typeof credId);
+        console.log(`🔍 [AUTH] User ${index + 1} is Buffer:`, Buffer.isBuffer(credId));
 
-        // Handle different types
         let credBuffer;
-        if (typeof credId === 'string') {
-          // It's a string, convert from base64url
-          credBuffer = base64urlToBuffer(credId);
-        } else if (Buffer.isBuffer(credId)) {
-          // It's already a buffer
+        
+        // Handle Buffer type (PostgreSQL bytea returns this)
+        if (Buffer.isBuffer(credId)) {
           credBuffer = credId;
-        } else if (credId instanceof Uint8Array) {
-          // It's a Uint8Array
+          console.log(`✅ [AUTH] User ${index + 1} - Using Buffer directly`);
+        }
+        // Handle Uint8Array
+        else if (credId instanceof Uint8Array) {
           credBuffer = Buffer.from(credId);
-        } else {
-          console.error(`❌ [AUTH] Invalid credential type for user ${user.id}`);
+          console.log(`✅ [AUTH] User ${index + 1} - Converted from Uint8Array`);
+        }
+        // Handle string (base64url encoded)
+        else if (typeof credId === 'string') {
+          // CRITICAL FIX: Add validation before calling replace
+          if (credId.length === 0) {
+            console.error(`❌ [AUTH] Empty credential string for user ${user.id}`);
+            return null;
+          }
+          credBuffer = base64urlToBuffer(credId);
+          console.log(`✅ [AUTH] User ${index + 1} - Converted from base64url string`);
+        }
+        // Handle object with data property (some PostgreSQL drivers)
+        else if (credId && typeof credId === 'object' && credId.data) {
+          credBuffer = Buffer.from(credId.data);
+          console.log(`✅ [AUTH] User ${index + 1} - Converted from object.data`);
+        }
+        else {
+          console.error(`❌ [AUTH] Unknown credential type for user ${user.id}:`, credId);
           return null;
         }
+
+        // Validate buffer
+        if (!credBuffer || credBuffer.length === 0) {
+          console.error(`❌ [AUTH] Invalid credential buffer for user ${user.id}`);
+          return null;
+        }
+
+        console.log(`✅ [AUTH] User ${index + 1} credential buffer length:`, credBuffer.length);
 
         return {
           id: credBuffer,
@@ -547,6 +572,7 @@ export const generateBiometricAuth = async (req, res) => {
         };
       } catch (error) {
         console.error(`❌ [AUTH] Error converting credential for user ${user.id}:`, error.message);
+        console.error(`❌ [AUTH] Error stack:`, error.stack);
         return null;
       }
     }).filter(cred => cred !== null);
@@ -556,7 +582,7 @@ export const generateBiometricAuth = async (req, res) => {
     if (allowCredentials.length === 0) {
       return res.json({
         success: false,
-        message: "No valid credentials found",
+        message: "No valid credentials found. Please set up biometric login again.",
       });
     }
 
@@ -592,7 +618,7 @@ export const generateBiometricAuth = async (req, res) => {
       message: 'Failed to generate authentication options: ' + error.message
     });
   }
-};;
+};
 
 // 4. Biometric login
 export const bioMetricLogin = async (req, res) => {
@@ -650,34 +676,45 @@ export const bioMetricLogin = async (req, res) => {
     // FIXED: Handle credential conversion properly
     let storedCredentialId, storedPublicKey;
 
-    try {
-      const credId = user.biometric_credential_id;
-      const pubKey = user.biometric_public_key;
+// In bioMetricLogin function, replace the conversion section:
 
-      // Convert stored credentials based on their type
-      if (typeof credId === 'string') {
-        storedCredentialId = base64urlToBuffer(credId);
-      } else if (Buffer.isBuffer(credId)) {
-        storedCredentialId = credId;
-      } else {
-        storedCredentialId = Buffer.from(credId);
-      }
+try {
+  const credId = user.biometric_credential_id;
+  const pubKey = user.biometric_public_key;
 
-      if (typeof pubKey === 'string') {
-        storedPublicKey = base64urlToBuffer(pubKey);
-      } else if (Buffer.isBuffer(pubKey)) {
-        storedPublicKey = pubKey;
-      } else {
-        storedPublicKey = Buffer.from(pubKey);
-      }
+  // Handle credential ID
+  if (Buffer.isBuffer(credId)) {
+    storedCredentialId = credId;
+  } else if (credId instanceof Uint8Array) {
+    storedCredentialId = Buffer.from(credId);
+  } else if (typeof credId === 'string' && credId.length > 0) {
+    storedCredentialId = base64urlToBuffer(credId);
+  } else if (credId && typeof credId === 'object' && credId.data) {
+    storedCredentialId = Buffer.from(credId.data);
+  } else {
+    throw new Error('Invalid credential ID format');
+  }
 
-    } catch (conversionError) {
-      console.error('❌ [LOGIN] Credential conversion error:', conversionError);
-      return res.status(500).json({
-        success: false,
-        message: "Error processing stored credentials"
-      });
-    }
+  // Handle public key
+  if (Buffer.isBuffer(pubKey)) {
+    storedPublicKey = pubKey;
+  } else if (pubKey instanceof Uint8Array) {
+    storedPublicKey = Buffer.from(pubKey);
+  } else if (typeof pubKey === 'string' && pubKey.length > 0) {
+    storedPublicKey = base64urlToBuffer(pubKey);
+  } else if (pubKey && typeof pubKey === 'object' && pubKey.data) {
+    storedPublicKey = Buffer.from(pubKey.data);
+  } else {
+    throw new Error('Invalid public key format');
+  }
+
+} catch (conversionError) {
+  console.error('❌ [LOGIN] Credential conversion error:', conversionError);
+  return res.status(500).json({
+    success: false,
+    message: "Error processing stored credentials: " + conversionError.message
+  });
+}
 
     console.log('🔍 [LOGIN] Verifying authentication...');
 
