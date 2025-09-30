@@ -16,8 +16,6 @@ import {
 } from '@simplewebauthn/server';
 import { SendMailClient } from "zeptomail";
 
-import { isoBase64URL } from "@simplewebauthn/server/helpers";
-
 const JWT_SECRET = process.env.JWT_SECRET || 'dev_secret';
 
 
@@ -495,6 +493,7 @@ export const verifyBiometricRegistration = async (req, res) => {
 
 
 // 3. Generate authentication options - FIXED FOR REAL
+// 3. Generate authentication options - CORRECT FIX
 export const generateBiometricAuth = async (req, res) => {
   try {
     console.log('🔐 [AUTH] Generating authentication options...');
@@ -504,7 +503,7 @@ export const generateBiometricAuth = async (req, res) => {
        FROM users 
        WHERE biometric_enabled = TRUE 
        AND biometric_credential_id IS NOT NULL
-       AND LENGTH(biometric_credential_id) > 0`
+       AND biometric_credential_id != ''`
     );
 
     console.log('👥 [AUTH] Found', rows.length, 'biometric users');
@@ -516,50 +515,30 @@ export const generateBiometricAuth = async (req, res) => {
       });
     }
 
+    // Build allowCredentials - keep credential IDs as base64url strings
     const allowCredentials = rows.map((user, index) => {
       try {
         const credId = user.biometric_credential_id;
 
-        console.log(`🔍 [AUTH] User ${index + 1} (${user.email}) credential ID type:`, typeof credId);
-        console.log(`🔍 [AUTH] User ${index + 1} is Buffer:`, Buffer.isBuffer(credId));
+        console.log(`🔍 [AUTH] User ${index + 1} (${user.email})`);
+        console.log(`🔍 [AUTH] Credential ID type:`, typeof credId);
+        console.log(`🔍 [AUTH] Credential ID (first 30 chars):`, credId?.substring(0, 30));
 
-        let credBuffer;
-        
-        if (Buffer.isBuffer(credId)) {
-          credBuffer = credId;
-        } else if (credId instanceof Uint8Array) {
-          credBuffer = Buffer.from(credId);
-        } else if (typeof credId === 'string') {
-          if (credId.length === 0) {
-            console.error(`❌ [AUTH] Empty credential string for user ${user.id}`);
-            return null;
-          }
-          credBuffer = base64urlToBuffer(credId);
-        } else if (credId && typeof credId === 'object' && credId.data) {
-          credBuffer = Buffer.from(credId.data);
-        } else {
-          console.error(`❌ [AUTH] Unknown credential type for user ${user.id}`);
+        // Validate it's a non-empty string
+        if (!credId || typeof credId !== 'string' || credId.length === 0) {
+          console.error(`❌ [AUTH] Invalid credential ID for user ${user.id}`);
           return null;
         }
 
-        if (!credBuffer || credBuffer.length === 0) {
-          console.error(`❌ [AUTH] Invalid credential buffer for user ${user.id}`);
-          return null;
-        }
-
-        console.log(`✅ [AUTH] User ${index + 1} credential buffer length:`, credBuffer.length);
-
-        // CRITICAL FIX: Convert Buffer to Uint8Array for @simplewebauthn/server
-        const credUint8Array = new Uint8Array(credBuffer);
-        console.log(`✅ [AUTH] User ${index + 1} converted to Uint8Array, length:`, credUint8Array.length);
-
+        // Return credential with ID as base64url string
+        // The library will handle the conversion internally
         return {
-          id: credUint8Array,  // <-- This must be Uint8Array, not Buffer
+          id: credId,  // Keep as base64url string
           type: 'public-key',
           transports: ['internal', 'hybrid'],
         };
       } catch (error) {
-        console.error(`❌ [AUTH] Error converting credential for user ${user.id}:`, error.message);
+        console.error(`❌ [AUTH] Error processing credential for user ${user.id}:`, error.message);
         return null;
       }
     }).filter(cred => cred !== null);
@@ -580,6 +559,7 @@ export const generateBiometricAuth = async (req, res) => {
       timeout: 60000,
     });
 
+    // Store challenge
     await Promise.all(
       rows.map(user =>
         pool.query(
@@ -612,16 +592,16 @@ export const bioMetricLogin = async (req, res) => {
     const { credential } = req.body;
     console.log('🔐 [LOGIN] Processing biometric login...');
 
-    if (!credential || !credential.id || !credential.rawId) {
+    if (!credential || !credential.id) {
       return res.status(400).json({
         success: false,
         message: "Valid credential is required"
       });
     }
 
-    // Convert rawId to base64url for lookup
-    const credentialIdBase64 = bufferToBase64url(credential.rawId);
-    console.log('🔍 [LOGIN] Looking for credential:', credentialIdBase64.substring(0, 20) + '...');
+    // Use credential.id directly (it's already base64url string from browser)
+    const credentialId = credential.id;
+    console.log('🔍 [LOGIN] Looking for credential:', credentialId.substring(0, 30) + '...');
 
     const { rows } = await pool.query(
       `SELECT 
@@ -631,18 +611,11 @@ export const bioMetricLogin = async (req, res) => {
        LEFT JOIN grades g ON g.id = u.grade_id
        WHERE u.biometric_credential_id = $1 
        AND u.biometric_enabled = TRUE`,
-      [credentialIdBase64]
+      [credentialId]
     );
 
     if (rows.length === 0) {
       console.log('❌ [LOGIN] No matching credential found');
-
-      // Debug: Show all stored credentials
-      const { rows: debugRows } = await pool.query(
-        'SELECT id, email, LEFT(biometric_credential_id, 20) as cred_prefix FROM users WHERE biometric_enabled = TRUE LIMIT 5'
-      );
-      console.log('📋 [LOGIN] Available credentials:', debugRows);
-
       return res.status(404).json({
         success: false,
         message: "No matching biometric credential found. Please set up biometric login first.",
@@ -659,48 +632,9 @@ export const bioMetricLogin = async (req, res) => {
       });
     }
 
-    // FIXED: Handle credential conversion properly
-    let storedCredentialId, storedPublicKey;
-
-// In bioMetricLogin function, replace the conversion section:
-
-try {
-  const credId = user.biometric_credential_id;
-  const pubKey = user.biometric_public_key;
-
-  // Handle credential ID
-  if (Buffer.isBuffer(credId)) {
-    storedCredentialId = credId;
-  } else if (credId instanceof Uint8Array) {
-    storedCredentialId = Buffer.from(credId);
-  } else if (typeof credId === 'string' && credId.length > 0) {
-    storedCredentialId = base64urlToBuffer(credId);
-  } else if (credId && typeof credId === 'object' && credId.data) {
-    storedCredentialId = Buffer.from(credId.data);
-  } else {
-    throw new Error('Invalid credential ID format');
-  }
-
-  // Handle public key
-  if (Buffer.isBuffer(pubKey)) {
-    storedPublicKey = pubKey;
-  } else if (pubKey instanceof Uint8Array) {
-    storedPublicKey = Buffer.from(pubKey);
-  } else if (typeof pubKey === 'string' && pubKey.length > 0) {
-    storedPublicKey = base64urlToBuffer(pubKey);
-  } else if (pubKey && typeof pubKey === 'object' && pubKey.data) {
-    storedPublicKey = Buffer.from(pubKey.data);
-  } else {
-    throw new Error('Invalid public key format');
-  }
-
-} catch (conversionError) {
-  console.error('❌ [LOGIN] Credential conversion error:', conversionError);
-  return res.status(500).json({
-    success: false,
-    message: "Error processing stored credentials: " + conversionError.message
-  });
-}
+    // Convert stored public key from base64url to buffer
+    const storedPublicKey = base64urlToBuffer(user.biometric_public_key);
+    const storedCredentialId = base64urlToBuffer(user.biometric_credential_id);
 
     console.log('🔍 [LOGIN] Verifying authentication...');
 
