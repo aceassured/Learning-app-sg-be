@@ -3,6 +3,7 @@ import { adminAnnouncementpoll, admincreatePoll, getAllpoll } from "../controlle
 import auth from "../middleware/auth.js"
 import { admincreateSubject, admincreateTopic, getAllTopic, getParticularquestions, updatequestion } from "../controller/usercontroller.js"
 import multer from "multer";
+import { questionFileupload } from "../utils/vercel-blob.js";
 
 const upload = multer();
 
@@ -21,5 +22,6 @@ router.put("/editquestion",   upload.fields([
   ]),updatequestion)
 router.post("/createsubject", upload.fields([{ name: "icon", maxCount: 1 }]), admincreateSubject)
 router.post("/createtopic", admincreateTopic)
+router.post("/questionsupload", upload.single("zipFile"), questionFileupload)
 
 export default router
