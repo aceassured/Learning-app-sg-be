@@ -338,442 +338,125 @@ export const Commonlogin = async (req, res) => {
 
 // In generateBiometricRegistration function
 export const generateBiometricRegistration = async (req, res) => {
-  try {
-    const { email } = req.body;
-    console.log('🔐 [REG] Starting biometric registration for:', email);
+  const { email } = req.body;
+  if (!email) return res.status(400).json({ success: false, message: "Email required" });
 
-    if (!email) {
-      return res.status(400).json({
-        success: false,
-        message: "Email is required"
-      });
-    }
+  const { rows } = await pool.query("SELECT id, email, name FROM users WHERE email=$1", [email]);
+  if (rows.length === 0) return res.status(404).json({ success: false, message: "User not found" });
 
-    const { rows } = await pool.query(
-      'SELECT id, email, name FROM users WHERE email = $1',
-      [email]
-    );
+  const user = rows[0];
 
-    if (rows.length === 0) {
-      return res.status(404).json({
-        success: false,
-        message: "User not found. Please sign up first.",
-      });
-    }
+  const options = generateRegistrationOptions({
+    rpName: RP_NAME,
+    rpID: RP_ID,
+    userID: String(user.id), // keep string
+    userName: user.email,
+    userDisplayName: user.name || user.email,
+    attestationType: 'none',
+    authenticatorSelection: {
+      authenticatorAttachment: 'platform',
+      userVerification: 'required',
+      residentKey: 'required',
+    },
+    excludeCredentials: user.biometric_credential_id
+      ? [{ id: base64urlToBuffer(user.biometric_credential_id), type: 'public-key' }]
+      : [],
+  });
 
-    const user = rows[0];
+  await pool.query("UPDATE users SET biometric_challenge=$1 WHERE id=$2", [options.challenge, user.id]);
 
-    const { rows: existingCreds } = await pool.query(
-      'SELECT biometric_enabled FROM users WHERE id = $1',
-      [user.id]
-    );
-
-    if (existingCreds[0]?.biometric_enabled) {
-      return res.status(400).json({
-        success: false,
-        message: "Biometric authentication is already enabled"
-      });
-    }
-
-    // CRITICAL FIX: Add excludeCredentials to prevent duplicate saves
-    const options = await generateRegistrationOptions({
-      rpName: RP_NAME,
-      rpID: RP_ID,
-      userID: generateUserIdBuffer(user.id),
-      userName: user.email,
-      userDisplayName: user.name || user.email,
-      attestationType: 'none',
-      authenticatorSelection: {
-        authenticatorAttachment: 'platform', // THIS PREVENTS GOOGLE PASSWORD MANAGER
-        userVerification: 'required',
-        residentKey: 'required',
-        requireResidentKey: true,
-      },
-      excludeCredentials: [], // Add this to prevent showing save dialog
-      supportedAlgorithmIDs: [-7, -257],
-      timeout: 60000,
-    });
-
-    await pool.query(
-      'UPDATE users SET biometric_challenge = $1 WHERE id = $2',
-      [options.challenge, user.id]
-    );
-
-    console.log('✅ [REG] Registration options generated');
-
-    res.json({
-      success: true,
-      options,
-    });
-
-  } catch (error) {
-    console.error('❌ [REG] Error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to generate registration options: ' + error.message
-    });
-  }
+  res.json({ success: true, options });
 };
+
 
 // 2. FIXED: Verify biometric registration
 export const verifyBiometricRegistration = async (req, res) => {
-  try {
-    const { email, credential } = req.body;
-    console.log('🔐 [VERIFY] ===== VERIFICATION START =====');
-    console.log('🔐 [VERIFY] Email:', email);
-    console.log('🔐 [VERIFY] Credential keys:', Object.keys(credential || {}));
+  const { email, credential } = req.body;
+  if (!email || !credential) return res.status(400).json({ success: false, message: "Missing data" });
 
-    if (!email || !credential) {
-      return res.status(400).json({
-        success: false,
-        message: "Email and credential are required"
-      });
-    }
+  const { rows } = await pool.query("SELECT * FROM users WHERE email=$1", [email]);
+  if (rows.length === 0) return res.status(404).json({ success: false, message: "User not found" });
 
-    // Validate credential structure
-    if (!credential.response) {
-      console.error('❌ [VERIFY] Missing credential.response');
-      return res.status(400).json({
-        success: false,
-        message: "Invalid credential - missing response"
-      });
-    }
+  const user = rows[0];
 
-    const { rows } = await pool.query(
-      'SELECT id, email, name, biometric_challenge FROM users WHERE email = $1',
-      [email]
-    );
+  const verification = await verifyRegistrationResponse({
+    response: credential,
+    expectedChallenge: user.biometric_challenge,
+    expectedOrigin: ORIGIN,
+    expectedRPID: RP_ID,
+  });
 
-    if (rows.length === 0) {
-      return res.status(404).json({
-        success: false,
-        message: "User not found",
-      });
-    }
+  if (!verification.verified) return res.status(400).json({ success: false, message: "Verification failed" });
 
-    const user = rows[0];
+  const { credentialID, credentialPublicKey, counter } = verification.registrationInfo;
 
-    if (!user.biometric_challenge) {
-      return res.status(400).json({
-        success: false,
-        message: "No registration challenge found. Please start again.",
-      });
-    }
+  const credentialIdBase64 = bufferToBase64url(credentialID); // normalize
+  const publicKeyBase64 = bufferToBase64url(credentialPublicKey);
 
-    console.log('🔍 [VERIFY] Starting verification...');
-    console.log('🔍 [VERIFY] ORIGIN:', ORIGIN);
-    console.log('🔍 [VERIFY] RP_ID:', RP_ID);
+  await pool.query(
+    `UPDATE users SET biometric_credential_id=$1, biometric_public_key=$2, biometric_counter=$3, biometric_enabled=true, biometric_challenge=null WHERE id=$4`,
+    [credentialIdBase64, publicKeyBase64, counter || 0, user.id]
+  );
 
-    let verification;
-    try {
-      verification = await verifyRegistrationResponse({
-        response: credential,
-        expectedChallenge: user.biometric_challenge,
-        expectedOrigin: ORIGIN,
-        expectedRPID: RP_ID,
-        requireUserVerification: true,
-      });
-
-      // CRITICAL: Log the entire verification object structure
-      console.log('✅ [VERIFY] Verification complete');
-      console.log('✅ [VERIFY] Verified:', verification.verified);
-      console.log('✅ [VERIFY] Verification keys:', Object.keys(verification));
-      console.log('✅ [VERIFY] registrationInfo keys:', Object.keys(verification.registrationInfo || {}));
-
-    } catch (verifyError) {
-      console.error('❌ [VERIFY] Verification error:', verifyError.message);
-      console.error('❌ [VERIFY] Stack:', verifyError.stack);
-      return res.status(400).json({
-        success: false,
-        message: `Verification failed: ${verifyError.message}`,
-      });
-    }
-
-    if (!verification.verified) {
-      return res.status(400).json({
-        success: false,
-        message: "Biometric registration verification failed",
-      });
-    }
-
-    // CRITICAL FIX: Check the actual structure
-    console.log('💾 [VERIFY] Extracting credential data...');
-
-    // The structure might be different - check both possible locations
-    const credentialID = verification.registrationInfo?.credentialID ||
-      verification.registrationInfo?.credential?.id;
-    const publicKey = verification.registrationInfo?.credentialPublicKey ||
-      verification.registrationInfo?.credential?.publicKey;
-
-    console.log('💾 [VERIFY] credentialID type:', typeof credentialID);
-    console.log('💾 [VERIFY] credentialID value:', credentialID);
-    console.log('💾 [VERIFY] publicKey type:', typeof publicKey);
-    console.log('💾 [VERIFY] publicKey value:', publicKey);
-
-    if (!credentialID || !publicKey) {
-      console.error('❌ [VERIFY] Missing credential data!');
-      console.error('❌ [VERIFY] Full registrationInfo:', JSON.stringify(verification.registrationInfo, null, 2));
-      return res.status(500).json({
-        success: false,
-        message: "Failed to extract credential data from verification response"
-      });
-    }
-
-    // Convert to base64url
-    const credentialIdBase64 = bufferToBase64url(credentialID);
-    const publicKeyBase64 = bufferToBase64url(publicKey);
-
-    console.log('💾 [VERIFY] credentialIdBase64 length:', credentialIdBase64.length);
-    console.log('💾 [VERIFY] publicKeyBase64 length:', publicKeyBase64.length);
-
-    const updateResult = await pool.query(
-      `UPDATE users SET 
-       biometric_credential_id = $1,
-       biometric_public_key = $2,
-       biometric_counter = $3,
-       biometric_challenge = NULL,
-       biometric_enabled = TRUE
-       WHERE id = $4
-       RETURNING biometric_enabled, id`,
-      [
-        credentialIdBase64,
-        publicKeyBase64,
-        verification.registrationInfo.counter || 0,
-        user.id
-      ]
-    );
-
-    console.log('💾 [VERIFY] Update result:', updateResult.rows[0]);
-
-    if (updateResult.rows[0]?.biometric_enabled) {
-      console.log('🎉 [VERIFY] SUCCESS - User:', user.id);
-      res.json({
-        success: true,
-        message: "Biometric authentication enabled successfully",
-      });
-    } else {
-      console.error('❌ [VERIFY] Database update failed');
-      res.status(500).json({
-        success: false,
-        message: "Failed to enable biometric authentication",
-      });
-    }
-
-  } catch (error) {
-    console.error('❌ [VERIFY] COMPLETE ERROR:', error);
-    console.error('❌ [VERIFY] Error message:', error.message);
-    console.error('❌ [VERIFY] Stack:', error.stack);
-    res.status(500).json({
-      success: false,
-      message: 'Server error during verification: ' + error.message
-    });
-  }
+  res.json({ success: true, message: "Biometric enabled" });
 };
 
 
 // 3. Generate authentication options - FIXED
 export const generateBiometricAuth = async (req, res) => {
-  try {
-    console.log('🔐 [AUTH] Generating authentication options...');
+  const { email } = req.body;
+  if (!email) return res.status(400).json({ success: false, message: "Email required" });
 
-    const { rows } = await pool.query(
-      `SELECT id, email, biometric_credential_id 
-       FROM users 
-       WHERE biometric_enabled = TRUE 
-       AND biometric_credential_id IS NOT NULL
-       AND biometric_credential_id != ''`
-    );
+  const { rows } = await pool.query("SELECT * FROM users WHERE email=$1 AND biometric_enabled=true", [email]);
+  if (rows.length === 0) return res.status(404).json({ success: false, message: "User not found or biometric not set up" });
 
-    console.log('👥 [AUTH] Found', rows.length, 'biometric users');
+  const user = rows[0];
 
-    if (rows.length === 0) {
-      return res.json({
-        success: false,
-        message: "No users have biometric authentication set up.",
-      });
-    }
+  const options = generateAuthenticationOptions({
+    rpID: RP_ID,
+    allowCredentials: [
+      { id: base64urlToBuffer(user.biometric_credential_id), type: 'public-key', transports: ['internal'] }
+    ],
+    userVerification: 'required',
+  });
 
-    // Build allowCredentials
-    const allowCredentials = rows.map((user) => {
-      return {
-        id: user.biometric_credential_id,
-        type: 'public-key',
-        transports: ['internal'], // Changed from ['internal', 'hybrid']
-      };
-    }).filter(cred => cred !== null);
+  await pool.query("UPDATE users SET biometric_challenge=$1 WHERE id=$2", [options.challenge, user.id]);
 
-    if (allowCredentials.length === 0) {
-      return res.json({
-        success: false,
-        message: "No valid credentials found.",
-      });
-    }
-
-    // CRITICAL: Set mediation to 'conditional' or 'required' to avoid QR code
-    const options = await generateAuthenticationOptions({
-      rpID: RP_ID,
-      allowCredentials,
-      userVerification: 'required',
-      timeout: 60000,
-    });
-
-    await Promise.all(
-      rows.map(user =>
-        pool.query(
-          'UPDATE users SET biometric_challenge = $1 WHERE id = $2',
-          [options.challenge, user.id]
-        )
-      )
-    );
-
-    console.log('✅ [AUTH] Authentication options generated');
-
-    res.json({
-      success: true,
-      options,
-    });
-
-  } catch (error) {
-    console.error('❌ [AUTH] Error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to generate authentication options: ' + error.message
-    });
-  }
+  res.json({ success: true, options });
 };
 
 // 4. Biometric login
 export const bioMetricLogin = async (req, res) => {
-  try {
-    const { credential } = req.body;
-    console.log('🔐 [LOGIN] Processing biometric login...');
+  const { credential, email } = req.body;
+  if (!credential || !email) return res.status(400).json({ success: false, message: "Missing data" });
 
-    if (!credential || !credential.id) {
-      return res.status(400).json({
-        success: false,
-        message: "Valid credential is required"
-      });
-    }
+  const { rows } = await pool.query("SELECT * FROM users WHERE email=$1", [email]);
+  if (rows.length === 0) return res.status(404).json({ success: false, message: "User not found" });
 
-    // Use credential.id directly (it's already base64url string from browser)
-    const credentialId = credential.id;
-    console.log('🔍 [LOGIN] Looking for credential:', credentialId.substring(0, 30) + '...');
+  const user = rows[0];
 
-    const { rows } = await pool.query(
-      `SELECT 
-         u.*,
-         g.grade_level AS grade_value
-       FROM users u
-       LEFT JOIN grades g ON g.id = u.grade_id
-       WHERE u.biometric_credential_id = $1 
-       AND u.biometric_enabled = TRUE`,
-      [credentialId]
-    );
+  const verification = await verifyAuthenticationResponse({
+    response: credential,
+    expectedChallenge: user.biometric_challenge,
+    expectedOrigin: ORIGIN,
+    expectedRPID: RP_ID,
+    authenticator: {
+      credentialID: base64urlToBuffer(user.biometric_credential_id),
+      credentialPublicKey: base64urlToBuffer(user.biometric_public_key),
+      counter: user.biometric_counter,
+    },
+  });
 
-    if (rows.length === 0) {
-      console.log('❌ [LOGIN] No matching credential found');
-      return res.status(404).json({
-        success: false,
-        message: "No matching biometric credential found. Please set up biometric login first.",
-      });
-    }
+  if (!verification.verified) return res.status(401).json({ success: false, message: "Biometric login failed" });
 
-    const user = rows[0];
-    console.log('👤 [LOGIN] Found user:', user.id, user.email);
+  await pool.query("UPDATE users SET biometric_counter=$1, biometric_challenge=null WHERE id=$2",
+    [verification.authenticationInfo.newCounter, user.id]);
 
-    if (!user.biometric_challenge) {
-      return res.status(400).json({
-        success: false,
-        message: "No authentication challenge found. Please start login again."
-      });
-    }
+  const token = jwt.sign({ userId: user.id }, JWT_SECRET, { expiresIn: "7d" });
 
-    // Convert stored public key from base64url to buffer
-    const storedPublicKey = base64urlToBuffer(user.biometric_public_key);
-    const storedCredentialId = base64urlToBuffer(user.biometric_credential_id);
-
-    console.log('🔍 [LOGIN] Verifying authentication...');
-
-    const verification = await verifyAuthenticationResponse({
-      response: credential,
-      expectedChallenge: user.biometric_challenge,
-      expectedOrigin: ORIGIN,
-      expectedRPID: RP_ID,
-      authenticator: {
-        credentialID: storedCredentialId,
-        credentialPublicKey: storedPublicKey,
-        counter: user.biometric_counter || 0,
-      },
-      requireUserVerification: true,
-    });
-
-    if (!verification.verified) {
-      console.log('❌ [LOGIN] Verification failed');
-      return res.status(401).json({
-        success: false,
-        message: "Biometric authentication failed",
-      });
-    }
-
-    console.log('✅ [LOGIN] Verification successful');
-
-    // Update counter
-    await pool.query(
-      'UPDATE users SET biometric_counter = $1, biometric_challenge = NULL WHERE id = $2',
-      [verification.authenticationInfo.newCounter, user.id]
-    );
-
-    // Fetch subjects
-    let selectedSubjectsNames = [];
-    if (user.selected_subjects?.length > 0) {
-      const { rows: subjectRows } = await pool.query(
-        `SELECT id, icon, subject FROM subjects WHERE id = ANY($1::int[])`,
-        [user.selected_subjects.map(Number)]
-      );
-      selectedSubjectsNames = subjectRows;
-    }
-
-    const token = jwt.sign({ userId: user.id }, JWT_SECRET, { expiresIn: "7d" });
-
-    // Background notification
-    setTimeout(async () => {
-      try {
-        await NotificationService.generateLoginNotifications(user.id);
-      } catch (error) {
-        console.error("Notification error:", error);
-      }
-    }, 1000);
-
-    const {
-      password: _,
-      biometric_challenge: __,
-      biometric_credential_id: ___,
-      biometric_public_key: ____,
-      biometric_counter: _____,
-      ...userData
-    } = user;
-
-    console.log('🎉 [LOGIN] Login successful for user:', user.id);
-
-    return res.json({
-      status: true,
-      data: {
-        ...userData,
-        selected_subjects: selectedSubjectsNames,
-        grade_value: user.grade_value || null,
-      },
-      token,
-    });
-
-  } catch (error) {
-    console.error('❌ [LOGIN] Error:', error);
-    console.error('❌ [LOGIN] Stack:', error.stack);
-    res.status(500).json({
-      success: false,
-      message: 'Server error: ' + error.message
-    });
-  }
+  res.json({ success: true, token, data: { id: user.id, email: user.email } });
 };
+
 
 export const cleanupBiometricRecords = async (req, res) => {
   try {
