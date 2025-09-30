@@ -494,8 +494,7 @@ export const verifyBiometricRegistration = async (req, res) => {
 };
 
 
-// 3. Generate authentication options
-// 3. Generate authentication options - FIXED
+// 3. Generate authentication options - FIXED FOR REAL
 export const generateBiometricAuth = async (req, res) => {
   try {
     console.log('🔐 [AUTH] Generating authentication options...');
@@ -517,7 +516,6 @@ export const generateBiometricAuth = async (req, res) => {
       });
     }
 
-    // FIXED: Properly handle credential ID conversion with type checking
     const allowCredentials = rows.map((user, index) => {
       try {
         const credId = user.biometric_credential_id;
@@ -527,37 +525,23 @@ export const generateBiometricAuth = async (req, res) => {
 
         let credBuffer;
         
-        // Handle Buffer type (PostgreSQL bytea returns this)
         if (Buffer.isBuffer(credId)) {
           credBuffer = credId;
-          console.log(`✅ [AUTH] User ${index + 1} - Using Buffer directly`);
-        }
-        // Handle Uint8Array
-        else if (credId instanceof Uint8Array) {
+        } else if (credId instanceof Uint8Array) {
           credBuffer = Buffer.from(credId);
-          console.log(`✅ [AUTH] User ${index + 1} - Converted from Uint8Array`);
-        }
-        // Handle string (base64url encoded)
-        else if (typeof credId === 'string') {
-          // CRITICAL FIX: Add validation before calling replace
+        } else if (typeof credId === 'string') {
           if (credId.length === 0) {
             console.error(`❌ [AUTH] Empty credential string for user ${user.id}`);
             return null;
           }
           credBuffer = base64urlToBuffer(credId);
-          console.log(`✅ [AUTH] User ${index + 1} - Converted from base64url string`);
-        }
-        // Handle object with data property (some PostgreSQL drivers)
-        else if (credId && typeof credId === 'object' && credId.data) {
+        } else if (credId && typeof credId === 'object' && credId.data) {
           credBuffer = Buffer.from(credId.data);
-          console.log(`✅ [AUTH] User ${index + 1} - Converted from object.data`);
-        }
-        else {
-          console.error(`❌ [AUTH] Unknown credential type for user ${user.id}:`, credId);
+        } else {
+          console.error(`❌ [AUTH] Unknown credential type for user ${user.id}`);
           return null;
         }
 
-        // Validate buffer
         if (!credBuffer || credBuffer.length === 0) {
           console.error(`❌ [AUTH] Invalid credential buffer for user ${user.id}`);
           return null;
@@ -565,14 +549,17 @@ export const generateBiometricAuth = async (req, res) => {
 
         console.log(`✅ [AUTH] User ${index + 1} credential buffer length:`, credBuffer.length);
 
+        // CRITICAL FIX: Convert Buffer to Uint8Array for @simplewebauthn/server
+        const credUint8Array = new Uint8Array(credBuffer);
+        console.log(`✅ [AUTH] User ${index + 1} converted to Uint8Array, length:`, credUint8Array.length);
+
         return {
-          id: credBuffer,
+          id: credUint8Array,  // <-- This must be Uint8Array, not Buffer
           type: 'public-key',
           transports: ['internal', 'hybrid'],
         };
       } catch (error) {
         console.error(`❌ [AUTH] Error converting credential for user ${user.id}:`, error.message);
-        console.error(`❌ [AUTH] Error stack:`, error.stack);
         return null;
       }
     }).filter(cred => cred !== null);
@@ -593,7 +580,6 @@ export const generateBiometricAuth = async (req, res) => {
       timeout: 60000,
     });
 
-    // Store challenge for all users
     await Promise.all(
       rows.map(user =>
         pool.query(
