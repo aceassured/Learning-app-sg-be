@@ -494,6 +494,99 @@ export const verifyBiometricRegistration = async (req, res) => {
 
 // 3. Generate authentication options - FIXED FOR REAL
 // 3. Generate authentication options - CORRECT FIX
+// export const generateBiometricAuth = async (req, res) => {
+//   try {
+//     console.log('🔐 [AUTH] Generating authentication options...');
+
+//     const { rows } = await pool.query(
+//       `SELECT id, email, biometric_credential_id 
+//        FROM users 
+//        WHERE biometric_enabled = TRUE 
+//        AND biometric_credential_id IS NOT NULL
+//        AND biometric_credential_id != ''`
+//     );
+
+//     console.log('👥 [AUTH] Found', rows.length, 'biometric users');
+
+//     if (rows.length === 0) {
+//       return res.json({
+//         success: false,
+//         message: "No users have biometric authentication set up.",
+//       });
+//     }
+
+//     // Build allowCredentials - keep credential IDs as base64url strings
+//     const allowCredentials = rows.map((user, index) => {
+//       try {
+//         const credId = user.biometric_credential_id;
+
+//         console.log(`🔍 [AUTH] User ${index + 1} (${user.email})`);
+//         console.log(`🔍 [AUTH] Credential ID type:`, typeof credId);
+//         console.log(`🔍 [AUTH] Credential ID (first 30 chars):`, credId?.substring(0, 30));
+
+//         // Validate it's a non-empty string
+//         if (!credId || typeof credId !== 'string' || credId.length === 0) {
+//           console.error(`❌ [AUTH] Invalid credential ID for user ${user.id}`);
+//           return null;
+//         }
+
+//         // Return credential with ID as base64url string
+//         // The library will handle the conversion internally
+//         return {
+//           id: credId,  // Keep as base64url string
+//           type: 'public-key',
+//           transports: ['internal', 'hybrid'],
+//         };
+//       } catch (error) {
+//         console.error(`❌ [AUTH] Error processing credential for user ${user.id}:`, error.message);
+//         return null;
+//       }
+//     }).filter(cred => cred !== null);
+
+//     console.log('✅ [AUTH] Valid credentials:', allowCredentials.length);
+
+//     if (allowCredentials.length === 0) {
+//       return res.json({
+//         success: false,
+//         message: "No valid credentials found. Please set up biometric login again.",
+//       });
+//     }
+
+//     const options = await generateAuthenticationOptions({
+//       rpID: RP_ID,
+//       allowCredentials,
+//       userVerification: 'required',
+//       timeout: 60000,
+//     });
+
+//     // Store challenge
+//     await Promise.all(
+//       rows.map(user =>
+//         pool.query(
+//           'UPDATE users SET biometric_challenge = $1 WHERE id = $2',
+//           [options.challenge, user.id]
+//         )
+//       )
+//     );
+
+//     console.log('✅ [AUTH] Authentication options generated successfully');
+
+//     res.json({
+//       success: true,
+//       options,
+//     });
+
+//   } catch (error) {
+//     console.error('❌ [AUTH] Error:', error);
+//     console.error('❌ [AUTH] Stack:', error.stack);
+//     res.status(500).json({
+//       success: false,
+//       message: 'Failed to generate authentication options: ' + error.message
+//     });
+//   }
+// };
+
+// 3. Generate authentication options - FIXED
 export const generateBiometricAuth = async (req, res) => {
   try {
     console.log('🔐 [AUTH] Generating authentication options...');
@@ -515,43 +608,23 @@ export const generateBiometricAuth = async (req, res) => {
       });
     }
 
-    // Build allowCredentials - keep credential IDs as base64url strings
-    const allowCredentials = rows.map((user, index) => {
-      try {
-        const credId = user.biometric_credential_id;
-
-        console.log(`🔍 [AUTH] User ${index + 1} (${user.email})`);
-        console.log(`🔍 [AUTH] Credential ID type:`, typeof credId);
-        console.log(`🔍 [AUTH] Credential ID (first 30 chars):`, credId?.substring(0, 30));
-
-        // Validate it's a non-empty string
-        if (!credId || typeof credId !== 'string' || credId.length === 0) {
-          console.error(`❌ [AUTH] Invalid credential ID for user ${user.id}`);
-          return null;
-        }
-
-        // Return credential with ID as base64url string
-        // The library will handle the conversion internally
-        return {
-          id: credId,  // Keep as base64url string
-          type: 'public-key',
-          transports: ['internal', 'hybrid'],
-        };
-      } catch (error) {
-        console.error(`❌ [AUTH] Error processing credential for user ${user.id}:`, error.message);
-        return null;
-      }
+    // Build allowCredentials
+    const allowCredentials = rows.map((user) => {
+      return {
+        id: user.biometric_credential_id,
+        type: 'public-key',
+        transports: ['internal'], // Changed from ['internal', 'hybrid']
+      };
     }).filter(cred => cred !== null);
-
-    console.log('✅ [AUTH] Valid credentials:', allowCredentials.length);
 
     if (allowCredentials.length === 0) {
       return res.json({
         success: false,
-        message: "No valid credentials found. Please set up biometric login again.",
+        message: "No valid credentials found.",
       });
     }
 
+    // CRITICAL: Set mediation to 'conditional' or 'required' to avoid QR code
     const options = await generateAuthenticationOptions({
       rpID: RP_ID,
       allowCredentials,
@@ -559,7 +632,6 @@ export const generateBiometricAuth = async (req, res) => {
       timeout: 60000,
     });
 
-    // Store challenge
     await Promise.all(
       rows.map(user =>
         pool.query(
@@ -569,7 +641,7 @@ export const generateBiometricAuth = async (req, res) => {
       )
     );
 
-    console.log('✅ [AUTH] Authentication options generated successfully');
+    console.log('✅ [AUTH] Authentication options generated');
 
     res.json({
       success: true,
@@ -578,7 +650,6 @@ export const generateBiometricAuth = async (req, res) => {
 
   } catch (error) {
     console.error('❌ [AUTH] Error:', error);
-    console.error('❌ [AUTH] Stack:', error.stack);
     res.status(500).json({
       success: false,
       message: 'Failed to generate authentication options: ' + error.message
