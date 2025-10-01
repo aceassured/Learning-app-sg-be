@@ -341,8 +341,8 @@ export const Commonlogin = async (req, res) => {
 export const generateBiometricRegistration = async (req, res) => {
   try {
     const { email } = req.body;
-    const user = await db.user.findUnique({ where: { email } });
-
+    const usernew = await pool.query(`SELECT * FROM users WHERE email = $1`, [email]);
+    const user = usernew.rows[0]
     if (!user) {
       return res.status(404).json({ success: false, message: "User not found" });
     }
@@ -361,11 +361,11 @@ export const generateBiometricRegistration = async (req, res) => {
       },
       excludeCredentials: user.biometric_credential_id
         ? [
-            {
-              id: Buffer.from(user.biometric_credential_id, "base64url"),
-              type: "public-key",
-            },
-          ]
+          {
+            id: Buffer.from(user.biometric_credential_id, "base64url"),
+            type: "public-key",
+          },
+        ]
         : [],
     });
 
