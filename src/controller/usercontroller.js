@@ -339,35 +339,43 @@ export const Commonlogin = async (req, res) => {
 
 // In generateBiometricRegistration function
 export const generateBiometricRegistration = async (req, res) => {
-  const { email } = req.body;
-  if (!email) return res.status(400).json({ success: false, message: "Email required" });
+  try {
+    const { email } = req.body;
+    const user = await db.user.findUnique({ where: { email } });
 
-  const { rows } = await pool.query("SELECT id, email, name FROM users WHERE email=$1", [email]);
-  if (rows.length === 0) return res.status(404).json({ success: false, message: "User not found" });
+    if (!user) {
+      return res.status(404).json({ success: false, message: "User not found" });
+    }
 
-  const user = rows[0];
+    const options = generateRegistrationOptions({
+      rpName: "Ace Hive",
+      rpID: "ace-hive-production-fe.vercel.app", // your frontend domain
+      userID: Buffer.from(user.id.toString(), "utf-8"), // MUST be buffer
+      userName: user.email,
+      userDisplayName: user.name || user.email,
+      attestationType: "none",
+      authenticatorSelection: {
+        authenticatorAttachment: "platform", // use device biometrics
+        residentKey: "preferred",
+        userVerification: "required",
+      },
+      excludeCredentials: user.biometric_credential_id
+        ? [
+            {
+              id: Buffer.from(user.biometric_credential_id, "base64url"),
+              type: "public-key",
+            },
+          ]
+        : [],
+    });
 
-  const options = generateRegistrationOptions({
-    rpName: RP_NAME,
-    rpID: RP_ID,
-    userID: generateUserIdBuffer(user.id), // must be a buffer
-    userName: user.email,
-    userDisplayName: user.name || user.email,
-    attestationType: 'none',
-    authenticatorSelection: {
-      authenticatorAttachment: 'platform',
-      userVerification: 'required',
-      residentKey: 'required',
-    },
-    excludeCredentials: user.biometric_credential_id
-      ? [{ id: base64urlToBuffer(user.biometric_credential_id), type: 'public-key' }]
-      : [],
-  });
+    console.log("Generated Registration Options:", options);
 
-
-  await pool.query("UPDATE users SET biometric_challenge=$1 WHERE id=$2", [options.challenge, user.id]);
-
-  res.json({ success: true, options });
+    res.json({ success: true, options });
+  } catch (err) {
+    console.error("Biometric registration error:", err);
+    res.status(500).json({ success: false, message: "Server error" });
+  }
 };
 
 
