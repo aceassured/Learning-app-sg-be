@@ -282,11 +282,13 @@ export const verifyBiometricRegistration = async (req, res) => {
       });
     }
 
+    // FIXED: The registrationInfo structure
     const { credentialID, credentialPublicKey, counter } = 
       verification.registrationInfo;
 
-    const credentialIdBase64 = bufferToBase64url(credentialID);
-    const publicKeyBase64 = bufferToBase64url(credentialPublicKey);
+    // FIXED: Convert Uint8Array to base64url properly
+    const credentialIdBase64 = bufferToBase64url(Buffer.from(credentialID));
+    const publicKeyBase64 = bufferToBase64url(Buffer.from(credentialPublicKey));
 
     await pool.query(
       `UPDATE users 
@@ -305,6 +307,7 @@ export const verifyBiometricRegistration = async (req, res) => {
     });
   } catch (error) {
     console.error('Registration verification error:', error);
+    console.error('Error stack:', error.stack);
     res.status(500).json({ 
       success: false, 
       message: 'Verification failed',
