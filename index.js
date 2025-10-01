@@ -207,12 +207,16 @@ app.use(express.urlencoded({ extended: true }));
 app.use(helmet());
 
 const corsOptions = {
-  origin: "https://ace-hive-production-fe.vercel.app", // ONLY your frontend
+  origin: [
+    "https://ace-hive-production-fe.vercel.app",
+    "http://localhost:5173"
+  ], // allow multiple frontends
   methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
   allowedHeaders: ["Content-Type", "Authorization", "auth"],
   credentials: true,
   optionsSuccessStatus: 200,
 };
+
 app.use(cors(corsOptions));
 
 // --- ROUTES ---
