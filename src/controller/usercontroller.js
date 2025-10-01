@@ -19,14 +19,6 @@ import { SendMailClient } from "zeptomail";
 
 const JWT_SECRET = process.env.JWT_SECRET || 'dev_secret';
 
-
-// Environment variables
-// const ORIGIN = process.env.ORIGIN || 'https://ace-hive-production-fe.vercel.app';
-// const RP_ID = process.env.RP_ID || 'ace-hive-production-fe.vercel.app';
-// const RP_NAME = process.env.RP_NAME || 'AceHive';
-
-
-
 const ORIGIN = process.env.NODE_ENV === 'development'
   ? 'http://localhost:5173'
   : 'https://ace-hive-production-fe.vercel.app';
