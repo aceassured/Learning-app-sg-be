@@ -234,14 +234,14 @@ export const generateBiometricRegistration = async (req, res) => {
   }
 };
 
-// 2. Verify Registration
+// 2. Verify Registration - CORRECTED
 export const verifyBiometricRegistration = async (req, res) => {
   try {
     const { email, credential } = req.body;
     
     console.log('=== VERIFICATION REQUEST ===');
     console.log('Email:', email);
-    console.log('Credential keys:', Object.keys(credential || {}));
+    console.log('Credential received:', JSON.stringify(credential, null, 2));
     
     if (!email || !credential) {
       return res.status(400).json({ 
@@ -271,9 +271,9 @@ export const verifyBiometricRegistration = async (req, res) => {
       });
     }
 
-    console.log('Challenge from DB:', user.biometric_challenge);
-    console.log('Credential structure:', JSON.stringify(credential, null, 2));
+    console.log('Expected challenge:', user.biometric_challenge);
 
+    // CRITICAL FIX: Ensure credential structure is correct
     const verification = await verifyRegistrationResponse({
       response: credential,
       expectedChallenge: user.biometric_challenge,
@@ -282,7 +282,7 @@ export const verifyBiometricRegistration = async (req, res) => {
       requireUserVerification: true,
     });
 
-    console.log('Verification completed:', verification.verified);
+    console.log('Verification result:', verification);
 
     if (!verification.verified) {
       return res.status(400).json({ 
@@ -294,20 +294,22 @@ export const verifyBiometricRegistration = async (req, res) => {
     const { credentialID, credentialPublicKey, counter } = 
       verification.registrationInfo;
 
+    // ADDED: Better validation
     if (!credentialID || !credentialPublicKey) {
-      console.error('Missing credential data:', { credentialID, credentialPublicKey });
+      console.error('Missing credential info:', verification.registrationInfo);
       return res.status(400).json({
         success: false,
-        message: "Invalid credential data"
+        message: "Registration info incomplete"
       });
     }
 
-    const credentialIdBase64 = bufferToBase64url(Buffer.from(credentialID));
-    const publicKeyBase64 = bufferToBase64url(Buffer.from(credentialPublicKey));
+    // Convert to base64url strings
+    const credentialIdBase64 = bufferToBase64url(credentialID);
+    const publicKeyBase64 = bufferToBase64url(credentialPublicKey);
 
-    console.log('Storing credentials (first 20 chars):', {
-      id: credentialIdBase64.substring(0, 20),
-      key: publicKeyBase64.substring(0, 20),
+    console.log('Storing credentials:', {
+      id: credentialIdBase64.substring(0, 20) + '...',
+      keyLength: publicKeyBase64.length,
       counter: counter || 0
     });
 
@@ -328,12 +330,13 @@ export const verifyBiometricRegistration = async (req, res) => {
     });
   } catch (error) {
     console.error('=== VERIFICATION ERROR ===');
-    console.error('Error:', error);
+    console.error('Error type:', error.name);
+    console.error('Error message:', error.message);
     console.error('Stack:', error.stack);
     
     res.status(500).json({ 
       success: false, 
-      message: 'Verification failed',
+      message: 'Verification failed: ' + error.message,
       error: error.message 
     });
   }
