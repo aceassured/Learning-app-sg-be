@@ -176,6 +176,24 @@ export const Commonlogin = async (req, res) => {
   }
 };
 
+
+// Helper to convert browser credential format to server format
+const convertCredentialForVerification = (credential) => {
+  return {
+    id: credential.id,
+    rawId: credential.rawId,
+    type: credential.type,
+    response: {
+      clientDataJSON: credential.response.clientDataJSON,
+      attestationObject: credential.response.attestationObject,
+      // Include transports if available
+      transports: credential.response.transports || [],
+    },
+    clientExtensionResults: credential.clientExtensionResults || {},
+    authenticatorAttachment: credential.authenticatorAttachment,
+  };
+};
+
 // 1. Generate Registration Options
 export const generateBiometricRegistration = async (req, res) => {
   try {
@@ -252,6 +270,8 @@ export const verifyBiometricRegistration = async (req, res) => {
     
     console.log('=== VERIFICATION STARTED ===');
     console.log('Email:', email);
+    console.log('Credential keys:', Object.keys(credential));
+    console.log('Response keys:', Object.keys(credential.response || {}));
     
     if (!email || !credential) {
       return res.status(400).json({ 
@@ -277,34 +297,45 @@ export const verifyBiometricRegistration = async (req, res) => {
     if (!user.biometric_challenge) {
       return res.status(400).json({ 
         success: false, 
-        message: "No active challenge found. Please try registration again." 
+        message: "No active challenge found" 
       });
     }
 
-    console.log('Expected challenge:', user.biometric_challenge);
-    console.log('Credential type:', credential.type);
-    console.log('Credential id:', credential.id);
+    console.log('Challenge:', user.biometric_challenge);
+    console.log('attestationObject present:', !!credential.response?.attestationObject);
+    console.log('clientDataJSON present:', !!credential.response?.clientDataJSON);
 
-    // Verify the registration response
+    // Convert credential to proper format
+    const formattedCredential = convertCredentialForVerification(credential);
+    
+    console.log('Formatted credential keys:', Object.keys(formattedCredential.response));
+
     let verification;
     try {
       verification = await verifyRegistrationResponse({
-        response: credential,
+        response: formattedCredential,
         expectedChallenge: user.biometric_challenge,
         expectedOrigin: ORIGIN,
         expectedRPID: RP_ID,
         requireUserVerification: true,
       });
+      
+      console.log('Verification result:', {
+        verified: verification.verified,
+        hasRegistrationInfo: !!verification.registrationInfo
+      });
+      
+      if (verification.registrationInfo) {
+        console.log('RegistrationInfo keys:', Object.keys(verification.registrationInfo));
+      }
     } catch (verifyError) {
-      console.error('Verification threw error:', verifyError.message);
+      console.error('Verification error:', verifyError.message);
+      console.error('Error stack:', verifyError.stack);
       return res.status(400).json({
         success: false,
         message: 'Verification failed: ' + verifyError.message
       });
     }
-
-    console.log('Verification complete:', verification.verified);
-    console.log('Registration info:', verification.registrationInfo);
 
     if (!verification.verified) {
       return res.status(400).json({ 
@@ -313,38 +344,39 @@ export const verifyBiometricRegistration = async (req, res) => {
       });
     }
 
-    // Extract credential data
-    const registrationInfo = verification.registrationInfo;
-    
-    if (!registrationInfo) {
-      console.error('No registrationInfo in verification result');
-      return res.status(400).json({
+    if (!verification.registrationInfo) {
+      console.error('Verification succeeded but no registrationInfo');
+      return res.status(500).json({
         success: false,
-        message: "Verification succeeded but no registration info returned"
+        message: "Verification succeeded but returned no registration data"
       });
     }
 
-    const { credentialID, credentialPublicKey, counter } = registrationInfo;
+    const { credentialID, credentialPublicKey, counter } = verification.registrationInfo;
+
+    console.log('Credential data:', {
+      hasCredentialID: !!credentialID,
+      credentialIDType: credentialID ? typeof credentialID : 'undefined',
+      hasPublicKey: !!credentialPublicKey,
+      publicKeyType: credentialPublicKey ? typeof credentialPublicKey : 'undefined',
+      counter
+    });
 
     if (!credentialID || !credentialPublicKey) {
-      console.error('Missing credential data:', { 
-        hasCredentialID: !!credentialID, 
-        hasPublicKey: !!credentialPublicKey 
-      });
+      console.error('Missing fields in registrationInfo:', verification.registrationInfo);
       return res.status(400).json({
         success: false,
         message: "Incomplete credential data from verification"
       });
     }
 
-    // Convert buffers to base64url strings for storage
-    const credentialIdBase64 = bufferToBase64url(credentialID);
-    const publicKeyBase64 = bufferToBase64url(credentialPublicKey);
+    // Convert to base64url for storage
+    const credentialIdBase64 = bufferToBase64url(Buffer.from(credentialID));
+    const publicKeyBase64 = bufferToBase64url(Buffer.from(credentialPublicKey));
 
-    console.log('Storing credentials:', {
+    console.log('Converted for storage:', {
       credentialIdLength: credentialIdBase64.length,
-      publicKeyLength: publicKeyBase64.length,
-      counter: counter
+      publicKeyLength: publicKeyBase64.length
     });
 
     await pool.query(
@@ -355,23 +387,24 @@ export const verifyBiometricRegistration = async (req, res) => {
            biometric_enabled=true, 
            biometric_challenge=NULL 
        WHERE id=$4`,
-      [credentialIdBase64, publicKeyBase64, counter, user.id]
+      [credentialIdBase64, publicKeyBase64, counter || 0, user.id]
     );
 
-    console.log('✅ Biometric registration saved successfully');
+    console.log('✅ Registration complete');
 
     res.json({ 
       success: true, 
       message: "Biometric authentication enabled successfully" 
     });
   } catch (error) {
-    console.error('=== VERIFICATION ERROR ===');
-    console.error('Error:', error.message);
+    console.error('=== UNEXPECTED ERROR ===');
+    console.error('Type:', error.constructor.name);
+    console.error('Message:', error.message);
     console.error('Stack:', error.stack);
     
     res.status(500).json({ 
       success: false, 
-      message: 'Verification error: ' + error.message
+      message: 'Server error: ' + error.message
     });
   }
 };
