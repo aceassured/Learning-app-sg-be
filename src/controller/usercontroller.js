@@ -17,6 +17,7 @@ import {
 import { SendMailClient } from "zeptomail";
 
 
+
 const JWT_SECRET = process.env.JWT_SECRET || 'dev_secret';
 
 const ORIGIN = process.env.NODE_ENV === 'development'
@@ -199,7 +200,9 @@ export const generateBiometricRegistration = async (req, res) => {
     }
 
     const user = rows[0];
-    const userIdBuffer = Buffer.from(user.id.toString(), 'utf-8');
+    
+    // CRITICAL: userID must be a Uint8Array or Buffer
+    const userIdBuffer = Buffer.from(user.id.toString());
 
     const options = await generateRegistrationOptions({
       rpName: RP_NAME,
@@ -215,13 +218,21 @@ export const generateBiometricRegistration = async (req, res) => {
         requireResidentKey: true,
       },
       timeout: 60000,
+      // IMPORTANT: Don't exclude existing credentials during registration
+      excludeCredentials: [],
     });
 
-    // Store challenge
+    // Store the ORIGINAL challenge (it's already base64url)
     await pool.query(
       "UPDATE users SET biometric_challenge=$1 WHERE id=$2",
       [options.challenge, user.id]
     );
+
+    console.log('Generated options:', {
+      challenge: options.challenge,
+      rpID: options.rp.id,
+      userId: user.id
+    });
 
     res.json({ success: true, options });
   } catch (error) {
@@ -239,9 +250,8 @@ export const verifyBiometricRegistration = async (req, res) => {
   try {
     const { email, credential } = req.body;
     
-    console.log('=== VERIFICATION REQUEST ===');
+    console.log('=== VERIFICATION STARTED ===');
     console.log('Email:', email);
-    console.log('Credential received:', JSON.stringify(credential, null, 2));
     
     if (!email || !credential) {
       return res.status(400).json({ 
@@ -267,50 +277,74 @@ export const verifyBiometricRegistration = async (req, res) => {
     if (!user.biometric_challenge) {
       return res.status(400).json({ 
         success: false, 
-        message: "No active challenge found" 
+        message: "No active challenge found. Please try registration again." 
       });
     }
 
     console.log('Expected challenge:', user.biometric_challenge);
+    console.log('Credential type:', credential.type);
+    console.log('Credential id:', credential.id);
 
-    // CRITICAL FIX: Ensure credential structure is correct
-    const verification = await verifyRegistrationResponse({
-      response: credential,
-      expectedChallenge: user.biometric_challenge,
-      expectedOrigin: ORIGIN,
-      expectedRPID: RP_ID,
-      requireUserVerification: true,
-    });
+    // Verify the registration response
+    let verification;
+    try {
+      verification = await verifyRegistrationResponse({
+        response: credential,
+        expectedChallenge: user.biometric_challenge,
+        expectedOrigin: ORIGIN,
+        expectedRPID: RP_ID,
+        requireUserVerification: true,
+      });
+    } catch (verifyError) {
+      console.error('Verification threw error:', verifyError.message);
+      return res.status(400).json({
+        success: false,
+        message: 'Verification failed: ' + verifyError.message
+      });
+    }
 
-    console.log('Verification result:', verification);
+    console.log('Verification complete:', verification.verified);
+    console.log('Registration info:', verification.registrationInfo);
 
     if (!verification.verified) {
       return res.status(400).json({ 
         success: false, 
-        message: "Verification failed - biometric authentication rejected" 
+        message: "Biometric verification failed" 
       });
     }
 
-    const { credentialID, credentialPublicKey, counter } = 
-      verification.registrationInfo;
-
-    // ADDED: Better validation
-    if (!credentialID || !credentialPublicKey) {
-      console.error('Missing credential info:', verification.registrationInfo);
+    // Extract credential data
+    const registrationInfo = verification.registrationInfo;
+    
+    if (!registrationInfo) {
+      console.error('No registrationInfo in verification result');
       return res.status(400).json({
         success: false,
-        message: "Registration info incomplete"
+        message: "Verification succeeded but no registration info returned"
       });
     }
 
-    // Convert to base64url strings
+    const { credentialID, credentialPublicKey, counter } = registrationInfo;
+
+    if (!credentialID || !credentialPublicKey) {
+      console.error('Missing credential data:', { 
+        hasCredentialID: !!credentialID, 
+        hasPublicKey: !!credentialPublicKey 
+      });
+      return res.status(400).json({
+        success: false,
+        message: "Incomplete credential data from verification"
+      });
+    }
+
+    // Convert buffers to base64url strings for storage
     const credentialIdBase64 = bufferToBase64url(credentialID);
     const publicKeyBase64 = bufferToBase64url(credentialPublicKey);
 
     console.log('Storing credentials:', {
-      id: credentialIdBase64.substring(0, 20) + '...',
-      keyLength: publicKeyBase64.length,
-      counter: counter || 0
+      credentialIdLength: credentialIdBase64.length,
+      publicKeyLength: publicKeyBase64.length,
+      counter: counter
     });
 
     await pool.query(
@@ -321,8 +355,10 @@ export const verifyBiometricRegistration = async (req, res) => {
            biometric_enabled=true, 
            biometric_challenge=NULL 
        WHERE id=$4`,
-      [credentialIdBase64, publicKeyBase64, counter || 0, user.id]
+      [credentialIdBase64, publicKeyBase64, counter, user.id]
     );
+
+    console.log('✅ Biometric registration saved successfully');
 
     res.json({ 
       success: true, 
@@ -330,14 +366,12 @@ export const verifyBiometricRegistration = async (req, res) => {
     });
   } catch (error) {
     console.error('=== VERIFICATION ERROR ===');
-    console.error('Error type:', error.name);
-    console.error('Error message:', error.message);
+    console.error('Error:', error.message);
     console.error('Stack:', error.stack);
     
     res.status(500).json({ 
       success: false, 
-      message: 'Verification failed: ' + error.message,
-      error: error.message 
+      message: 'Verification error: ' + error.message
     });
   }
 };
