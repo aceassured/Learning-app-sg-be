@@ -270,8 +270,6 @@ export const verifyBiometricRegistration = async (req, res) => {
     
     console.log('=== VERIFICATION STARTED ===');
     console.log('Email:', email);
-    console.log('Credential keys:', Object.keys(credential));
-    console.log('Response keys:', Object.keys(credential.response || {}));
     
     if (!email || !credential) {
       return res.status(400).json({ 
@@ -302,13 +300,20 @@ export const verifyBiometricRegistration = async (req, res) => {
     }
 
     console.log('Challenge:', user.biometric_challenge);
-    console.log('attestationObject present:', !!credential.response?.attestationObject);
-    console.log('clientDataJSON present:', !!credential.response?.clientDataJSON);
 
     // Convert credential to proper format
-    const formattedCredential = convertCredentialForVerification(credential);
-    
-    console.log('Formatted credential keys:', Object.keys(formattedCredential.response));
+    const formattedCredential = {
+      id: credential.id,
+      rawId: credential.rawId,
+      type: credential.type,
+      response: {
+        clientDataJSON: credential.response.clientDataJSON,
+        attestationObject: credential.response.attestationObject,
+        transports: credential.response.transports || [],
+      },
+      clientExtensionResults: credential.clientExtensionResults || {},
+      authenticatorAttachment: credential.authenticatorAttachment,
+    };
 
     let verification;
     try {
@@ -324,13 +329,8 @@ export const verifyBiometricRegistration = async (req, res) => {
         verified: verification.verified,
         hasRegistrationInfo: !!verification.registrationInfo
       });
-      
-      if (verification.registrationInfo) {
-        console.log('RegistrationInfo keys:', Object.keys(verification.registrationInfo));
-      }
     } catch (verifyError) {
       console.error('Verification error:', verifyError.message);
-      console.error('Error stack:', verifyError.stack);
       return res.status(400).json({
         success: false,
         message: 'Verification failed: ' + verifyError.message
@@ -352,18 +352,28 @@ export const verifyBiometricRegistration = async (req, res) => {
       });
     }
 
-    const { credentialID, credentialPublicKey, counter } = verification.registrationInfo;
+    // CRITICAL FIX: Use correct field names from registrationInfo
+    // The actual structure contains 'credential' object with these fields
+    const registrationInfo = verification.registrationInfo;
+    
+    console.log('Full registrationInfo:', JSON.stringify(registrationInfo, null, 2));
 
-    console.log('Credential data:', {
+    // Extract from the nested credential object
+    const credentialID = registrationInfo.credential?.id;
+    const credentialPublicKey = registrationInfo.credential?.publicKey;
+    const counter = registrationInfo.credential?.counter;
+
+    console.log('Extracted credential data:', {
       hasCredentialID: !!credentialID,
-      credentialIDType: credentialID ? typeof credentialID : 'undefined',
+      credentialIDLength: credentialID ? credentialID.length : 0,
       hasPublicKey: !!credentialPublicKey,
-      publicKeyType: credentialPublicKey ? typeof credentialPublicKey : 'undefined',
+      publicKeyLength: credentialPublicKey ? credentialPublicKey.length : 0,
       counter
     });
 
     if (!credentialID || !credentialPublicKey) {
-      console.error('Missing fields in registrationInfo:', verification.registrationInfo);
+      console.error('Missing credential data in registrationInfo.credential');
+      console.error('Available keys:', Object.keys(registrationInfo.credential || {}));
       return res.status(400).json({
         success: false,
         message: "Incomplete credential data from verification"
@@ -376,21 +386,30 @@ export const verifyBiometricRegistration = async (req, res) => {
 
     console.log('Converted for storage:', {
       credentialIdLength: credentialIdBase64.length,
-      publicKeyLength: publicKeyBase64.length
+      publicKeyLength: publicKeyBase64.length,
+      counter: counter || 0
     });
 
+    // Update database
     await pool.query(
       `UPDATE users 
        SET biometric_credential_id=$1, 
            biometric_public_key=$2, 
            biometric_counter=$3, 
+           biometric_device_type=$4,
            biometric_enabled=true, 
            biometric_challenge=NULL 
-       WHERE id=$4`,
-      [credentialIdBase64, publicKeyBase64, counter || 0, user.id]
+       WHERE id=$5`,
+      [
+        credentialIdBase64, 
+        publicKeyBase64, 
+        counter || 0, 
+        registrationInfo.credentialDeviceType || 'unknown',
+        user.id
+      ]
     );
 
-    console.log('✅ Registration complete');
+    console.log('✅ Registration complete for user:', user.email);
 
     res.json({ 
       success: true, 
