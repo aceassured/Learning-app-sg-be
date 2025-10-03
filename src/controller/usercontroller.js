@@ -28,8 +28,11 @@ const RP_ID = process.env.NODE_ENV === 'development'
   : 'ace-hive-production-fe.vercel.app';
 const RP_NAME = 'AceHive';
 
-// Helper functions
+// Helper functions with validation
 const bufferToBase64url = (buffer) => {
+  if (!buffer) {
+    throw new Error('Buffer is required for base64url conversion');
+  }
   return Buffer.from(buffer)
     .toString('base64')
     .replace(/\+/g, '-')
@@ -38,6 +41,9 @@ const bufferToBase64url = (buffer) => {
 };
 
 const base64urlToBuffer = (base64url) => {
+  if (!base64url || typeof base64url !== 'string') {
+    throw new Error(`Invalid base64url input: ${typeof base64url}`);
+  }
   const base64 = base64url.replace(/-/g, '+').replace(/_/g, '/');
   const paddedBase64 = base64.padEnd(
     base64.length + ((4 - (base64.length % 4)) % 4),
@@ -217,8 +223,6 @@ export const generateBiometricRegistration = async (req, res) => {
     }
 
     const user = rows[0];
-    
-    // Convert user ID to Buffer
     const userIdBuffer = Buffer.from(user.id.toString());
 
     const options = await generateRegistrationOptions({
@@ -238,17 +242,15 @@ export const generateBiometricRegistration = async (req, res) => {
       excludeCredentials: [],
     });
 
-    // Store challenge (it's already base64url)
     await pool.query(
       "UPDATE users SET biometric_challenge=$1 WHERE id=$2",
       [options.challenge, user.id]
     );
 
-    console.log('Generated registration options for:', user.email);
-
+    console.log('✅ Generated registration options for:', user.email);
     res.json({ success: true, options });
   } catch (error) {
-    console.error('Registration generation error:', error);
+    console.error('❌ Registration generation error:', error);
     res.status(500).json({ 
       success: false, 
       message: 'Failed to generate registration options',
@@ -293,9 +295,6 @@ export const verifyBiometricRegistration = async (req, res) => {
       });
     }
 
-    console.log('Challenge:', user.biometric_challenge);
-
-    // Format credential properly
     const formattedCredential = {
       id: credential.id,
       rawId: credential.rawId,
@@ -309,58 +308,25 @@ export const verifyBiometricRegistration = async (req, res) => {
       authenticatorAttachment: credential.authenticatorAttachment,
     };
 
-    let verification;
-    try {
-      verification = await verifyRegistrationResponse({
-        response: formattedCredential,
-        expectedChallenge: user.biometric_challenge,
-        expectedOrigin: ORIGIN,
-        expectedRPID: RP_ID,
-        requireUserVerification: true,
-      });
-      
-      console.log('Verification result:', {
-        verified: verification.verified,
-        hasRegistrationInfo: !!verification.registrationInfo
-      });
-    } catch (verifyError) {
-      console.error('Verification error:', verifyError.message);
-      return res.status(400).json({
-        success: false,
-        message: 'Verification failed: ' + verifyError.message
-      });
-    }
+    const verification = await verifyRegistrationResponse({
+      response: formattedCredential,
+      expectedChallenge: user.biometric_challenge,
+      expectedOrigin: ORIGIN,
+      expectedRPID: RP_ID,
+      requireUserVerification: true,
+    });
 
-    if (!verification.verified) {
+    if (!verification.verified || !verification.registrationInfo) {
       return res.status(400).json({ 
         success: false, 
         message: "Biometric verification failed" 
       });
     }
 
-    if (!verification.registrationInfo) {
-      return res.status(500).json({
-        success: false,
-        message: "Verification succeeded but returned no registration data"
-      });
-    }
-
-    // Extract from nested credential object
-    const registrationInfo = verification.registrationInfo;
-    const credentialID = registrationInfo.credential?.id;
-    const credentialPublicKey = registrationInfo.credential?.publicKey;
-    const counter = registrationInfo.credential?.counter;
-
-    console.log('Extracted credential data:', {
-      hasCredentialID: !!credentialID,
-      credentialIDLength: credentialID ? credentialID.length : 0,
-      hasPublicKey: !!credentialPublicKey,
-      publicKeyLength: credentialPublicKey ? credentialPublicKey.length : 0,
-      counter
-    });
-
-    if (!credentialID || !credentialPublicKey) {
-      console.error('Missing credential data');
+    const { credential: credData } = verification.registrationInfo;
+    
+    if (!credData?.id || !credData?.publicKey) {
+      console.error('❌ Missing credential data:', credData);
       return res.status(400).json({
         success: false,
         message: "Incomplete credential data from verification"
@@ -368,13 +334,13 @@ export const verifyBiometricRegistration = async (req, res) => {
     }
 
     // Convert to base64url for storage
-    const credentialIdBase64 = bufferToBase64url(Buffer.from(credentialID));
-    const publicKeyBase64 = bufferToBase64url(Buffer.from(credentialPublicKey));
+    const credentialIdBase64 = bufferToBase64url(credData.id);
+    const publicKeyBase64 = bufferToBase64url(credData.publicKey);
 
-    console.log('Converted for storage:', {
+    console.log('💾 Storing:', {
+      credentialId: credentialIdBase64,
       credentialIdLength: credentialIdBase64.length,
       publicKeyLength: publicKeyBase64.length,
-      counter: counter || 0
     });
 
     // Update database
@@ -390,24 +356,19 @@ export const verifyBiometricRegistration = async (req, res) => {
       [
         credentialIdBase64, 
         publicKeyBase64, 
-        counter || 0, 
-        registrationInfo.credentialDeviceType || 'unknown',
+        credData.counter || 0, 
+        verification.registrationInfo.credentialDeviceType || 'unknown',
         user.id
       ]
     );
 
-    console.log('✅ Registration complete for user:', user.email);
-
+    console.log('✅ Registration complete for:', user.email);
     res.json({ 
       success: true, 
       message: "Biometric authentication enabled successfully" 
     });
   } catch (error) {
-    console.error('=== UNEXPECTED ERROR ===');
-    console.error('Type:', error.constructor.name);
-    console.error('Message:', error.message);
-    console.error('Stack:', error.stack);
-    
+    console.error('❌ Verification error:', error.message);
     res.status(500).json({ 
       success: false, 
       message: 'Server error: ' + error.message
@@ -418,9 +379,10 @@ export const verifyBiometricRegistration = async (req, res) => {
 // 3. Generate Authentication Options
 export const generateBiometricAuth = async (req, res) => {
   try {
-    // Get ALL users with biometric enabled
+    console.log('=== GENERATING AUTH OPTIONS ===');
+    
     const { rows } = await pool.query(
-      "SELECT id, email, biometric_credential_id FROM users WHERE biometric_enabled=true"
+      "SELECT id, email, biometric_credential_id FROM users WHERE biometric_enabled=true AND biometric_credential_id IS NOT NULL"
     );
 
     if (rows.length === 0) {
@@ -432,18 +394,43 @@ export const generateBiometricAuth = async (req, res) => {
 
     console.log(`Found ${rows.length} users with biometric enabled`);
 
-    // CRITICAL: Convert base64url strings to Buffers
-    const allowCredentials = rows.map(user => {
-      const credentialIdBuffer = base64urlToBuffer(user.biometric_credential_id);
-      
-      console.log(`User ${user.email}: credentialId length = ${credentialIdBuffer.length}`);
-      
-      return {
-        id: credentialIdBuffer,  // Must be Buffer, not string
-        type: 'public-key',
-        transports: ['internal', 'hybrid'],
-      };
-    });
+    // Convert credential IDs to Buffers with validation
+    const allowCredentials = [];
+    
+    for (const user of rows) {
+      try {
+        console.log(`Processing user ${user.email}:`, {
+          credentialId: user.biometric_credential_id,
+          type: typeof user.biometric_credential_id,
+          length: user.biometric_credential_id?.length
+        });
+
+        if (!user.biometric_credential_id || typeof user.biometric_credential_id !== 'string') {
+          console.error(`❌ Invalid credential ID for user ${user.email}`);
+          continue;
+        }
+
+        const credentialIdBuffer = base64urlToBuffer(user.biometric_credential_id);
+        
+        allowCredentials.push({
+          id: credentialIdBuffer,
+          type: 'public-key',
+          transports: ['internal', 'hybrid'],
+        });
+
+        console.log(`✅ Added credential for ${user.email}, buffer length: ${credentialIdBuffer.length}`);
+      } catch (err) {
+        console.error(`❌ Error processing user ${user.email}:`, err.message);
+        continue;
+      }
+    }
+
+    if (allowCredentials.length === 0) {
+      return res.status(404).json({ 
+        success: false, 
+        message: "No valid biometric credentials found" 
+      });
+    }
 
     const options = await generateAuthenticationOptions({
       rpID: RP_ID,
@@ -452,20 +439,21 @@ export const generateBiometricAuth = async (req, res) => {
       timeout: 60000,
     });
 
-    console.log('Generated auth options:', {
+    console.log('✅ Generated auth options:', {
       challenge: options.challenge,
       allowCredentialsCount: options.allowCredentials.length
     });
 
-    // Store challenge for ALL biometric users
+    // Store challenge for users with valid credentials
     await pool.query(
-      "UPDATE users SET biometric_challenge=$1 WHERE biometric_enabled=true",
+      "UPDATE users SET biometric_challenge=$1 WHERE biometric_enabled=true AND biometric_credential_id IS NOT NULL",
       [options.challenge]
     );
 
     res.json({ success: true, options });
   } catch (error) {
-    console.error('Auth generation error:', error);
+    console.error('❌ Auth generation error:', error);
+    console.error('Stack:', error.stack);
     res.status(500).json({ 
       success: false, 
       message: 'Failed to generate authentication options',
@@ -480,28 +468,25 @@ export const bioMetricLogin = async (req, res) => {
     const { credential } = req.body;
     
     console.log('=== BIOMETRIC LOGIN STARTED ===');
-    console.log('Credential ID:', credential.id);
+    console.log('Credential ID from client:', credential.id);
     
-    if (!credential) {
+    if (!credential || !credential.id) {
       return res.status(400).json({ 
         success: false, 
         message: "Credential required" 
       });
     }
 
-    // The credential.id from browser is already base64url
     const credentialIdBase64 = credential.id;
-
     console.log('Looking for user with credential ID:', credentialIdBase64);
 
-    // Find user by credential ID
     const { rows } = await pool.query(
       "SELECT * FROM users WHERE biometric_credential_id=$1",
       [credentialIdBase64]
     );
 
     if (rows.length === 0) {
-      console.error('No user found with this credential ID');
+      console.error('❌ No user found with credential ID:', credentialIdBase64);
       return res.status(404).json({ 
         success: false, 
         message: "User not found" 
@@ -509,7 +494,7 @@ export const bioMetricLogin = async (req, res) => {
     }
 
     const user = rows[0];
-    console.log('Found user:', user.email);
+    console.log('✅ Found user:', user.email);
 
     if (!user.biometric_challenge) {
       return res.status(400).json({ 
@@ -518,25 +503,29 @@ export const bioMetricLogin = async (req, res) => {
       });
     }
 
-    console.log('Challenge:', user.biometric_challenge);
+    if (!user.biometric_public_key) {
+      console.error('❌ No public key stored for user');
+      return res.status(400).json({ 
+        success: false, 
+        message: "Biometric data incomplete" 
+      });
+    }
 
-    // CRITICAL: Convert stored base64url strings to Buffers
+    console.log('Converting stored credentials...');
+    const credentialIDBuffer = base64urlToBuffer(user.biometric_credential_id);
+    const publicKeyBuffer = base64urlToBuffer(user.biometric_public_key);
+
     const verification = await verifyAuthenticationResponse({
       response: credential,
       expectedChallenge: user.biometric_challenge,
       expectedOrigin: ORIGIN,
       expectedRPID: RP_ID,
       authenticator: {
-        credentialID: base64urlToBuffer(user.biometric_credential_id),
-        credentialPublicKey: base64urlToBuffer(user.biometric_public_key),
+        credentialID: credentialIDBuffer,
+        credentialPublicKey: publicKeyBuffer,
         counter: user.biometric_counter || 0,
       },
       requireUserVerification: true,
-    });
-
-    console.log('Verification result:', {
-      verified: verification.verified,
-      newCounter: verification.authenticationInfo?.newCounter
     });
 
     if (!verification.verified) {
@@ -555,7 +544,6 @@ export const bioMetricLogin = async (req, res) => {
       [verification.authenticationInfo.newCounter, user.id]
     );
 
-    // Generate JWT token
     const token = jwt.sign(
       { userId: user.id, email: user.email },
       JWT_SECRET,
@@ -578,9 +566,7 @@ export const bioMetricLogin = async (req, res) => {
       message: 'Login successful',
     });
   } catch (error) {
-    console.error('=== BIOMETRIC LOGIN ERROR ===');
-    console.error('Type:', error.constructor.name);
-    console.error('Message:', error.message);
+    console.error('❌ Biometric login error:', error.message);
     console.error('Stack:', error.stack);
     
     res.status(500).json({ 
