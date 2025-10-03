@@ -55,6 +55,8 @@ const base64urlToBuffer = (base64url) => {
   );
   return Buffer.from(paddedBase64, 'base64');
 };
+
+
 // // FIXED: Proper user ID buffer generation
 // const generateUserIdBuffer = (userId) => {
 //   const userIdString = userId.toString();
@@ -434,15 +436,15 @@ export const generateBiometricAuth = async (req, res) => {
           continue;
         }
 
-        const credentialIdBuffer = base64urlToBuffer(credId);
-        
+        // CRITICAL FIX: Keep as base64url string, don't convert to Buffer
+        // The library expects the ID as a base64url string
         allowCredentials.push({
-          id: credentialIdBuffer,
+          id: credId,  // Keep as string, not Buffer!
           type: 'public-key',
           transports: ['internal', 'hybrid'],
         });
 
-        console.log(`✅ Added credential for ${user.email}, buffer length: ${credentialIdBuffer.length}`);
+        console.log(`✅ Added credential for ${user.email}`);
       } catch (err) {
         console.error(`❌ Error processing user ${user.email}:`, err.message);
         console.error('Error stack:', err.stack);
