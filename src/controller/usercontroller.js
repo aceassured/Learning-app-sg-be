@@ -382,11 +382,12 @@ export const verifyBiometricRegistration = async (req, res) => {
   }
 };
 
-// 3. Generate Authentication Options - FIXED
+// 3. Generate Authentication Options
 export const generateBiometricAuth = async (req, res) => {
   try {
     console.log('=== GENERATING AUTH OPTIONS ===');
     
+    // CRITICAL: Cast to TEXT in query
     const { rows } = await pool.query(
       `SELECT id, email, 
               biometric_credential_id::TEXT as biometric_credential_id 
@@ -411,23 +412,42 @@ export const generateBiometricAuth = async (req, res) => {
       try {
         const credId = user.biometric_credential_id;
         
-        if (!credId || typeof credId !== 'string' || credId.length < 10) {
-          console.error(`❌ Invalid credential for ${user.email}`);
+        console.log(`Processing user ${user.email}:`, {
+          credentialId: credId,
+          type: typeof credId,
+          length: credId?.length,
+          isString: typeof credId === 'string',
+          firstChars: credId?.substring(0, 10)
+        });
+
+        // EXTRA VALIDATION
+        if (!credId) {
+          console.error(`❌ Empty credential ID for user ${user.email}`);
           continue;
         }
 
-        // ✅ CRITICAL FIX: Convert to Buffer for library
-        const credIdBuffer = base64urlToBuffer(credId);
+        if (typeof credId !== 'string') {
+          console.error(`❌ Credential ID is not a string for user ${user.email}, it's ${typeof credId}`);
+          continue;
+        }
 
+        if (credId.length < 10) {
+          console.error(`❌ Credential ID too short for user ${user.email}`);
+          continue;
+        }
+
+        // CRITICAL FIX: Keep as base64url string, don't convert to Buffer
+        // The library expects the ID as a base64url string
         allowCredentials.push({
-          id: credIdBuffer,  // ✅ Buffer, not string!
+          id: credId,  // Keep as string, not Buffer!
           type: 'public-key',
-          transports: ['internal'],  // ✅ Only internal (platform authenticator)
+          transports: ['internal', 'hybrid'],
         });
 
         console.log(`✅ Added credential for ${user.email}`);
       } catch (err) {
         console.error(`❌ Error processing user ${user.email}:`, err.message);
+        console.error('Error stack:', err.stack);
         continue;
       }
     }
@@ -446,17 +466,20 @@ export const generateBiometricAuth = async (req, res) => {
       timeout: 60000,
     });
 
-    console.log('✅ Generated auth options for', allowCredentials.length, 'credentials');
+    console.log('✅ Generated auth options:', {
+      challenge: options.challenge,
+      allowCredentialsCount: options.allowCredentials.length
+    });
 
-    // Store challenge for all enabled users
     await pool.query(
-      "UPDATE users SET biometric_challenge=$1 WHERE biometric_enabled=true",
+      "UPDATE users SET biometric_challenge=$1 WHERE biometric_enabled=true AND biometric_credential_id IS NOT NULL",
       [options.challenge]
     );
 
     res.json({ success: true, options });
   } catch (error) {
     console.error('❌ Auth generation error:', error);
+    console.error('Stack:', error.stack);
     res.status(500).json({ 
       success: false, 
       message: 'Failed to generate authentication options',
@@ -465,12 +488,13 @@ export const generateBiometricAuth = async (req, res) => {
   }
 };
 
-// 4. Biometric Login - FIXED
+// 4. Biometric Login
 export const bioMetricLogin = async (req, res) => {
   try {
     const { credential } = req.body;
     
     console.log('=== BIOMETRIC LOGIN STARTED ===');
+    console.log('Credential ID from client:', credential.id);
     
     if (!credential || !credential.id) {
       return res.status(400).json({ 
@@ -479,15 +503,11 @@ export const bioMetricLogin = async (req, res) => {
       });
     }
 
-    // ✅ Get credential ID as base64url string
-    const credentialIdBase64 = typeof credential.id === 'string' 
-      ? credential.id 
-      : bufferToBase64url(credential.id);
+    const credentialIdBase64 = credential.id;
 
-    console.log('Looking for credential:', credentialIdBase64.substring(0, 20) + '...');
-
+    // CRITICAL: Cast to TEXT in query
     const { rows } = await pool.query(
-      `SELECT id, email, name, grade_level, selected_subjects, profile_picture_url,
+      `SELECT id, email, name, grade_level, selected_subjects,
               biometric_credential_id::TEXT as biometric_credential_id,
               biometric_public_key::TEXT as biometric_public_key,
               biometric_counter,
@@ -498,35 +518,39 @@ export const bioMetricLogin = async (req, res) => {
     );
 
     if (rows.length === 0) {
-      console.error('❌ No user found with this credential');
+      console.error('❌ No user found with credential ID:', credentialIdBase64);
       return res.status(404).json({ 
         success: false, 
-        message: "Biometric credential not registered. Please register first." 
+        message: "User not found" 
       });
     }
 
     const user = rows[0];
     console.log('✅ Found user:', user.email);
+    console.log('User data types:', {
+      credentialIdType: typeof user.biometric_credential_id,
+      publicKeyType: typeof user.biometric_public_key,
+      challengeType: typeof user.biometric_challenge
+    });
 
     if (!user.biometric_challenge) {
       return res.status(400).json({ 
         success: false, 
-        message: "No active authentication session. Please try again." 
+        message: "No active challenge" 
       });
     }
 
     if (!user.biometric_public_key) {
+      console.error('❌ No public key stored for user');
       return res.status(400).json({ 
         success: false, 
-        message: "Biometric setup incomplete. Please register again." 
+        message: "Biometric data incomplete" 
       });
     }
 
-    // Convert stored credentials to Buffer
+    console.log('Converting stored credentials...');
     const credentialIDBuffer = base64urlToBuffer(user.biometric_credential_id);
     const publicKeyBuffer = base64urlToBuffer(user.biometric_public_key);
-
-    console.log('Verifying authentication...');
 
     const verification = await verifyAuthenticationResponse({
       response: credential,
@@ -542,24 +566,20 @@ export const bioMetricLogin = async (req, res) => {
     });
 
     if (!verification.verified) {
-      console.error('❌ Verification failed');
       return res.status(401).json({ 
         success: false, 
-        message: "Biometric authentication failed. Please try again." 
+        message: "Authentication failed" 
       });
     }
 
-    // Update counter and clear challenge
     await pool.query(
       `UPDATE users 
        SET biometric_counter=$1, 
-           biometric_challenge=NULL,
-           last_login=NOW()
+           biometric_challenge=NULL 
        WHERE id=$2`,
       [verification.authenticationInfo.newCounter, user.id]
     );
 
-    // Generate JWT token
     const token = jwt.sign(
       { userId: user.id, email: user.email },
       JWT_SECRET,
@@ -578,7 +598,6 @@ export const bioMetricLogin = async (req, res) => {
         name: user.name,
         grade_level: user.grade_level,
         selected_subjects: user.selected_subjects,
-        profile_picture_url: user.profile_picture_url,
       },
       message: 'Login successful',
     });
@@ -589,8 +608,8 @@ export const bioMetricLogin = async (req, res) => {
     res.status(500).json({ 
       success: false, 
       status: false,
-      message: 'Biometric login failed. Please try again.',
-      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+      message: 'Login failed',
+      error: error.message 
     });
   }
 };
