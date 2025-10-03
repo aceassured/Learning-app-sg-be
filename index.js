@@ -209,7 +209,9 @@ app.use(helmet());
 const corsOptions = {
   origin: [
     "https://ace-hive-production-fe.vercel.app",
-    "http://localhost:5173"
+    "http://localhost:5173",
+    "http://localhost:8000",
+    "https://learning-app-admin-fe.vercel.app"
   ], // allow multiple frontends
   methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
   allowedHeaders: ["Content-Type", "Authorization", "auth"],
