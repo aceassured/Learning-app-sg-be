@@ -28,7 +28,7 @@ const RP_ID = process.env.NODE_ENV === 'development'
   : 'ace-hive-production-fe.vercel.app';
 const RP_NAME = 'AceHive';
 
-// Helper functions with validation
+// Helper functions with EXTRA validation
 const bufferToBase64url = (buffer) => {
   if (!buffer) {
     throw new Error('Buffer is required for base64url conversion');
@@ -41,17 +41,20 @@ const bufferToBase64url = (buffer) => {
 };
 
 const base64urlToBuffer = (base64url) => {
-  if (!base64url || typeof base64url !== 'string') {
-    throw new Error(`Invalid base64url input: ${typeof base64url}`);
+  // CRITICAL: Convert to string if it's not already
+  const input = typeof base64url === 'string' ? base64url : String(base64url);
+  
+  if (!input || input === 'null' || input === 'undefined') {
+    throw new Error(`Invalid base64url input: empty or null`);
   }
-  const base64 = base64url.replace(/-/g, '+').replace(/_/g, '/');
+  
+  const base64 = input.replace(/-/g, '+').replace(/_/g, '/');
   const paddedBase64 = base64.padEnd(
     base64.length + ((4 - (base64.length % 4)) % 4),
     '='
   );
   return Buffer.from(paddedBase64, 'base64');
 };
-
 // // FIXED: Proper user ID buffer generation
 // const generateUserIdBuffer = (userId) => {
 //   const userIdString = userId.toString();
@@ -333,23 +336,24 @@ export const verifyBiometricRegistration = async (req, res) => {
       });
     }
 
-    // Convert to base64url for storage
+    // Convert to base64url for storage - ENSURE STRING TYPE
     const credentialIdBase64 = bufferToBase64url(credData.id);
     const publicKeyBase64 = bufferToBase64url(credData.publicKey);
 
     console.log('💾 Storing:', {
       credentialId: credentialIdBase64,
+      credentialIdType: typeof credentialIdBase64,
       credentialIdLength: credentialIdBase64.length,
       publicKeyLength: publicKeyBase64.length,
     });
 
-    // Update database
+    // CRITICAL: Cast to TEXT explicitly in SQL
     await pool.query(
       `UPDATE users 
-       SET biometric_credential_id=$1, 
-           biometric_public_key=$2, 
+       SET biometric_credential_id=$1::TEXT, 
+           biometric_public_key=$2::TEXT, 
            biometric_counter=$3, 
-           biometric_device_type=$4,
+           biometric_device_type=$4::TEXT,
            biometric_enabled=true, 
            biometric_challenge=NULL 
        WHERE id=$5`,
@@ -381,8 +385,14 @@ export const generateBiometricAuth = async (req, res) => {
   try {
     console.log('=== GENERATING AUTH OPTIONS ===');
     
+    // CRITICAL: Cast to TEXT in query
     const { rows } = await pool.query(
-      "SELECT id, email, biometric_credential_id FROM users WHERE biometric_enabled=true AND biometric_credential_id IS NOT NULL"
+      `SELECT id, email, 
+              biometric_credential_id::TEXT as biometric_credential_id 
+       FROM users 
+       WHERE biometric_enabled=true 
+       AND biometric_credential_id IS NOT NULL 
+       AND biometric_credential_id != ''`
     );
 
     if (rows.length === 0) {
@@ -394,23 +404,37 @@ export const generateBiometricAuth = async (req, res) => {
 
     console.log(`Found ${rows.length} users with biometric enabled`);
 
-    // Convert credential IDs to Buffers with validation
     const allowCredentials = [];
     
     for (const user of rows) {
       try {
+        const credId = user.biometric_credential_id;
+        
         console.log(`Processing user ${user.email}:`, {
-          credentialId: user.biometric_credential_id,
-          type: typeof user.biometric_credential_id,
-          length: user.biometric_credential_id?.length
+          credentialId: credId,
+          type: typeof credId,
+          length: credId?.length,
+          isString: typeof credId === 'string',
+          firstChars: credId?.substring(0, 10)
         });
 
-        if (!user.biometric_credential_id || typeof user.biometric_credential_id !== 'string') {
-          console.error(`❌ Invalid credential ID for user ${user.email}`);
+        // EXTRA VALIDATION
+        if (!credId) {
+          console.error(`❌ Empty credential ID for user ${user.email}`);
           continue;
         }
 
-        const credentialIdBuffer = base64urlToBuffer(user.biometric_credential_id);
+        if (typeof credId !== 'string') {
+          console.error(`❌ Credential ID is not a string for user ${user.email}, it's ${typeof credId}`);
+          continue;
+        }
+
+        if (credId.length < 10) {
+          console.error(`❌ Credential ID too short for user ${user.email}`);
+          continue;
+        }
+
+        const credentialIdBuffer = base64urlToBuffer(credId);
         
         allowCredentials.push({
           id: credentialIdBuffer,
@@ -421,6 +445,7 @@ export const generateBiometricAuth = async (req, res) => {
         console.log(`✅ Added credential for ${user.email}, buffer length: ${credentialIdBuffer.length}`);
       } catch (err) {
         console.error(`❌ Error processing user ${user.email}:`, err.message);
+        console.error('Error stack:', err.stack);
         continue;
       }
     }
@@ -444,7 +469,6 @@ export const generateBiometricAuth = async (req, res) => {
       allowCredentialsCount: options.allowCredentials.length
     });
 
-    // Store challenge for users with valid credentials
     await pool.query(
       "UPDATE users SET biometric_challenge=$1 WHERE biometric_enabled=true AND biometric_credential_id IS NOT NULL",
       [options.challenge]
@@ -478,10 +502,16 @@ export const bioMetricLogin = async (req, res) => {
     }
 
     const credentialIdBase64 = credential.id;
-    console.log('Looking for user with credential ID:', credentialIdBase64);
 
+    // CRITICAL: Cast to TEXT in query
     const { rows } = await pool.query(
-      "SELECT * FROM users WHERE biometric_credential_id=$1",
+      `SELECT id, email, name, grade_level, selected_subjects,
+              biometric_credential_id::TEXT as biometric_credential_id,
+              biometric_public_key::TEXT as biometric_public_key,
+              biometric_counter,
+              biometric_challenge::TEXT as biometric_challenge
+       FROM users 
+       WHERE biometric_credential_id::TEXT = $1`,
       [credentialIdBase64]
     );
 
@@ -495,6 +525,11 @@ export const bioMetricLogin = async (req, res) => {
 
     const user = rows[0];
     console.log('✅ Found user:', user.email);
+    console.log('User data types:', {
+      credentialIdType: typeof user.biometric_credential_id,
+      publicKeyType: typeof user.biometric_public_key,
+      challengeType: typeof user.biometric_challenge
+    });
 
     if (!user.biometric_challenge) {
       return res.status(400).json({ 
@@ -535,7 +570,6 @@ export const bioMetricLogin = async (req, res) => {
       });
     }
 
-    // Update counter and clear challenge
     await pool.query(
       `UPDATE users 
        SET biometric_counter=$1, 
