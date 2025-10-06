@@ -14,6 +14,55 @@ CREATE TABLE users (
 );
 
 
+--new updates
+
+-- Enum for challenge purpose
+CREATE TYPE challenge_purpose AS ENUM ('register', 'login');
+
+
+-- Table to store WebAuthn credentials per user
+CREATE TABLE webauthn_credentials (
+  id SERIAL PRIMARY KEY,
+  user_id INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+
+  credential_id TEXT UNIQUE NOT NULL,   -- base64url from client
+  public_key BYTEA NOT NULL,            -- COSE-encoded public key
+  counter INT DEFAULT 0,
+  transports TEXT[] DEFAULT '{}',       -- e.g. ["internal"]
+  backup_eligible BOOLEAN DEFAULT FALSE,
+  backup_state BOOLEAN DEFAULT FALSE,
+
+  created_at TIMESTAMP DEFAULT now(),
+  updated_at TIMESTAMP DEFAULT now()
+);
+
+-- Index for faster lookup by user
+CREATE INDEX idx_webauthn_credentials_user ON webauthn_credentials(user_id);
+
+
+-- Table to store short-lived challenges
+CREATE TABLE webauthn_challenges (
+  id SERIAL PRIMARY KEY,
+  user_id INT REFERENCES users(id) ON DELETE CASCADE,
+
+  purpose challenge_purpose NOT NULL,   -- enum instead of text
+  challenge TEXT NOT NULL,
+  expires_at TIMESTAMP NOT NULL,
+
+  created_at TIMESTAMP DEFAULT now()
+);
+
+-- new updates
+-- Indexes for fast lookups
+CREATE INDEX idx_webauthn_challenges_user_purpose 
+    ON webauthn_challenges(user_id, purpose);
+
+CREATE INDEX idx_webauthn_challenges_expires 
+    ON webauthn_challenges(expires_at);
+
+
+
+
 CREATE TABLE user_question_status (
   id SERIAL PRIMARY KEY,
   user_id INT REFERENCES users(id) ON DELETE CASCADE,
@@ -48,7 +97,7 @@ CREATE TABLE user_quiz_sessions (
   user_id INT REFERENCES users(id),
   started_at TIMESTAMP DEFAULT now(),
   finished_at TIMESTAMP,
-  allowed_duration_seconds INT DEFAULT 300,
+  allowed_duration_seconds INT DEFAULT 300,wa
   total_questions INT,
   score INT DEFAULT 0
 );

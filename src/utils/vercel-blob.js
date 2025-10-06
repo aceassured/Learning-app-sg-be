@@ -6,8 +6,8 @@ import unzipper from "unzipper";
 import XLSX from "xlsx";
 import fs from "fs";
 import path from "path";
-import pool from '../../database.js';
 dotenv.config({ quiet: true });
+import pool from '../../database.js';
 
 
 
@@ -28,7 +28,6 @@ export const uploadBufferToVercel = async (buffer, filename) => {
   }
 };
 
-const uploadedImagesCache = new Map();
 
 // export const questionFileupload = async (req, res) => {
 //   try {
@@ -129,6 +128,7 @@ const uploadedImagesCache = new Map();
 //     res.status(500).send("Error processing bulk upload");
 //   }
 // }
+
 
 
 export const questionFileupload = async (req, res) => {
