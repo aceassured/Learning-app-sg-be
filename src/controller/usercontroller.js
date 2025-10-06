@@ -773,11 +773,11 @@ export const generateBiometricAuth = async (req, res) => {
     });
 
     // 4️⃣ Save challenge in DB (5 min expiry)
-    const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
+    // ✅ Let PostgreSQL handle the expiry time directly to avoid timezone issues.
     await pool.query(
-      `INSERT INTO webauthn_challenges (purpose, challenge, expires_at, created_at)
-       VALUES ($1, $2, $3, NOW())`,
-      ['login', options.challenge, expiresAt]
+      `INSERT INTO webauthn_challenges (purpose, challenge, expires_at)
+       VALUES ($1, $2, NOW() + INTERVAL '5 minutes')`,
+      ['login', options.challenge]
     );
 
     return res.json({ success: true, options });
@@ -1005,8 +1005,8 @@ export const bioMetricLogin = async (req, res) => {
     }, 1000);
 
 
-    // ✅ Clean up old challenges for this user
-    await pool.query(`DELETE FROM webauthn_challenges WHERE user_id = $1`, [dbCred.user_id]);
+    // ✅ Clean up ALL expired challenges from the table
+    const status = await pool.query(`DELETE FROM webauthn_challenges WHERE expires_at < NOW()`);
 
 
     // ✅ Exclude password and return same format as Commonlogin
