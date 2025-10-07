@@ -229,6 +229,7 @@ app.use("/api/progress", progressStates);
 app.use("/api/admin", adminRouter);
 app.use("/api/notifications", notificationRouter);
 
+
 app.get("/", (req, res) => {
   res.status(200).json("Learning App Backend Connected.......!");
 });
