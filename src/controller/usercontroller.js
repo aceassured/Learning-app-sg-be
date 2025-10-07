@@ -3256,6 +3256,74 @@ export const socialRegister = async (req, res) => {
 };
 
 // 4. Updated updateGradesubject API to handle social users
+// export const updateGradesubject = async (req, res) => {
+//   try {
+//     const {
+//       email,
+//       grade_level,
+//       selected_subjects,
+//       grade_id,
+//       is_social_completion // Flag for social users completing profile
+//     } = req.body;
+
+//     if (!email) {
+//       return res.status(400).json({ status: false, message: "Email is required" });
+//     }
+
+//     // ✅ Validate required fields
+//     if (!grade_level || !selected_subjects || selected_subjects.length < 3 || !grade_id) {
+//       return res.status(400).json({
+//         status: false,
+//         message: "Missing or invalid fields. Select minimum 3 subjects."
+//       });
+//     }
+
+//     // ✅ Update user and return with grade_value
+//     const userRes = await pool.query(
+//       `UPDATE users 
+//        SET grade_level = $1, 
+//            selected_subjects = $2, 
+//            grade_id = $3
+//        WHERE email = $4
+//        RETURNING id, email, name, grade_level, selected_subjects, grade_id, 
+//                  daily_reminder_time, questions_per_day, school_name, phone,
+//                  provider, social_id, is_social_login`,
+//       [grade_level, selected_subjects, grade_id, email]
+//     );
+
+//     if (userRes.rows.length === 0) {
+//       return res.status(404).json({ status: false, message: "User not found" });
+//     }
+
+//     let user = userRes.rows[0];
+
+//     // ✅ Fetch grade_value
+//     const gradeRes = await pool.query(
+//       `SELECT grade_level FROM grades WHERE id = $1 LIMIT 1`,
+//       [user.grade_id]
+//     );
+
+//     const grade_value = gradeRes.rows.length > 0 ? gradeRes.rows[0].grade_level : null;
+
+//     // ✅ Generate JWT token
+//     const token = jwt.sign({ userId: user.id }, JWT_SECRET, { expiresIn: "7d" });
+
+//     return res.json({
+//       status: true,
+//       message: `${is_social_completion ? "Social registration" : "User profile"} updated successfully`,
+//       user: {
+//         ...user,
+//         grade_value, // ✅ add grade_value
+//       },
+//       token,
+//       redirect: "home",
+//     });
+//   } catch (err) {
+//     console.error("updateGradesubject error:", err);
+//     res.status(500).json({ status: false, message: "Server error" });
+//   }
+// };
+
 export const updateGradesubject = async (req, res) => {
   try {
     const {
@@ -3263,7 +3331,7 @@ export const updateGradesubject = async (req, res) => {
       grade_level,
       selected_subjects,
       grade_id,
-      is_social_completion // Flag for social users completing profile
+      is_social_completion // Optional flag for social completion
     } = req.body;
 
     if (!email) {
@@ -3278,16 +3346,14 @@ export const updateGradesubject = async (req, res) => {
       });
     }
 
-    // ✅ Update user and return with grade_value
+    // ✅ Update user
     const userRes = await pool.query(
       `UPDATE users 
        SET grade_level = $1, 
            selected_subjects = $2, 
            grade_id = $3
        WHERE email = $4
-       RETURNING id, email, name, grade_level, selected_subjects, grade_id, 
-                 daily_reminder_time, questions_per_day, school_name, phone,
-                 provider, social_id, is_social_login`,
+       RETURNING *`,
       [grade_level, selected_subjects, grade_id, email]
     );
 
@@ -3302,18 +3368,37 @@ export const updateGradesubject = async (req, res) => {
       `SELECT grade_level FROM grades WHERE id = $1 LIMIT 1`,
       [user.grade_id]
     );
-
     const grade_value = gradeRes.rows.length > 0 ? gradeRes.rows[0].grade_level : null;
+
+    // ✅ Fetch subject details (convert IDs to full objects)
+    let selectedSubjectsDetails = [];
+    if (user.selected_subjects && user.selected_subjects.length > 0) {
+      const { rows: subjectRows } = await pool.query(
+        `SELECT id, icon, subject 
+         FROM subjects 
+         WHERE id = ANY($1::int[])`,
+        [user.selected_subjects.map(Number)]
+      );
+      selectedSubjectsDetails = subjectRows.map((r) => ({
+        id: r.id,
+        subject: r.subject,
+        icon: r.icon,
+      }));
+    }
 
     // ✅ Generate JWT token
     const token = jwt.sign({ userId: user.id }, JWT_SECRET, { expiresIn: "7d" });
 
+    // ✅ Remove sensitive fields
+    const { password, ...userData } = user;
+
+    // ✅ Return unified response (same structure as login)
     return res.json({
       status: true,
-      message: `${is_social_completion ? "Social registration" : "User profile"} updated successfully`,
-      user: {
-        ...user,
-        grade_value, // ✅ add grade_value
+      data: {
+        ...userData,
+        selected_subjects: selectedSubjectsDetails,
+        grade_value,
       },
       token,
       redirect: "home",
