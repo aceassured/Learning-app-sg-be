@@ -234,7 +234,8 @@ export const startQuiz = async (req, res) => {
       "SELECT questions_per_day FROM users WHERE id=$1",
       [userId]
     );
-    const qpd = userRes.rows[0]?.questions_per_day;
+    const qpd = userRes.rows[0]?.questions_per_day || 10;
+
     console.log("question per day", qpd)
     // ✅ Already answered question_ids
     const answeredRes = await pool.query(
@@ -476,16 +477,15 @@ export const submitAnswers = async (req, res) => {
     await NotificationService.generateQuizCompletionNotifications(userId, session_id);
 
     const percentage = Math.round((correctCount / answers.length) * 100);
-    const message = `🎯 Quiz completed! You scored ${correctCount}/${answers.length} (${percentage}%). ${
-      percentage >= 80 ? 'Excellent work! 🌟' : 
-      percentage >= 60 ? 'Good job! Keep practicing! 💪' : 
-      'Keep studying and try again! 📚'
-    }`;
+    const message = `🎯 Quiz completed! You scored ${correctCount}/${answers.length} (${percentage}%). ${percentage >= 80 ? 'Excellent work! 🌟' :
+        percentage >= 60 ? 'Good job! Keep practicing! 💪' :
+          'Keep studying and try again! 📚'
+      }`;
 
-    res.json({ 
-      ok: true, 
-      score: correctCount, 
-      total: answers.length, 
+    res.json({
+      ok: true,
+      score: correctCount,
+      total: answers.length,
       percentage: percentage,
       data: quizsessionData.rows[0],
       message: message
