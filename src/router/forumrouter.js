@@ -3,7 +3,25 @@ import multer from 'multer';
 import auth from '../middleware/auth.js';
 import { addComment, addLike, addView, createPost, deleteComment, deleteForum, editComment, editPost, getAlllikesandComments, getForumAndPollFeed, getNotesfromTopics, getonlyForumNotes, listPosts, removeLike, savedForumAndPolls, saveForumOrPoll, trackNoteAccess } from '../controller/forumcontroller.js';
 
-const upload = multer({ storage: multer.memoryStorage() });
+const storage = multer.memoryStorage();
+
+const fileFilter = (req, file, cb) => {
+  const allowedTypes = [
+    "image/jpeg",
+    "image/png",
+    "application/pdf",
+    "application/zip",
+    "application/x-zip-compressed"
+  ];
+  if (allowedTypes.includes(file.mimetype)) {
+    cb(null, true);
+  } else {
+    cb(new Error("Only images, PDFs, and ZIP files are allowed!"));
+  }
+};
+
+const upload = multer({ storage, fileFilter });
+
 const router = express.Router();
 
 router.get('/', auth, listPosts);
