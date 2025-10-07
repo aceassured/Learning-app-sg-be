@@ -494,19 +494,20 @@ export const createPost = async (req, res) => {
     const authorId = req.userId;
 
     let postRes;
-
+    // Force UTC timestamp
+    const created_at = new Date().toISOString();
 
     if (author_type === "user") {
       postRes = await pool.query(
-        `INSERT INTO forum_posts (user_id, grade_level, content, subject_tag, type_of_upload, forum_title, topic_id) 
-         VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
-        [authorId, grade_level, content, subject_tag, type_of_upload, forum_title, topic_id]
+        `INSERT INTO forum_posts (user_id, grade_level, content, subject_tag, type_of_upload, forum_title, topic_id, created_at) 
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
+        [authorId, grade_level, content, subject_tag, type_of_upload, forum_title, topic_id, created_at]
       );
     } else if (author_type === "admin") {
       postRes = await pool.query(
-        `INSERT INTO forum_posts (admin_id, grade_level, content, subject_tag, type_of_upload, forum_title, topic_id) 
-         VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
-        [authorId, grade_level, content, subject_tag, type_of_upload, forum_title, topic_id]
+        `INSERT INTO forum_posts (admin_id, grade_level, content, subject_tag, type_of_upload, forum_title, topic_id, created_at) 
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
+        [authorId, grade_level, content, subject_tag, type_of_upload, forum_title, topic_id, created_at]
       );
     } else {
       return res.status(400).json({ ok: false, message: "Invalid author_type" });
