@@ -27,7 +27,8 @@ import {
   generateBiometricAuth,
   bioMetricLogin,
   cleanupBiometricRecords,
-  getParticularquestions
+  getParticularquestions,
+  getAllquestionsSearch
 } from '../controller/usercontroller.js';
 import { deleteForum, deleteUser } from '../controller/forumcontroller.js';
 import { admingetTopics, getTopics } from '../controller/quizcontroller.js';
@@ -75,7 +76,7 @@ router.put("/adminedit", auth, upload.single("file"), adminEdit)
 router.put("/edit", auth, upload.single("profile_photo"), userEdit);
 router.post("/questionadd", upload.fields([{ name: "file", maxCount: 1 }, { name: "fileanswer", maxCount: 1 }]), newQuestionsadd);
 router.get("/allquestions", getAllquestions)
-router.get("/allquestions", getAllquestions)
+router.get("/questions", getAllquestionsSearch)
 router.get("/home", homeApi)
 router.delete("/deletequestion", deleteQuestions)
 router.delete("/deleteuser", deleteUser)

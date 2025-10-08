@@ -2977,7 +2977,7 @@ export const newQuestionsadd = async (req, res) => {
 // get all questions......
 
 export const getAllquestions = async (req, res) => {
-  try {
+  try { 
     const query = `SELECT * FROM questions ORDER BY created_at DESC;`;
     const result = await pool.query(query);
 
@@ -2991,6 +2991,64 @@ export const getAllquestions = async (req, res) => {
     return res.status(500).json({ message: "Internal Server Error" });
   }
 };
+
+export const getAllquestionsSearch = async (req, res) => {
+  try {
+    let { search = "", page = 1, limit = 10 } = req.query;
+
+    page = Number(page);
+    limit = Number(limit);
+    const offset = (page - 1) * limit;
+
+    let totalQuery = "SELECT COUNT(*) FROM questions";
+    let dataQuery = `
+      SELECT * FROM questions
+    `;
+    let values = [];
+
+    if (search) {
+      // If search exists, add WHERE clause
+      totalQuery += `
+        WHERE question_text ILIKE $1
+          OR grade_level ILIKE $1
+          OR subject ILIKE $1
+          OR topics ILIKE $1
+      `;
+      dataQuery += `
+        WHERE question_text ILIKE $1
+          OR grade_level ILIKE $1
+          OR subject ILIKE $1
+          OR topics ILIKE $1
+      `;
+      values.push(`%${search}%`);
+    }
+
+    // Add pagination
+    dataQuery += `
+      ORDER BY created_at DESC
+      LIMIT $${values.length + 1} OFFSET $${values.length + 2}
+    `;
+    values.push(limit, offset);
+
+    // Get total
+    const totalResult = await pool.query(totalQuery, search ? [`%${search}%`] : []);
+    const total = parseInt(totalResult.rows[0].count, 10);
+
+    const result = await pool.query(dataQuery, values);
+
+    return res.status(200).json({
+      message: "Questions fetched successfully",
+      total,
+      page,
+      totalPages: Math.ceil(total / limit),
+      questions: result.rows,
+    });
+  } catch (error) {
+    console.error("Error fetching questions:", error);
+    return res.status(500).json({ message: "Internal Server Error" });
+  }
+};
+
 
 
 export const getParticularquestions = async (req, res) => {
