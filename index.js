@@ -291,20 +291,59 @@ export const io = new Server(server, {
   },
 });
 
-global.onlineUsers = {};
+global.onlineUsers = new Map(); // Using Map instead of object for better performance
 
 io.on("connection", (socket) => {
   console.log("✅ User connected:", socket.id);
 
+  // Handle user registration
   socket.on("register", (userId) => {
+    // ✅ CRITICAL: Check if user already has an active connection
+    if (global.onlineUsers.has(userId)) {
+      const existingSocketId = global.onlineUsers.get(userId);
+      const existingSocket = io.sockets.sockets.get(existingSocketId);
+      
+      // Disconnect the old socket to prevent duplicates
+      if (existingSocket && existingSocket.id !== socket.id) {
+        console.log(`⚠️ User ${userId} already connected. Disconnecting old socket: ${existingSocketId}`);
+        existingSocket.disconnect(true);
+      }
+    }
+
+    // Register the new socket
     socket.userId = userId;
-    global.onlineUsers[userId] = socket.id;
+    global.onlineUsers.set(userId, socket.id);
     console.log(`📡 User ${userId} registered with socket ${socket.id}`);
+    console.log(`👥 Total online users: ${global.onlineUsers.size}`);
+
+    // Join a room for this user (useful for targeted notifications)
+    socket.join(`user_${userId}`);
   });
 
-  socket.on("disconnect", () => {
-    console.log("❌ User disconnected:", socket.id);
-    if (socket.userId) delete global.onlineUsers[socket.userId];
+  // Handle manual disconnect
+  socket.on("disconnect", (reason) => {
+    console.log(`❌ User disconnected: ${socket.id} | Reason: ${reason}`);
+    
+    if (socket.userId) {
+      // Only delete if this is the current socket for this user
+      const currentSocketId = global.onlineUsers.get(socket.userId);
+      if (currentSocketId === socket.id) {
+        global.onlineUsers.delete(socket.userId);
+        console.log(`🗑️ Removed user ${socket.userId} from online users`);
+      }
+    }
+    
+    console.log(`👥 Total online users: ${global.onlineUsers.size}`);
+  });
+
+  // Handle connection errors
+  socket.on("error", (error) => {
+    console.error(`❌ Socket error for ${socket.id}:`, error);
+  });
+
+  // Optional: Handle reconnection attempts
+  socket.on("reconnect_attempt", () => {
+    console.log(`🔄 Reconnection attempt from ${socket.id}`);
   });
 });
 
