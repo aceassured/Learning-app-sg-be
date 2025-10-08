@@ -81,10 +81,10 @@ export const markNotificationsAsViewed = async (req, res) => {
   }
 
   try {
-    await pool.query(
-      "UPDATE notifications SET is_viewed = true WHERE user_id = $1 AND id = ANY($2::int[])",
-      [userId, ids]
-    );
+await pool.query(
+  "UPDATE notifications SET is_viewed = true, is_read = true WHERE user_id = $1 AND id = ANY($2::int[])",
+  [userId, ids]
+);
 
     // Get updated unread count
     const countResult = await pool.query(
