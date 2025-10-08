@@ -88,7 +88,7 @@ await pool.query(
 
     // Get updated unread count
     const countResult = await pool.query(
-      "SELECT COUNT(*) as unread_count FROM notifications WHERE user_id = $1 AND is_read = false",
+      "SELECT COUNT(*) as unread_count FROM notifications WHERE user_id = $1 AND is_read = false AND type != 'reminder'",
       [userId]
     );
 
