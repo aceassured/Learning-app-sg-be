@@ -195,6 +195,7 @@ import adminRouter from "./src/router/adminrouter.js";
 import notificationRouter from "./src/router/notificationRouter.js";
 import http from "http";
 import { Server } from "socket.io";
+import { initializeNotificationServices } from "./src/services/notificationService.js";
 
 dotenv.config({ quiet: true });
 
@@ -228,6 +229,52 @@ app.use("/api/forum", forumRouter);
 app.use("/api/progress", progressStates);
 app.use("/api/admin", adminRouter);
 app.use("/api/notifications", notificationRouter);
+
+
+
+// FCM Token registration endpoint
+app.post("/api/user/register-fcm-token", async (req, res) => {
+  const { userId, fcmToken, deviceType } = req.body;
+  
+  if (!userId || !fcmToken) {
+    return res.status(400).json({ error: "userId and fcmToken are required" });
+  }
+
+  try {
+    await pool.query(
+      "UPDATE users SET fcm_token = $1, device_type = $2 WHERE id = $3",
+      [fcmToken, deviceType || 'web', userId]
+    );
+    
+    console.log(`✅ FCM token registered for user ${userId}`);
+    res.json({ success: true, message: "FCM token registered" });
+  } catch (error) {
+    console.error("❌ Error registering FCM token:", error);
+    res.status(500).json({ error: "Failed to register FCM token" });
+  }
+});
+
+// Update user reminder settings
+app.post("/api/user/reminder-settings", async (req, res) => {
+  const { userId, reminderEnabled, reminderTime } = req.body;
+  
+  if (!userId) {
+    return res.status(400).json({ error: "userId is required" });
+  }
+
+  try {
+    await pool.query(
+      "UPDATE users SET reminder_enabled = $1, reminder_time = $2 WHERE id = $3",
+      [reminderEnabled, reminderTime, userId]
+    );
+    
+    console.log(`✅ Reminder settings updated for user ${userId}`);
+    res.json({ success: true, message: "Reminder settings updated" });
+  } catch (error) {
+    console.error("❌ Error updating reminder settings:", error);
+    res.status(500).json({ error: "Failed to update reminder settings" });
+  }
+});
 
 
 app.get("/", (req, res) => {
@@ -335,4 +382,7 @@ app.use((err, req, res, next) => {
 });
 
 // ✅ START SERVER
-server.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
+server.listen(PORT, () => {
+  console.log(`🚀 Server running on port ${PORT}`)
+   initializeNotificationServices();
+});

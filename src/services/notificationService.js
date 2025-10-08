@@ -1,6 +1,8 @@
 // src/services/notificationService.js
 import pool from '../../database.js';
 import { io } from "../../index.js";
+import { sendPushNotification } from '../config/firebaseAdmin.js';
+import cron from "node-cron"
 
 export class NotificationService {
 
@@ -443,3 +445,200 @@ LIMIT 1;
         }
     }
 }
+
+
+
+
+
+// web push...........
+
+/**
+ * Send notification to user (WebSocket + Push)
+ * Automatically determines if user is online or offline
+ */
+export const sendNotificationToUser = async (userId, notificationData) => {
+  try {
+    // 1. Save notification to database
+    const query = `
+      INSERT INTO notifications (user_id, message, type, subject, is_read, is_viewed) 
+      VALUES ($1, $2, $3, $4, false, false) 
+      RETURNING *
+    `;
+    const values = [
+      userId,
+      notificationData.message,
+      notificationData.type || 'general',
+      notificationData.subject || null,
+    ];
+    const result = await pool.query(query, values);
+    const notification = {
+      ...result.rows[0],
+      read: false,
+      viewed: false,
+      time_section: 'today',
+    };
+
+    // 2. Check if user is online (WebSocket)
+    const isOnline = global.onlineUsers && global.onlineUsers[userId];
+
+    if (isOnline) {
+      // Send via WebSocket (real-time)
+      io.to(global.onlineUsers[userId]).emit('notification', notification);
+      console.log(`📨 Real-time notification sent to user ${userId}`);
+    }
+
+    // 3. Get user's FCM token
+    const userResult = await pool.query(
+      'SELECT fcm_token FROM users WHERE id = $1',
+      [userId]
+    );
+
+    const fcmToken = userResult.rows[0]?.fcm_token;
+
+    // 4. Send push notification (works even if offline)
+    if (fcmToken) {
+      const pushResult = await sendPushNotification(fcmToken, {
+        title: notificationData.title || 'Acehive',
+        message: notificationData.message,
+        type: notificationData.type,
+        subject: notificationData.subject,
+        url: notificationData.url || '/',
+      });
+
+      // If token is invalid, remove it
+      if (pushResult.shouldDelete) {
+        await pool.query('UPDATE users SET fcm_token = NULL WHERE id = $1', [userId]);
+        console.log(`🗑️ Removed invalid FCM token for user ${userId}`);
+      }
+
+      console.log(
+        isOnline
+          ? `✅ Notification sent via WebSocket + Push to user ${userId}`
+          : `✅ Push notification sent to offline user ${userId}`
+      );
+    } else {
+      console.log(
+        isOnline
+          ? `✅ Real-time notification sent (no FCM token)`
+          : `⚠️ User ${userId} is offline and has no FCM token`
+      );
+    }
+
+    return { success: true, notification };
+  } catch (error) {
+    console.error('❌ Error sending notification:', error);
+    return { success: false, error: error.message };
+  }
+};
+
+/**
+ * Send daily reminder notifications based on user's reminder_time
+ * Runs every minute to check for users who need reminders
+ */
+export const startReminderCron = () => {
+  // Run every minute
+  cron.schedule('* * * * *', async () => {
+    try {
+      const currentTime = new Date();
+      const hours = currentTime.getHours().toString().padStart(2, '0');
+      const minutes = currentTime.getMinutes().toString().padStart(2, '0');
+      const currentTimeStr = `${hours}:${minutes}:00`;
+
+      console.log(`⏰ Checking reminders for ${currentTimeStr}...`);
+
+      // ✅ Get users who have reminders enabled and time matches
+      const result = await pool.query(
+        `SELECT 
+           u.id, 
+           u.name, 
+           u.fcm_token, 
+           s.daily_reminder_time
+         FROM users u
+         INNER JOIN user_settings s ON s.user_id = u.id
+         WHERE s.reminder_enabled = true
+         AND s.daily_reminder_time = $1::time`,
+        [currentTimeStr]
+      );
+
+      const users = result.rows;
+
+      if (users.length === 0) return;
+
+      console.log(`📢 Sending reminders to ${users.length} users at ${currentTimeStr}`);
+
+      // Send notifications
+      for (const user of users) {
+        await sendNotificationToUser(user.id, {
+          title: '📚 Daily Quiz Reminder',
+          message: `Hi ${user.name}! Time for your daily learning session. Let's keep your streak going! 🔥`,
+          type: 'reminder',
+          subject: 'Daily Reminder',
+          url: '/quiz',
+        });
+      }
+
+      console.log(`✅ Sent ${users.length} reminder notifications`);
+    } catch (error) {
+      console.error('❌ Error in reminder cron job:', error);
+    }
+  });
+
+  console.log('✅ Reminder cron job started (runs every minute)');
+};
+
+
+/**
+ * Send quiz availability notifications
+ * Can be called when a new quiz is created
+ */
+
+export const sendQuizAvailableNotification = async (subject) => {
+  try {
+    // Get all users who are subscribed to this subject
+    const result = await pool.query(
+      `SELECT DISTINCT u.id, u.name, u.fcm_token
+       FROM users u
+       JOIN user_subjects us ON u.id = us.user_id
+       JOIN subjects s ON us.subject_id = s.id
+       WHERE s.subject = $1`,
+      [subject]
+    );
+
+    const users = result.rows;
+
+    if (users.length === 0) {
+      console.log(`No users found for subject: ${subject}`);
+      return { success: true, count: 0 };
+    }
+
+    console.log(`📢 Sending quiz notifications to ${users.length} users for ${subject}`);
+
+    let successCount = 0;
+    for (const user of users) {
+      const result = await sendNotificationToUser(user.id, {
+        title: '📚 New Quiz Available',
+        message: `New daily quiz available in ${subject}! Test your knowledge now.`,
+        type: 'quiz',
+        subject: subject,
+        url: '/quiz',
+      });
+
+      if (result.success) successCount++;
+    }
+
+    console.log(`✅ Sent ${successCount}/${users.length} quiz notifications`);
+    return { success: true, count: successCount };
+  } catch (error) {
+    console.error('❌ Error sending quiz notifications:', error);
+    return { success: false, error: error.message };
+  }
+};
+
+/**
+ * Initialize all notification services
+ */
+export const initializeNotificationServices = () => {
+  console.log('🚀 Initializing notification services...');
+  startReminderCron();
+  console.log('✅ All notification services initialized');
+};
