@@ -588,7 +588,12 @@ export const sendNotificationToUser = async (userId, notificationData) => {
 //   console.log('✅ Reminder cron job started (runs every minute)');
 // };
 
+let reminderCronStarted = false;
+
 export const startReminderCron = () => {
+  if (reminderCronStarted) return; // Prevent multiple cron instances
+  reminderCronStarted = true;
+
   // Run every minute
   cron.schedule('* * * * *', async () => {
     try {
@@ -643,6 +648,7 @@ export const startReminderCron = () => {
 
   console.log('✅ Reminder cron job started (runs every minute)');
 };
+
 
 
 /**
