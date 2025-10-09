@@ -604,18 +604,33 @@ export const bioMetricLogin = async (req, res) => {
     const dbCred = credRows[0];
 
     // 3️⃣ Verify authentication
-    const verification = await verifyAuthenticationResponse({
-      response: credential,
-      expectedChallenge: challenge.challenge,
-      expectedOrigin: getAllowedOrigins(),
-      expectedRPID: process.env.RP_ID,
-      credential: {
-        id: dbCred.credential_id,
-        publicKey: dbCred.public_key, // stored as bytea (Buffer)
-        counter: dbCred.counter,
-        transports: dbCred.transports?.length > 0 ? dbCred.transports : ['internal'],
-      },
-    });
+    let verification;
+    try {
+      verification = await verifyAuthenticationResponse({
+        response: credential,
+        expectedChallenge: challenge.challenge,
+        expectedOrigin: Array.isArray(getAllowedOrigins())
+          ? getAllowedOrigins()
+          : [getAllowedOrigins()],
+        expectedRPID: process.env.RP_ID,
+        credential: {
+          id: dbCred.credential_id,
+          publicKey: dbCred.public_key, // stored as bytea (Buffer)
+          counter: dbCred.counter,
+          transports: dbCred.transports?.length > 0 ? dbCred.transports : ['internal'],
+        },
+      });
+    } catch (err) {
+      // ✅ Gracefully handle Mac Touch ID failures
+      if (err.message?.includes('User verification required')) {
+        return res.status(400).json({
+          success: false,
+          message:
+            'Biometric verification failed. Please retry Touch ID or use a different browser/device.',
+        });
+      }
+      throw err; // rethrow others
+    }
 
     const { verified, authenticationInfo } = verification;
     if (!verified || !authenticationInfo) {
