@@ -613,12 +613,13 @@ export const bioMetricLogin = async (req, res) => {
           ? getAllowedOrigins()
           : [getAllowedOrigins()],
         expectedRPID: process.env.RP_ID,
-        credential: {
-          id: dbCred.credential_id,
-          publicKey: dbCred.public_key, // stored as bytea (Buffer)
+        authenticator: {
+          credentialID: dbCred.credential_id,
+          credentialPublicKey: dbCred.public_key, // Ensure this is a Buffer
           counter: dbCred.counter,
           transports: dbCred.transports?.length > 0 ? dbCred.transports : ['internal'],
         },
+        requireUserVerification: false,
       });
     } catch (err) {
       // ✅ Gracefully handle Mac Touch ID failures
