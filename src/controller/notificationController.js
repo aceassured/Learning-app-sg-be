@@ -27,7 +27,7 @@ export const getUserNotifications = async (req, res) => {
           ELSE 'earlier'
         END as time_section
        FROM notifications 
-       WHERE user_id = $1 
+       WHERE user_id = $1 AND type != 'reminder'
        ORDER BY created_at DESC`,
       [userId]
     );
@@ -93,7 +93,6 @@ await pool.query(
     );
 
     const unreadCount = parseInt(countResult.rows[0].unread_count);
-
     res.json({ 
       success: true, 
       message: "Notifications marked as viewed",
