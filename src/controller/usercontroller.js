@@ -422,8 +422,9 @@ export const generateBiometricRegistration = async (req, res) => {
       userDisplayName: user.name || user.email,
       attestationType: 'none',
       authenticatorSelection: {
-        residentKey: 'preferred',
-        userVerification: 'preferred',
+        residentKey: 'required',
+        userVerification: 'required',
+        authenticatorAttachment: 'platform',
       },
       excludeCredentials: user.biometric_credential_id
         ? [{ id: base64url.toBuffer(user.biometric_credential_id), type: 'public-key' }]
@@ -2992,7 +2993,7 @@ export const newQuestionsadd = async (req, res) => {
 // get all questions......
 
 export const getAllquestions = async (req, res) => {
-  try { 
+  try {
     const query = `SELECT * FROM questions ORDER BY created_at DESC;`;
     const result = await pool.query(query);
 
