@@ -1,4 +1,5 @@
 import pool from "../../database.js";
+import { uploadBufferToVercel } from "../utils/vercel-blob.js";
 
 
 // create poll...........
@@ -108,5 +109,194 @@ export const adminAnnouncementpoll = async (req, res) => {
   } catch (error) {
     console.error("adminAnnouncementpoll error:", error);
     return res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+
+
+// ✅ CREATE GRADE
+export const createGrades = async (req, res) => {
+  try {
+    const { grade_level } = req.body;
+
+    if (!grade_level)
+      return res.status(400).json({ message: "Grade level is required" });
+
+    const existing = await pool.query(
+      "SELECT * FROM grades WHERE grade_level = $1 AND active_status = true",
+      [grade_level]
+    );
+
+    if (existing.rows.length > 0)
+      return res.status(400).json({ message: "Grade already exists" });
+
+    const result = await pool.query(
+      "INSERT INTO grades (grade_level, created_at, updated_at, active_status) VALUES ($1, NOW(), NOW(), true) RETURNING *",
+      [grade_level]
+    );
+
+    res.status(201).json({ message: "Grade created successfully", data: result.rows[0] });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Internal Server Error" });
+  }
+};
+
+// ✅ UPDATE GRADE
+export const updateGrade = async (req, res) => {
+  try {
+    const { id } = req.body;
+    const { grade_level } = req.body;
+
+    if (!id || !grade_level)
+      return res.status(400).json({ message: "ID and grade_level are required" });
+
+    const grade = await pool.query("SELECT * FROM grades WHERE id = $1", [id]);
+    if (grade.rows.length === 0)
+      return res.status(404).json({ message: "Grade not found" });
+
+    const updated = await pool.query(
+      "UPDATE grades SET grade_level = $1, updated_at = NOW() WHERE id = $2 RETURNING *",
+      [grade_level, id]
+    );
+
+    res.json({ message: "Grade updated successfully", data: updated.rows[0] });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Internal Server Error" });
+  }
+};
+
+// ✅ DELETE (soft delete) GRADE
+export const deleteGrade = async (req, res) => {
+  try {
+    const { id } = req.body;
+
+    const grade = await pool.query("SELECT * FROM grades WHERE id = $1", [id]);
+    if (grade.rows.length === 0)
+      return res.status(404).json({ message: "Grade not found" });
+
+    await pool.query(
+      "UPDATE grades SET active_status = false, updated_at = NOW() WHERE id = $1",
+      [id]
+    );
+
+    res.json({ message: "Grade deleted successfully (soft delete)" });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Internal Server Error" });
+  }
+};
+
+// ======================================================
+// ================ SUBJECTS API ========================
+// ======================================================
+
+// ✅ UPDATE SUBJECT
+export const updateSubject = async (req, res) => {
+  try {
+    const { id } = req.body;
+    const { subject, grade_id } = req.body;
+    const file = req.file; // assuming multer middleware used
+
+    if (!id) return res.status(400).json({ message: "ID is required" });
+
+    const existing = await pool.query("SELECT * FROM subjects WHERE id = $1", [id]);
+    if (existing.rows.length === 0)
+      return res.status(404).json({ message: "Subject not found" });
+
+    let iconUrl = existing.rows[0].icon;
+
+    if (file) {
+      const buffer = file.buffer;
+      iconUrl = await uploadBufferToVercel(buffer, file.originalname);
+    }
+
+    const updated = await pool.query(
+      "UPDATE subjects SET subject = COALESCE($1, subject), grade_id = COALESCE($2, grade_id), icon = $3, created_at = NOW() WHERE id = $4 RETURNING *",
+      [subject, grade_id, iconUrl, id]
+    );
+
+    res.json({ message: "Subject updated successfully", data: updated.rows[0] });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Internal Server Error" });
+  }
+};
+
+// ✅ DELETE SUBJECT (soft delete)
+export const deleteSubject = async (req, res) => {
+  try {
+    const { id } = req.body;
+
+    const subject = await pool.query("SELECT * FROM subjects WHERE id = $1", [id]);
+    if (subject.rows.length === 0)
+      return res.status(404).json({ message: "Subject not found" });
+
+    await pool.query(
+      "UPDATE subjects SET active_status = false WHERE id = $1",
+      [id]
+    );
+
+    res.json({ message: "Subject deleted successfully (soft delete)" });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Internal Server Error" });
+  }
+};
+
+// ======================================================
+// ================ TOPICS API ==========================
+// ======================================================
+
+// ✅ UPDATE TOPIC
+export const updateTopics = async (req, res) => {
+  try {
+    const { id } = req.body;
+    const { topic, subject_id, grade_id, grade_level } = req.body;
+
+    if (!id) return res.status(400).json({ message: "ID is required" });
+
+    const existing = await pool.query("SELECT * FROM topics WHERE id = $1", [id]);
+    if (existing.rows.length === 0)
+      return res.status(404).json({ message: "Topic not found" });
+
+    const updated = await pool.query(
+      `UPDATE topics 
+       SET topic = COALESCE($1, topic), 
+           subject_id = COALESCE($2, subject_id), 
+           grade_id = COALESCE($3, grade_id), 
+           grade_level = COALESCE($4, grade_level),
+           updated_at = NOW()
+       WHERE id = $5
+       RETURNING *`,
+      [topic, subject_id, grade_id, grade_level, id]
+    );
+
+    res.json({ message: "Topic updated successfully", data: updated.rows[0] });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Internal Server Error" });
+  }
+};
+
+// ✅ DELETE TOPIC (soft delete)
+export const deleteTopic = async (req, res) => {
+  try {
+    const { id } = req.body;
+
+    const topic = await pool.query("SELECT * FROM topics WHERE id = $1", [id]);
+    if (topic.rows.length === 0)
+      return res.status(404).json({ message: "Topic not found" });
+
+    await pool.query(
+      "UPDATE topics SET active_status = false, updated_at = NOW() WHERE id = $1",
+      [id]
+    );
+
+    res.json({ message: "Topic deleted successfully (soft delete)" });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Internal Server Error" });
   }
 };

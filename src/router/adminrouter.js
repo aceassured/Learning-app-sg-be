@@ -1,5 +1,5 @@
 import express from "express"
-import { adminAnnouncementpoll, admincreatePoll, getAllpoll } from "../controller/admincontroller.js"
+import { adminAnnouncementpoll, admincreatePoll, createGrades, deleteGrade, deleteSubject, deleteTopic, getAllpoll, updateGrade, updateSubject, updateTopics } from "../controller/admincontroller.js"
 import auth from "../middleware/auth.js"
 import { admincreateSubject, admincreateTopic, getAllTopic, getParticularquestions, updatequestion } from "../controller/usercontroller.js"
 import multer from "multer";
@@ -24,5 +24,20 @@ router.put("/editquestion",   upload.fields([
 router.post("/createsubject", upload.fields([{ name: "icon", maxCount: 1 }]), admincreateSubject)
 router.post("/createtopic", admincreateTopic)
 router.post("/questionsupload", uploadNew.single("zipFile"), questionFileupload)
+
+
+// Grade Routes
+router.post("/creategrade", createGrades);
+router.put("/updategrades", updateGrade);
+router.delete("/deletegrades", deleteGrade);
+
+// Subject Routes
+router.put("/updatesubject", upload.single("icon"), updateSubject);
+router.delete("/deletesubject", deleteSubject);
+
+// Topic Routes
+router.put("/updatetopic", updateTopics);
+router.delete("/deletetopic", deleteTopic);
+
 
 export default router
