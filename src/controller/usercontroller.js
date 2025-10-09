@@ -606,6 +606,18 @@ export const bioMetricLogin = async (req, res) => {
     // 3️⃣ Verify authentication
     let verification;
     try {
+      // ✅ Create the "metal key" here.
+      const authenticator = {
+        // Convert the string from the DB into the required Buffer format.
+        credentialID: Buffer.from(dbCred.credential_id, 'base64url'),
+        // The public key from a 'bytea' column is already a Buffer ("metal").
+        credentialPublicKey: dbCred.public_key,
+        // The counter is a number, which is correct.
+        counter: dbCred.counter,
+        transports: dbCred.transports?.length > 0 ? dbCred.transports : ['internal'],
+      };
+
+      // ✅ Now, give the perfect "metal key" to the "lock".
       verification = await verifyAuthenticationResponse({
         response: credential,
         expectedChallenge: challenge.challenge,
@@ -613,12 +625,7 @@ export const bioMetricLogin = async (req, res) => {
           ? getAllowedOrigins()
           : [getAllowedOrigins()],
         expectedRPID: process.env.RP_ID,
-        authenticator: {
-          credentialID: dbCred.credential_id,
-          credentialPublicKey: dbCred.public_key, // Ensure this is a Buffer
-          counter: dbCred.counter,
-          transports: dbCred.transports?.length > 0 ? dbCred.transports : ['internal'],
-        },
+        authenticator: authenticator, // Use our perfectly formatted object
         requireUserVerification: false,
       });
     } catch (err) {
