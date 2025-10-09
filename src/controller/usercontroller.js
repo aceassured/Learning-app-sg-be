@@ -476,13 +476,24 @@ export const verifyBiometricRegistration = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Invalid origin' });
     }
 
-    // Verify registration
-    const verification = await verifyRegistrationResponse({
-      response: credential,
-      expectedChallenge,
-      expectedOrigin: requestOrigin,
-      expectedRPID: process.env.RP_ID,
-    });
+    let verification;
+    try {
+      verification = await verifyRegistrationResponse({
+        response: credential,
+        expectedChallenge,
+        expectedOrigin: requestOrigin,
+        expectedRPID: process.env.RP_ID,
+      });
+    } catch (err) {
+      if (err.message.includes("User verification was required")) {
+        return res.status(400).json({
+          success: false,
+          message: "Touch ID / Face ID failed. Please use another device or browser."
+        });
+      }
+      // re-throw other errors
+      throw err;
+    }
 
     const { verified, registrationInfo } = verification;
     if (!verified || !registrationInfo)
@@ -512,6 +523,197 @@ export const verifyBiometricRegistration = async (req, res) => {
     res.status(500).json({ success: false, message: 'Internal server error' });
   }
 };
+
+export const generateBiometricAuth = async (req, res) => {
+  try {
+    // 1️⃣ Get all registered credentials
+    const { rows: credentials } = await pool.query(
+      `SELECT credential_id, transports FROM webauthn_credentials`
+    );
+
+    if (credentials.length === 0) {
+      return res
+        .status(404)
+        .json({ success: false, message: 'No passkeys have been registered yet.' });
+    }
+
+    // 2️⃣ Map them into allowCredentials
+    const allowCredentials = credentials.map((cred) => ({
+      id: cred.credential_id, // already stored as base64url string
+      type: 'public-key',
+      transports: cred.transports?.length > 0 ? cred.transports : ['internal'],
+    }));
+
+    // 3️⃣ Generate challenge
+    const options = await generateAuthenticationOptions({
+      rpID: process.env.RP_ID,
+      allowCredentials,
+      userVerification: 'preferred', // same as Nest
+    });
+
+    // 4️⃣ Save challenge in DB (5 min expiry)
+    // ✅ Let PostgreSQL handle the expiry time directly to avoid timezone issues.
+    await pool.query(
+      `INSERT INTO webauthn_challenges (purpose, challenge, expires_at)
+       VALUES ($1, $2, NOW() + INTERVAL '5 minutes')`,
+      ['login', options.challenge]
+    );
+
+    return res.json({ success: true, options });
+  } catch (err) {
+    console.error('Error generating biometric login options:', err);
+    return res.status(500).json({ success: false, message: 'Internal server error' });
+  }
+};
+
+export const bioMetricLogin = async (req, res) => {
+  try {
+    const { credential } = req.body;
+    if (!credential) {
+      return res.status(400).json({ success: false, message: 'Missing credential' });
+    }
+
+    // 1️⃣ Get latest login challenge
+    const { rows: challengeRows } = await pool.query(
+      `SELECT * FROM webauthn_challenges 
+       WHERE purpose='login' 
+       ORDER BY created_at DESC 
+       LIMIT 1`
+    );
+
+    if (challengeRows.length === 0) {
+      return res.status(400).json({ success: false, message: 'No challenge found' });
+    }
+
+    const challenge = challengeRows[0];
+
+    // 2️⃣ Find the credential in DB
+    const { rows: credRows } = await pool.query(
+      `SELECT wc.*, u.id as user_id, u.email 
+       FROM webauthn_credentials wc 
+       JOIN users u ON wc.user_id = u.id 
+       WHERE wc.credential_id=$1`,
+      [credential.id]
+    );
+
+    if (credRows.length === 0) {
+      return res.status(400).json({ success: false, message: 'Authenticator not found' });
+    }
+
+    const dbCred = credRows[0];
+
+    // 3️⃣ Verify authentication
+    const verification = await verifyAuthenticationResponse({
+      response: credential,
+      expectedChallenge: challenge.challenge,
+      expectedOrigin: getAllowedOrigins(),
+      expectedRPID: process.env.RP_ID,
+      credential: {
+        id: dbCred.credential_id,
+        publicKey: dbCred.public_key, // stored as bytea (Buffer)
+        counter: dbCred.counter,
+        transports: dbCred.transports?.length > 0 ? dbCred.transports : ['internal'],
+      },
+    });
+
+    const { verified, authenticationInfo } = verification;
+    if (!verified || !authenticationInfo) {
+      return res.status(401).json({ success: false, message: 'Biometric login failed' });
+    }
+
+    // 4️⃣ Protect against cloned authenticators
+    if (
+      authenticationInfo.newCounter !== 0 &&
+      authenticationInfo.newCounter <= dbCred.counter
+    ) {
+      return res.status(400).json({ success: false, message: 'Authenticator counter did not increase' });
+    }
+
+    // 5️⃣ Update counter
+    await pool.query(
+      `UPDATE webauthn_credentials SET counter=$1 WHERE id=$2`,
+      [authenticationInfo.newCounter, dbCred.id]
+    );
+
+    // 6️⃣ Update challenge with userId
+    await pool.query(
+      `UPDATE webauthn_challenges SET user_id=$1 WHERE id=$2`,
+      [dbCred.user_id, challenge.id]
+    );
+
+    // 7️⃣ Issue JWT
+    const token = jwt.sign(
+      { userId: dbCred.user_id, email: dbCred.email },
+      process.env.JWT_SECRET,
+      { expiresIn: '7d' }
+    );
+
+    // ✅ Fetch full user info like Commonlogin
+    const { rows } = await pool.query(
+      `SELECT 
+         u.*, 
+         g.grade_level AS grade_value, 
+         us.quiz_time_seconds
+       FROM users u
+       LEFT JOIN grades g ON g.id = u.grade_id
+       LEFT JOIN user_settings us ON us.user_id = u.id
+       WHERE u.id = $1`,
+      [dbCred.user_id]
+    );
+
+    const user = rows[0];
+    if (!user) {
+      return res.status(404).json({ status: false, message: "User not found" });
+    }
+
+    // ✅ Fetch selected subjects (if any)
+    let selectedSubjectsNames = [];
+    if (user.selected_subjects && user.selected_subjects.length > 0) {
+      const { rows: subjectRows } = await pool.query(
+        `SELECT id, icon, subject 
+         FROM subjects 
+         WHERE id = ANY($1::int[])`,
+        [user.selected_subjects.map(Number)]
+      );
+      selectedSubjectsNames = subjectRows.map((r) => ({
+        id: r.id,
+        subject: r.subject,
+        icon: r.icon,
+      }));
+    }
+
+    // ✅ Trigger notifications in background
+    setTimeout(async () => {
+      try {
+        await NotificationService.generateLoginNotifications(user.id);
+      } catch (error) {
+        console.error("Error generating login notifications:", error);
+      }
+    }, 1000);
+
+
+    // ✅ Clean up ALL expired challenges from the table
+    const status = await pool.query(`DELETE FROM webauthn_challenges WHERE expires_at < NOW()`);
+
+
+    // ✅ Exclude password and return same format as Commonlogin
+    const { password: _, ...userData } = user;
+
+    return res.json({
+      status: true,
+      data: {
+        ...userData,
+        selected_subjects: selectedSubjectsNames,
+        grade_value: user.grade_value || null,
+      },
+      token,
+    });
+  } catch (err) {
+    console.error('Error in biometric login:', err);
+    return res.status(500).json({ status: false, message: 'Internal server error' });
+  }
+};
+
 
 // // 3. Generate Authentication Options
 // export const generateBiometricAuth = async (req, res) => {
@@ -745,47 +947,6 @@ export const verifyBiometricRegistration = async (req, res) => {
 //   }
 // };
 
-export const generateBiometricAuth = async (req, res) => {
-  try {
-    // 1️⃣ Get all registered credentials
-    const { rows: credentials } = await pool.query(
-      `SELECT credential_id, transports FROM webauthn_credentials`
-    );
-
-    if (credentials.length === 0) {
-      return res
-        .status(404)
-        .json({ success: false, message: 'No passkeys have been registered yet.' });
-    }
-
-    // 2️⃣ Map them into allowCredentials
-    const allowCredentials = credentials.map((cred) => ({
-      id: cred.credential_id, // already stored as base64url string
-      type: 'public-key',
-      transports: cred.transports?.length > 0 ? cred.transports : ['internal'],
-    }));
-
-    // 3️⃣ Generate challenge
-    const options = await generateAuthenticationOptions({
-      rpID: process.env.RP_ID,
-      allowCredentials,
-      userVerification: 'preferred', // same as Nest
-    });
-
-    // 4️⃣ Save challenge in DB (5 min expiry)
-    // ✅ Let PostgreSQL handle the expiry time directly to avoid timezone issues.
-    await pool.query(
-      `INSERT INTO webauthn_challenges (purpose, challenge, expires_at)
-       VALUES ($1, $2, NOW() + INTERVAL '5 minutes')`,
-      ['login', options.challenge]
-    );
-
-    return res.json({ success: true, options });
-  } catch (err) {
-    console.error('Error generating biometric login options:', err);
-    return res.status(500).json({ success: false, message: 'Internal server error' });
-  }
-};
 
 // export const bioMetricLogin = async (req, res) => {
 //   try {
@@ -879,153 +1040,7 @@ export const generateBiometricAuth = async (req, res) => {
 //     return res.status(500).json({ success: false, message: 'Internal server error' });
 //   }
 // };
-export const bioMetricLogin = async (req, res) => {
-  try {
-    const { credential } = req.body;
-    if (!credential) {
-      return res.status(400).json({ success: false, message: 'Missing credential' });
-    }
 
-    // 1️⃣ Get latest login challenge
-    const { rows: challengeRows } = await pool.query(
-      `SELECT * FROM webauthn_challenges 
-       WHERE purpose='login' 
-       ORDER BY created_at DESC 
-       LIMIT 1`
-    );
-
-    if (challengeRows.length === 0) {
-      return res.status(400).json({ success: false, message: 'No challenge found' });
-    }
-
-    const challenge = challengeRows[0];
-
-    // 2️⃣ Find the credential in DB
-    const { rows: credRows } = await pool.query(
-      `SELECT wc.*, u.id as user_id, u.email 
-       FROM webauthn_credentials wc 
-       JOIN users u ON wc.user_id = u.id 
-       WHERE wc.credential_id=$1`,
-      [credential.id]
-    );
-
-    if (credRows.length === 0) {
-      return res.status(400).json({ success: false, message: 'Authenticator not found' });
-    }
-
-    const dbCred = credRows[0];
-
-    // 3️⃣ Verify authentication
-    const verification = await verifyAuthenticationResponse({
-      response: credential,
-      expectedChallenge: challenge.challenge,
-      expectedOrigin: getAllowedOrigins(),
-      expectedRPID: process.env.RP_ID,
-      credential: {
-        id: dbCred.credential_id,
-        publicKey: dbCred.public_key, // stored as bytea (Buffer)
-        counter: dbCred.counter,
-        transports: dbCred.transports?.length > 0 ? dbCred.transports : ['internal'],
-      },
-    });
-
-    const { verified, authenticationInfo } = verification;
-    if (!verified || !authenticationInfo) {
-      return res.status(401).json({ success: false, message: 'Biometric login failed' });
-    }
-
-    // 4️⃣ Protect against cloned authenticators
-    if (
-      authenticationInfo.newCounter !== 0 &&
-      authenticationInfo.newCounter <= dbCred.counter
-    ) {
-      return res.status(400).json({ success: false, message: 'Authenticator counter did not increase' });
-    }
-
-    // 5️⃣ Update counter
-    await pool.query(
-      `UPDATE webauthn_credentials SET counter=$1 WHERE id=$2`,
-      [authenticationInfo.newCounter, dbCred.id]
-    );
-
-    // 6️⃣ Update challenge with userId
-    await pool.query(
-      `UPDATE webauthn_challenges SET user_id=$1 WHERE id=$2`,
-      [dbCred.user_id, challenge.id]
-    );
-
-    // 7️⃣ Issue JWT
-    const token = jwt.sign(
-      { userId: dbCred.user_id, email: dbCred.email },
-      process.env.JWT_SECRET,
-      { expiresIn: '7d' }
-    );
-
-    // ✅ Fetch full user info like Commonlogin
-    const { rows } = await pool.query(
-      `SELECT 
-         u.*, 
-         g.grade_level AS grade_value, 
-         us.quiz_time_seconds
-       FROM users u
-       LEFT JOIN grades g ON g.id = u.grade_id
-       LEFT JOIN user_settings us ON us.user_id = u.id
-       WHERE u.id = $1`,
-      [dbCred.user_id]
-    );
-
-    const user = rows[0];
-    if (!user) {
-      return res.status(404).json({ status: false, message: "User not found" });
-    }
-
-    // ✅ Fetch selected subjects (if any)
-    let selectedSubjectsNames = [];
-    if (user.selected_subjects && user.selected_subjects.length > 0) {
-      const { rows: subjectRows } = await pool.query(
-        `SELECT id, icon, subject 
-         FROM subjects 
-         WHERE id = ANY($1::int[])`,
-        [user.selected_subjects.map(Number)]
-      );
-      selectedSubjectsNames = subjectRows.map((r) => ({
-        id: r.id,
-        subject: r.subject,
-        icon: r.icon,
-      }));
-    }
-
-    // ✅ Trigger notifications in background
-    setTimeout(async () => {
-      try {
-        await NotificationService.generateLoginNotifications(user.id);
-      } catch (error) {
-        console.error("Error generating login notifications:", error);
-      }
-    }, 1000);
-
-
-    // ✅ Clean up ALL expired challenges from the table
-    const status = await pool.query(`DELETE FROM webauthn_challenges WHERE expires_at < NOW()`);
-
-
-    // ✅ Exclude password and return same format as Commonlogin
-    const { password: _, ...userData } = user;
-
-    return res.json({
-      status: true,
-      data: {
-        ...userData,
-        selected_subjects: selectedSubjectsNames,
-        grade_value: user.grade_value || null,
-      },
-      token,
-    });
-  } catch (err) {
-    console.error('Error in biometric login:', err);
-    return res.status(500).json({ status: false, message: 'Internal server error' });
-  }
-};
 
 
 export const cleanupBiometricRecords = async (req, res) => {
