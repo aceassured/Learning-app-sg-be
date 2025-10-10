@@ -18,6 +18,8 @@ import { verifyRegistrationResponse } from '@simplewebauthn/server';
 import { generateAuthenticationOptions } from '@simplewebauthn/server';
 import { verifyAuthenticationResponse } from '@simplewebauthn/server';
 
+import { isoBase64URL } from '@simplewebauthn/server/helpers';
+
 
 
 const JWT_SECRET = process.env.JWT_SECRET || 'dev_secret';
@@ -396,52 +398,503 @@ const convertCredentialForVerification = (credential) => {
 //   }
 // };
 
+
+// export const verifyBiometricRegistration = async (req, res) => {
+//   try {
+//     const { email, credential } = req.body;
+//     if (!email || !credential)
+//       return res.status(400).json({ success: false, message: 'Missing data' });
+
+//     // Fetch user
+//     const { rows: userRows } = await pool.query('SELECT id FROM users WHERE email=$1', [email]);
+//     if (!userRows[0]) return res.status(404).json({ success: false, message: 'User not found' });
+//     const user = userRows[0];
+
+//     // Fetch latest challenge for this user
+//     const { rows: challengeRows } = await pool.query(
+//       `SELECT * FROM webauthn_challenges
+//        WHERE user_id=$1 AND purpose='register'
+//        ORDER BY created_at DESC
+//        LIMIT 1`,
+//       [user.id]
+//     );
+//     if (!challengeRows[0])
+//       return res.status(400).json({ success: false, message: 'No registration challenge found' });
+
+//     const expectedChallenge = challengeRows[0].challenge;
+
+//     // Determine frontend origin from allowed origins
+//     const allowedOrigins = process.env.ALLOWED_ORIGINS?.split(',') || [];
+//     const requestOrigin = req.headers.origin;
+//     if (!allowedOrigins.includes(requestOrigin)) {
+//       return res.status(400).json({ success: false, message: 'Invalid origin' });
+//     }
+
+//     let verification;
+//     try {
+//       verification = await verifyRegistrationResponse({
+//         response: credential,
+//         expectedChallenge,
+//         expectedOrigin: requestOrigin,
+//         expectedRPID: process.env.RP_ID,
+//       });
+//     } catch (err) {
+//       if (err.message.includes("User verification was required")) {
+//         return res.status(400).json({
+//           success: false,
+//           message: "Touch ID / Face ID failed. Please use another device or browser."
+//         });
+//       }
+//       // re-throw other errors
+//       throw err;
+//     }
+
+//     const { verified, registrationInfo } = verification;
+//     if (!verified || !registrationInfo)
+//       return res.status(400).json({ success: false, message: 'Registration verification failed' });
+
+//     const { id, publicKey, counter } = registrationInfo.credential;
+
+//     // Insert credential
+//     const insertResult = await pool.query(
+//       `INSERT INTO webauthn_credentials (user_id, credential_id, public_key, counter)
+//        VALUES ($1, $2, $3, $4) RETURNING id`,
+//       [user.id, id, Buffer.from(publicKey), counter || 0]
+//     );
+
+//     // Update user's primary credential
+//     await pool.query(
+//       `UPDATE users SET biometric_credential_id=$1 WHERE id=$2`,
+//       [insertResult.rows[0].id, user.id]
+//     );
+
+//     // Delete challenge after verification
+//     await pool.query(`DELETE FROM webauthn_challenges WHERE id=$1`, [challengeRows[0].id]);
+
+//     res.json({ success: true, message: 'Biometric enabled' });
+//   } catch (err) {
+//     console.error(err);
+//     res.status(500).json({ success: false, message: 'Internal server error' });
+//   }
+// };
+
+
+//-- old code
+
+// export const generateBiometricRegistration = async (req, res) => {
+//   try {
+//     const { email } = req.body;
+//     if (!email) return res.status(400).json({ success: false, message: 'Email required' });
+
+//     // Fetch user along with biometric_credential_id
+//     const { rows } = await pool.query(
+//       `SELECT id, email, name, biometric_credential_id 
+//        FROM users 
+//        WHERE email=$1`,
+//       [email]
+//     );
+//     if (!rows[0]) return res.status(404).json({ success: false, message: 'User not found' });
+//     const user = rows[0];
+
+//     const userIdBuffer = new TextEncoder().encode(String(user.id));
+
+//     // Generate registration options
+//     const options = await generateRegistrationOptions({
+//       rpName: process.env.RP_NAME,
+//       rpID: process.env.RP_ID,
+//       userID: userIdBuffer,
+//       userName: user.email,
+//       userDisplayName: user.name || user.email,
+//       attestationType: 'none',
+//       authenticatorSelection: {
+//         residentKey: 'required',
+//         userVerification: 'required',
+//         authenticatorAttachment: 'platform',
+//       },
+//       excludeCredentials: user.biometric_credential_id
+//         ? [{ id: base64url.toBuffer(user.biometric_credential_id), type: 'public-key' }]
+//         : [],
+//     });
+
+//     // Save challenge (5 min expiry)
+//     const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
+//     await pool.query(
+//       `INSERT INTO webauthn_challenges (user_id, purpose, challenge, expires_at, created_at)
+//        VALUES ($1, 'register', $2, $3, NOW())`,
+//       [user.id, options.challenge, expiresAt]
+//     );
+
+//     res.json({ success: true, options });
+//   } catch (err) {
+//     console.error(err);
+//     res.status(500).json({ success: false, message: 'Internal server error' });
+//   }
+// };
+
+// export const verifyBiometricRegistration = async (req, res) => {
+//   try {
+//     const { email, credential } = req.body;
+//     if (!email || !credential)
+//       return res.status(400).json({ success: false, message: 'Missing data' });
+
+//     // Fetch user
+//     const { rows: userRows } = await pool.query('SELECT id FROM users WHERE email=$1', [email]);
+//     if (!userRows[0]) return res.status(404).json({ success: false, message: 'User not found' });
+//     const user = userRows[0];
+
+//     // Fetch latest challenge for this user
+//     const { rows: challengeRows } = await pool.query(
+//       `SELECT * FROM webauthn_challenges
+//        WHERE user_id=$1 AND purpose='register'
+//        ORDER BY created_at DESC
+//        LIMIT 1`,
+//       [user.id]
+//     );
+//     if (!challengeRows[0])
+//       return res.status(400).json({ success: false, message: 'No registration challenge found' });
+
+//     const expectedChallenge = challengeRows[0].challenge;
+
+//     // Determine frontend origin from allowed origins
+//     const allowedOrigins = (process.env.ALLOWED_ORIGINS?.split(',')) || [];
+//     const requestOrigin = req.headers.origin;
+//     if (!allowedOrigins.includes(requestOrigin)) {
+//       return res.status(400).json({ success: false, message: 'Invalid origin' });
+//     }
+
+//     let verification;
+//     try {
+//       verification = await verifyRegistrationResponse({
+//         response: credential,
+//         expectedChallenge,
+//         expectedOrigin: requestOrigin,
+//         expectedRPID: process.env.RP_ID,
+//       });
+//     } catch (err) {
+//       if (err.message.includes("User verification was required")) {
+//         return res.status(400).json({
+//           success: false,
+//           message: "Touch ID / Face ID failed. Please use another device or browser."
+//         });
+//       }
+//       throw err;
+//     }
+
+//     const { verified, registrationInfo } = verification;
+//     if (!verified || !registrationInfo)
+//       return res.status(400).json({ success: false, message: 'Registration verification failed' });
+
+//     // ✨ FINAL FIX: Use the exact property names from your console.log output.
+//     const { id, publicKey, counter } = registrationInfo.credential;
+
+//     // We now have:
+//     // id: The Base64URL string (e.g., 'HhIAnocXXyTD0U_bgNiOBA')
+//     // publicKey: A Uint8Array (which works like a Buffer for the database)
+//     // counter: The number 0
+
+//     // Insert credential
+//     await pool.query(
+//       `INSERT INTO webauthn_credentials (user_id, credential_id, public_key, counter)
+//        VALUES ($1, $2, $3, $4)`,
+//       // ✨ Use the correct variables. The 'id' is already the string we need.
+//       [user.id, id, publicKey, counter || 0]
+//     );
+
+//     // Delete challenge after verification
+//     await pool.query(`DELETE FROM webauthn_challenges WHERE id=$1`, [challengeRows[0].id]);
+
+//     const status = await pool.query(`DELETE FROM webauthn_challenges WHERE expires_at < NOW()`);
+
+//     res.json({ success: true, message: 'Biometric enabled' });
+//   } catch (err) {
+//     console.error('Error in verifyBiometricRegistration:', err);
+//     res.status(500).json({ success: false, message: 'Internal server error' });
+//   }
+// };
+
+// export const generateBiometricAuth = async (req, res) => {
+//   try {
+//     // 1️⃣ Get all registered credentials
+//     const { rows: credentials } = await pool.query(
+//       `SELECT credential_id, transports FROM webauthn_credentials`
+//     );
+
+//     if (credentials.length === 0) {
+//       return res
+//         .status(404)
+//         .json({ success: false, message: 'No passkeys have been registered yet.' });
+//     }
+
+//     // 2️⃣ Map them into allowCredentials
+//     const allowCredentials = credentials.map((cred) => ({
+//       id: cred.credential_id, // already stored as base64url string
+//       type: 'public-key',
+//       transports: cred.transports?.length > 0 ? cred.transports : ['internal'],
+//     }));
+
+//     // 3️⃣ Generate challenge
+//     const options = await generateAuthenticationOptions({
+//       rpID: process.env.RP_ID,
+//       allowCredentials,
+//       userVerification: 'preferred', // same as Nest
+//     });
+
+//     // 4️⃣ Save challenge in DB (5 min expiry)
+//     // ✅ Let PostgreSQL handle the expiry time directly to avoid timezone issues.
+//     await pool.query(
+//       `INSERT INTO webauthn_challenges (purpose, challenge, expires_at)
+//        VALUES ($1, $2, NOW() + INTERVAL '5 minutes')`,
+//       ['login', options.challenge]
+//     );
+
+//     return res.json({ success: true, options });
+//   } catch (err) {
+//     console.error('Error generating biometric login options:', err);
+//     return res.status(500).json({ success: false, message: 'Internal server error' });
+//   }
+// };
+
+// export const bioMetricLogin = async (req, res) => {
+//   try {
+//     const { credential } = req.body;
+//     if (!credential) {
+//       return res.status(400).json({ success: false, message: 'Missing credential' });
+//     }
+
+//     // 1️⃣ Get latest login challenge
+//     const { rows: challengeRows } = await pool.query(
+//       `SELECT * FROM webauthn_challenges 
+//        WHERE purpose='login' 
+//        ORDER BY created_at DESC 
+//        LIMIT 1`
+//     );
+
+//     if (challengeRows.length === 0) {
+//       return res.status(400).json({ success: false, message: 'No challenge found' });
+//     }
+
+//     const challenge = challengeRows[0];
+
+//     // 2️⃣ Find the credential in DB
+//     const { rows: credRows } = await pool.query(
+//       `SELECT wc.*, u.id as user_id, u.email 
+//        FROM webauthn_credentials wc 
+//        JOIN users u ON wc.user_id = u.id 
+//        WHERE wc.credential_id=$1`,
+//       [credential.id]
+//     );
+
+//     if (credRows.length === 0) {
+//       return res.status(400).json({ success: false, message: 'Authenticator not found' });
+//     }
+
+//     const dbCred = credRows[0];
+
+//     console.log('dbCred', dbCred)
+
+//     // 3️⃣ Verify authentication
+//     let verification;
+//     try {
+//       // ✨ THE FINAL FIX IS HERE ✨
+//       // We must build the object with the exact property names and data types the library requires.
+//       const authenticator = {
+//         // ✅ The key must be 'credentialID' and the value must be a Buffer.
+//         credentialID: Buffer.from(dbCred.credential_id, 'base64url'),
+//         // ✅ The key must be 'credentialPublicKey' and the value is the Buffer from the DB.
+//         credentialPublicKey: dbCred.public_key,
+//         // ✅ The counter is correct.
+//         counter: dbCred.counter,
+//         // ✅ The transports are correct.
+//         transports: dbCred.transports?.length > 0 ? dbCred.transports : ['internal'],
+//       };
+
+//       console.log('authentication', authenticator)
+//       verification = await verifyAuthenticationResponse({
+//         response: credential,
+//         expectedChallenge: challenge.challenge,
+//         expectedOrigin: Array.isArray(getAllowedOrigins())
+//           ? getAllowedOrigins()
+//           : [getAllowedOrigins()],
+//         expectedRPID: process.env.RP_ID,
+//         authenticator: authenticator, // Pass the perfectly formatted object
+//         requireUserVerification: false,
+//       });
+//       console.log('verification1', verification)
+//     } catch (err) {
+//       // ✅ Gracefully handle Mac Touch ID failures
+//       if (err.message?.includes('User verification required')) {
+//         return res.status(400).json({
+//           success: false,
+//           message:
+//             'Biometric verification failed. Please retry Touch ID or use a different browser/device.',
+//         });
+//       }
+//       throw err; // rethrow others
+//     }
+
+//     console.log('verification2', verification)
+
+//     const { verified, authenticationInfo } = verification;
+//     if (!verified || !authenticationInfo) {
+//       return res.status(401).json({ success: false, message: 'Biometric login failed' });
+//     }
+
+//     // 4️⃣ Protect against cloned authenticators
+//     if (
+//       authenticationInfo.newCounter !== 0 &&
+//       authenticationInfo.newCounter <= dbCred.counter
+//     ) {
+//       return res.status(400).json({ success: false, message: 'Authenticator counter did not increase' });
+//     }
+
+//     // 5️⃣ Update counter
+//     await pool.query(
+//       `UPDATE webauthn_credentials SET counter=$1 WHERE id=$2`,
+//       [authenticationInfo.newCounter, dbCred.id]
+//     );
+
+//     // 6️⃣ Update challenge with userId
+//     await pool.query(
+//       `UPDATE webauthn_challenges SET user_id=$1 WHERE id=$2`,
+//       [dbCred.user_id, challenge.id]
+//     );
+
+//     // 7️⃣ Issue JWT
+//     const token = jwt.sign(
+//       { userId: dbCred.user_id, email: dbCred.email },
+//       process.env.JWT_SECRET,
+//       { expiresIn: '7d' }
+//     );
+
+//     // ✅ Fetch full user info like Commonlogin
+//     const { rows } = await pool.query(
+//       `SELECT 
+//          u.*, 
+//          g.grade_level AS grade_value, 
+//          us.quiz_time_seconds
+//        FROM users u
+//        LEFT JOIN grades g ON g.id = u.grade_id
+//        LEFT JOIN user_settings us ON us.user_id = u.id
+//        WHERE u.id = $1`,
+//       [dbCred.user_id]
+//     );
+
+//     const user = rows[0];
+//     if (!user) {
+//       return res.status(404).json({ status: false, message: "User not found" });
+//     }
+
+//     // ✅ Fetch selected subjects (if any)
+//     let selectedSubjectsNames = [];
+//     if (user.selected_subjects && user.selected_subjects.length > 0) {
+//       const { rows: subjectRows } = await pool.query(
+//         `SELECT id, icon, subject 
+//          FROM subjects 
+//          WHERE id = ANY($1::int[])`,
+//         [user.selected_subjects.map(Number)]
+//       );
+//       selectedSubjectsNames = subjectRows.map((r) => ({
+//         id: r.id,
+//         subject: r.subject,
+//         icon: r.icon,
+//       }));
+//     }
+
+//     // ✅ Trigger notifications in background
+//     setTimeout(async () => {
+//       try {
+//         await NotificationService.generateLoginNotifications(user.id);
+//       } catch (error) {
+//         console.error("Error generating login notifications:", error);
+//       }
+//     }, 1000);
+
+
+//     // ✅ Clean up ALL expired challenges from the table
+//     const status = await pool.query(`DELETE FROM webauthn_challenges WHERE expires_at < NOW()`);
+
+
+//     // ✅ Exclude password and return same format as Commonlogin
+//     const { password: _, ...userData } = user;
+
+//     return res.json({
+//       status: true,
+//       data: {
+//         ...userData,
+//         selected_subjects: selectedSubjectsNames,
+//         grade_value: user.grade_value || null,
+//       },
+//       token,
+//     });
+//   } catch (err) {
+//     console.error('Error in biometric login:', err);
+//     return res.status(500).json({ status: false, message: 'Internal server error' });
+//   }
+// };
+
+
+// old code
+// Add this import at the top of your file if not already present
+// Add this import at the top of your file if not already present
+
+// Add this import at the top of your file if not already present
+
+
 export const generateBiometricRegistration = async (req, res) => {
   try {
     const { email } = req.body;
     if (!email) return res.status(400).json({ success: false, message: 'Email required' });
 
-    // Fetch user along with biometric_credential_id
     const { rows } = await pool.query(
-      `SELECT id, email, name, biometric_credential_id 
-       FROM users 
-       WHERE email=$1`,
+      `SELECT id, email, name FROM users WHERE email=$1`,
       [email]
     );
     if (!rows[0]) return res.status(404).json({ success: false, message: 'User not found' });
     const user = rows[0];
 
-    const userIdBuffer = new TextEncoder().encode(String(user.id));
+    // Find any existing credentials for this user
+    const { rows: existingCreds } = await pool.query(
+      `SELECT credential_id FROM webauthn_credentials WHERE user_id=$1`,
+      [user.id]
+    );
 
-    // Generate registration options
+    const excludeCredentials = existingCreds.map(cred => ({
+      id: isoBase64URL.toBuffer(cred.credential_id),
+      type: 'public-key',
+    }));
+
     const options = await generateRegistrationOptions({
       rpName: process.env.RP_NAME,
       rpID: process.env.RP_ID,
-      userID: userIdBuffer,
+      userID: Buffer.from(String(user.id)), // CHANGE: Simplified buffer creation
       userName: user.email,
       userDisplayName: user.name || user.email,
+
+      // CHANGE: Added pubKeyCredParams to match creator's code. This is crucial.
+      pubKeyCredParams: [
+        { type: 'public-key', alg: -7 },  // ES256
+        { type: 'public-key', alg: -257 }, // RS256
+      ],
+
       attestationType: 'none',
       authenticatorSelection: {
         residentKey: 'required',
         userVerification: 'required',
         authenticatorAttachment: 'platform',
       },
-      excludeCredentials: user.biometric_credential_id
-        ? [{ id: base64url.toBuffer(user.biometric_credential_id), type: 'public-key' }]
-        : [],
+      excludeCredentials, // Use the dynamically fetched list
     });
 
-    // Save challenge (5 min expiry)
     const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
     await pool.query(
-      `INSERT INTO webauthn_challenges (user_id, purpose, challenge, expires_at, created_at)
-       VALUES ($1, 'register', $2, $3, NOW())`,
+      `INSERT INTO webauthn_challenges (user_id, purpose, challenge, expires_at)
+       VALUES ($1, 'register', $2, $3)`,
       [user.id, options.challenge, expiresAt]
     );
 
     res.json({ success: true, options });
   } catch (err) {
-    console.error(err);
+    console.error('Error in generateBiometricRegistration:', err);
     res.status(500).json({ success: false, message: 'Internal server error' });
   }
 };
@@ -452,12 +905,10 @@ export const verifyBiometricRegistration = async (req, res) => {
     if (!email || !credential)
       return res.status(400).json({ success: false, message: 'Missing data' });
 
-    // Fetch user
     const { rows: userRows } = await pool.query('SELECT id FROM users WHERE email=$1', [email]);
     if (!userRows[0]) return res.status(404).json({ success: false, message: 'User not found' });
     const user = userRows[0];
 
-    // Fetch latest challenge for this user
     const { rows: challengeRows } = await pool.query(
       `SELECT * FROM webauthn_challenges
        WHERE user_id=$1 AND purpose='register'
@@ -470,96 +921,73 @@ export const verifyBiometricRegistration = async (req, res) => {
 
     const expectedChallenge = challengeRows[0].challenge;
 
-    // Determine frontend origin from allowed origins
-    const allowedOrigins = process.env.ALLOWED_ORIGINS?.split(',') || [];
-    const requestOrigin = req.headers.origin;
-    if (!allowedOrigins.includes(requestOrigin)) {
-      return res.status(400).json({ success: false, message: 'Invalid origin' });
-    }
-
     let verification;
     try {
+      // CHANGE: We now use the origin directly from the request header for a perfect match.
+      const expectedOrigin = req.headers.origin;
+      if (!expectedOrigin) {
+        return res.status(400).json({ success: false, message: 'Request origin is missing.' });
+      }
+
       verification = await verifyRegistrationResponse({
         response: credential,
         expectedChallenge,
-        expectedOrigin: requestOrigin,
+        expectedOrigin, // Use the origin from the current request
         expectedRPID: process.env.RP_ID,
+        requireUserVerification: false,
       });
     } catch (err) {
-      if (err.message.includes("User verification was required")) {
-        return res.status(400).json({
-          success: false,
-          message: "Touch ID / Face ID failed. Please use another device or browser."
-        });
-      }
-      // re-throw other errors
-      throw err;
+      console.error('Verification library error:', err);
+      // Provide a more detailed error to the client for debugging
+      return res.status(400).json({ success: false, message: `Verification failed: ${err.message}` });
     }
 
     const { verified, registrationInfo } = verification;
     if (!verified || !registrationInfo)
-      return res.status(400).json({ success: false, message: 'Registration verification failed' });
+      return res.status(400).json({ success: false, message: 'Could not verify registration.' });
 
+    // With a successful verification, these values will now be defined.
     const { id, publicKey, counter } = registrationInfo.credential;
 
-    // Insert credential
-    const insertResult = await pool.query(
-      `INSERT INTO webauthn_credentials (user_id, credential_id, public_key, counter)
-       VALUES ($1, $2, $3, $4) RETURNING id`,
-      [user.id, id, Buffer.from(publicKey), counter || 0]
-    );
+    console.log('registrationInfo:', registrationInfo)
+    console.log('registrationInfo.credential:', registrationInfo.credential);
+    console.log('id type:', typeof registrationInfo.credential.id);
+    console.log('id value:', registrationInfo.credential.id);
 
-    // Update user's primary credential
+    const credentialPublicKey = isoBase64URL.fromBuffer(publicKey);
+
+    console.log('credential public key (Buffer):', credentialPublicKey);
+
+
     await pool.query(
-      `UPDATE users SET biometric_credential_id=$1 WHERE id=$2`,
-      [insertResult.rows[0].id, user.id]
+      `INSERT INTO webauthn_credentials (user_id, credential_id, public_key, counter)
+       VALUES ($1, $2, $3, $4)`,
+      [user.id, id, credentialPublicKey, counter || 0]
     );
 
-    // Delete challenge after verification
     await pool.query(`DELETE FROM webauthn_challenges WHERE id=$1`, [challengeRows[0].id]);
 
     res.json({ success: true, message: 'Biometric enabled' });
   } catch (err) {
-    console.error(err);
+    console.error('Error in verifyBiometricRegistration:', err);
     res.status(500).json({ success: false, message: 'Internal server error' });
   }
 };
 
 export const generateBiometricAuth = async (req, res) => {
   try {
-    // 1️⃣ Get all registered credentials
-    const { rows: credentials } = await pool.query(
-      `SELECT credential_id, transports FROM webauthn_credentials`
-    );
-
-    if (credentials.length === 0) {
-      return res
-        .status(404)
-        .json({ success: false, message: 'No passkeys have been registered yet.' });
-    }
-
-    // 2️⃣ Map them into allowCredentials
-    const allowCredentials = credentials.map((cred) => ({
-      id: cred.credential_id, // already stored as base64url string
-      type: 'public-key',
-      transports: cred.transports?.length > 0 ? cred.transports : ['internal'],
-    }));
-
-    // 3️⃣ Generate challenge
     const options = await generateAuthenticationOptions({
       rpID: process.env.RP_ID,
-      allowCredentials,
-      userVerification: 'preferred', // same as Nest
+      userVerification: 'preferred',
+      // CHANGE: Removed allowCredentials. This is the modern "passkey" approach
+      // where the browser/OS finds the resident keys on its own.
     });
 
-    // 4️⃣ Save challenge in DB (5 min expiry)
-    // ✅ Let PostgreSQL handle the expiry time directly to avoid timezone issues.
     await pool.query(
       `INSERT INTO webauthn_challenges (purpose, challenge, expires_at)
-       VALUES ($1, $2, NOW() + INTERVAL '5 minutes')`,
-      ['login', options.challenge]
+       VALUES ('login', $1, NOW() + INTERVAL '5 minutes')`,
+      [options.challenge]
     );
-
     return res.json({ success: true, options });
   } catch (err) {
     console.error('Error generating biometric login options:', err);
@@ -570,109 +998,102 @@ export const generateBiometricAuth = async (req, res) => {
 export const bioMetricLogin = async (req, res) => {
   try {
     const { credential } = req.body;
+    console.log('credentail', credential)
+    console.log('req headers', req.headers)
     if (!credential) {
       return res.status(400).json({ success: false, message: 'Missing credential' });
     }
 
-    // 1️⃣ Get latest login challenge
     const { rows: challengeRows } = await pool.query(
-      `SELECT * FROM webauthn_challenges 
-       WHERE purpose='login' 
-       ORDER BY created_at DESC 
-       LIMIT 1`
+      `SELECT * FROM webauthn_challenges WHERE purpose='login' ORDER BY created_at DESC LIMIT 1`
     );
-
     if (challengeRows.length === 0) {
       return res.status(400).json({ success: false, message: 'No challenge found' });
     }
-
     const challenge = challengeRows[0];
 
-    // 2️⃣ Find the credential in DB
+    const credentialIdToSearch = credential.rawId || credential.id;
+
     const { rows: credRows } = await pool.query(
       `SELECT wc.*, u.id as user_id, u.email 
        FROM webauthn_credentials wc 
        JOIN users u ON wc.user_id = u.id 
        WHERE wc.credential_id=$1`,
-      [credential.id]
+      [credentialIdToSearch]
     );
+
 
     if (credRows.length === 0) {
       return res.status(400).json({ success: false, message: 'Authenticator not found' });
     }
-
     const dbCred = credRows[0];
 
-    // 3️⃣ Verify authentication
+    console.log('debug dbCred', dbCred)
+
+    const credentialPublicKey = isoBase64URL.toBuffer(
+      Buffer.isBuffer(dbCred.public_key)
+        ? dbCred.public_key.toString('utf8')
+        : dbCred.public_key
+    );
+
+    const authenticator = {
+      id: dbCred.credential_id,
+      publicKey: credentialPublicKey,
+      counter: dbCred.counter,
+      transports: dbCred.transports || [],
+    };
+
+    console.log('authenticator', authenticator)
+
     let verification;
     try {
-      // ✅ Create the "metal key" here.
-      const authenticator = {
-        // Convert the string from the DB into the required Buffer format.
-        credentialID: Buffer.from(dbCred.credential_id, 'base64url'),
-        // The public key from a 'bytea' column is already a Buffer ("metal").
-        credentialPublicKey: dbCred.public_key,
-        // The counter is a number, which is correct.
-        counter: dbCred.counter,
-        transports: dbCred.transports?.length > 0 ? dbCred.transports : ['internal'],
-      };
-
-      // ✅ Now, give the perfect "metal key" to the "lock".
       verification = await verifyAuthenticationResponse({
         response: credential,
         expectedChallenge: challenge.challenge,
-        expectedOrigin: Array.isArray(getAllowedOrigins())
-          ? getAllowedOrigins()
-          : [getAllowedOrigins()],
+        expectedOrigin: req.headers.origin,
         expectedRPID: process.env.RP_ID,
-        authenticator: authenticator, // Use our perfectly formatted object
-        requireUserVerification: false,
+        credential: authenticator,
+        requireUserVerification: false, // To be consistent with creator's code
       });
     } catch (err) {
-      // ✅ Gracefully handle Mac Touch ID failures
-      if (err.message?.includes('User verification required')) {
-        return res.status(400).json({
-          success: false,
-          message:
-            'Biometric verification failed. Please retry Touch ID or use a different browser/device.',
-        });
-      }
-      throw err; // rethrow others
+      console.log('verification result:', verification)
+      console.error('❌ Verification error:', err);
+      return res.status(401).json({ success: false, message: err.message });
     }
 
+
+    // ... The rest of your function from here on is correct.
     const { verified, authenticationInfo } = verification;
+
     if (!verified || !authenticationInfo) {
       return res.status(401).json({ success: false, message: 'Biometric login failed' });
     }
 
-    // 4️⃣ Protect against cloned authenticators
-    if (
-      authenticationInfo.newCounter !== 0 &&
-      authenticationInfo.newCounter <= dbCred.counter
-    ) {
-      return res.status(400).json({ success: false, message: 'Authenticator counter did not increase' });
+    if (authenticationInfo.newCounter !== 0 && authenticationInfo.newCounter <= dbCred.counter) {
+      return res.status(400).json({
+        success: false,
+        message: 'Authenticator counter did not increase. Possible cloned device detected.'
+      });
     }
 
-    // 5️⃣ Update counter
     await pool.query(
       `UPDATE webauthn_credentials SET counter=$1 WHERE id=$2`,
       [authenticationInfo.newCounter, dbCred.id]
     );
 
-    // 6️⃣ Update challenge with userId
     await pool.query(
       `UPDATE webauthn_challenges SET user_id=$1 WHERE id=$2`,
       [dbCred.user_id, challenge.id]
     );
 
-    // 7️⃣ Issue JWT
+    // 8️⃣ Issue JWT
     const token = jwt.sign(
       { userId: dbCred.user_id, email: dbCred.email },
       process.env.JWT_SECRET,
       { expiresIn: '7d' }
     );
 
-    // ✅ Fetch full user info like Commonlogin
+    // Fetch full user info
     const { rows } = await pool.query(
       `SELECT 
          u.*, 
@@ -690,7 +1111,7 @@ export const bioMetricLogin = async (req, res) => {
       return res.status(404).json({ status: false, message: "User not found" });
     }
 
-    // ✅ Fetch selected subjects (if any)
+    // Fetch selected subjects
     let selectedSubjectsNames = [];
     if (user.selected_subjects && user.selected_subjects.length > 0) {
       const { rows: subjectRows } = await pool.query(
@@ -706,7 +1127,7 @@ export const bioMetricLogin = async (req, res) => {
       }));
     }
 
-    // ✅ Trigger notifications in background
+    // Trigger notifications in background
     setTimeout(async () => {
       try {
         await NotificationService.generateLoginNotifications(user.id);
@@ -715,12 +1136,10 @@ export const bioMetricLogin = async (req, res) => {
       }
     }, 1000);
 
+    // Clean up expired challenges
+    await pool.query(`DELETE FROM webauthn_challenges WHERE expires_at < NOW()`);
 
-    // ✅ Clean up ALL expired challenges from the table
-    const status = await pool.query(`DELETE FROM webauthn_challenges WHERE expires_at < NOW()`);
-
-
-    // ✅ Exclude password and return same format as Commonlogin
+    // Exclude password and return
     const { password: _, ...userData } = user;
 
     return res.json({
@@ -732,12 +1151,12 @@ export const bioMetricLogin = async (req, res) => {
       },
       token,
     });
+
   } catch (err) {
     console.error('Error in biometric login:', err);
     return res.status(500).json({ status: false, message: 'Internal server error' });
   }
 };
-
 
 // // 3. Generate Authentication Options
 // export const generateBiometricAuth = async (req, res) => {
@@ -2063,10 +2482,10 @@ export const adminRegister = async (req, res) => {
 
 const generatePassword = (name) => {
   const base = name.substring(0, 4); // take first 4 chars of name
-  const upper = base.charAt(0).toUpperCase();
+  const upper = base.charAt(0)?.toUpperCase();
   const randomNum = Math.floor(1000 + Math.random() * 9000); // 4-digit number
   const specialChars = "!@#$%^&*";
-  const special = specialChars.charAt(Math.floor(Math.random() * specialChars.length));
+  const special = specialChars?.charAt(Math.floor(Math.random() * specialChars.length));
 
   // Example: John1234!
   return `${upper}${base.slice(1)}${randomNum}${special}`.slice(0, 8);

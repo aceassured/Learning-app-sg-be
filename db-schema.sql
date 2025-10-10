@@ -26,7 +26,7 @@ CREATE TABLE webauthn_credentials (
   user_id INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
 
   credential_id TEXT UNIQUE NOT NULL,   -- base64url from client
-  public_key BYTEA NOT NULL,            -- COSE-encoded public key
+  public_key TEXT NOT NULL,            -- COSE-encoded public key
   counter INT DEFAULT 0,
   transports TEXT[] DEFAULT '{}',       -- e.g. ["internal"]
   backup_eligible BOOLEAN DEFAULT FALSE,
