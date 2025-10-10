@@ -3,7 +3,7 @@ import { adminAnnouncementpoll, admincreatePoll, createGrades, deleteGrade, dele
 import auth from "../middleware/auth.js"
 import { admincreateSubject, admincreateTopic, getAllTopic, getParticularquestions, updatequestion } from "../controller/usercontroller.js"
 import multer from "multer";
-import { questionFileupload } from "../utils/vercel-blob.js";
+import { deleteUpload, getQuestionsForUpload, getUploadHistory, questionFileupload } from "../utils/vercel-blob.js";
 
 
 const upload = multer();
@@ -24,7 +24,10 @@ router.put("/editquestion",   upload.fields([
 router.post("/createsubject", upload.fields([{ name: "icon", maxCount: 1 }]), admincreateSubject)
 router.post("/createtopic", admincreateTopic)
 router.post("/questionsupload", uploadNew.single("zipFile"), questionFileupload)
+router.get('/upload-questions/:uploadBatchId', getQuestionsForUpload);
 
+router.get('/upload-history', getUploadHistory);
+router.delete('/delete-upload/:uploadId', deleteUpload);
 
 // Grade Routes
 router.post("/creategrade", createGrades);
