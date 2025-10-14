@@ -685,7 +685,7 @@ export const deleteUser = async (req, res) => {
 
 export const addLike = async (req, res) => {
   try {
-    const { id, data_type } = req.body; 
+    const { id, data_type } = req.body;
     // id = forum_post_id or poll_id depending on data_type
     const userId = req.userId;
 
@@ -746,7 +746,7 @@ export const addLike = async (req, res) => {
 // ✅ Remove Like
 export const removeLike = async (req, res) => {
   try {
-    const { id, data_type } = req.body; 
+    const { id, data_type } = req.body;
     // id = forum_post_id or poll_id depending on data_type
     const userId = req.userId;
 
@@ -905,30 +905,61 @@ export const editComment = async (req, res) => {
 // ✅ Delete Comment
 export const deleteComment = async (req, res) => {
   try {
-    const { commentId } = req.body;
+    const { commentId, data_type } = req.body; // Add data_type here
     const userId = req.userId;
+    console.log("userId:", userId);
+    console.log("commentId:", commentId);
+    console.log("data_type:", data_type);
 
     if (!commentId || !userId) {
-      return res.status(400).json({ success: false, message: "commentId and userId are required" });
+      return res.status(400).json({ 
+        success: false, 
+        message: "commentId and userId are required" 
+      });
     }
 
-    // ensure only owner can delete
-    const { rowCount } = await pool.query(
-      `DELETE FROM forum_comments WHERE id=$1 AND user_id=$2`,
-      [commentId, userId]
-    );
+    // Determine which table to use based on data_type
+    const tableName = data_type === "poll" ? "poll_comments" : "forum_comments";
+    
+    console.log("Deleting from table:", tableName);
+
+    // Check if comment exists and belongs to user
+    const topicCheckQuery = `SELECT * FROM ${tableName} WHERE id=$1 AND user_id=$2`;
+    const topicCheck = await pool.query(topicCheckQuery, [commentId, userId]);
+    console.log("topicCheck:", topicCheck.rows[0]);
+
+    if (topicCheck.rowCount === 0) {
+      return res.status(404).json({ 
+        success: false, 
+        message: "Comment not found or you don't have permission to delete it" 
+      });
+    }
+
+    // Delete from the same table
+    const deleteQuery = `DELETE FROM ${tableName} WHERE id=$1 AND user_id=$2`;
+    const { rowCount } = await pool.query(deleteQuery, [commentId, userId]);
+    
+    console.log("Deleted rows:", rowCount);
 
     if (rowCount === 0) {
-      return res.status(403).json({ success: false, message: "Not authorized or comment not found" });
+      return res.status(403).json({ 
+        success: false, 
+        message: "Not authorized or comment not found" 
+      });
     }
 
-    return res.status(200).json({ success: true, message: "Comment deleted successfully" });
+    return res.status(200).json({ 
+      success: true, 
+      message: "Comment deleted successfully" 
+    });
   } catch (error) {
     console.error("❌ deleteComment error:", error);
-    return res.status(500).json({ success: false, message: "Internal server error" });
+    return res.status(500).json({ 
+      success: false, 
+      message: "Internal server error" 
+    });
   }
 };
-
 export const getAlllikesandComments = async (req, res) => {
   try {
     const { postId } = req.body;
