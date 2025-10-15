@@ -157,6 +157,142 @@ export const listPosts = async (req, res) => {
   }
 };
 
+// export const savedForumAndPolls = async (req, res) => {
+//   try {
+//     const userId = req.userId; // from auth middleware
+//     const search = req.body?.search || null;
+
+//     if (!userId) {
+//       return res.status(400).json({ ok: false, error: "User ID is required" });
+//     }
+
+//     const params = [userId];
+//     let forumSearchCondition = "";
+//     let pollSearchCondition = "";
+
+//     if (search) {
+//       params.push(`%${search}%`);
+//       forumSearchCondition = `AND f.forum_title ILIKE $${params.length}`;
+//       pollSearchCondition = `AND p.question ILIKE $${params.length}`;
+//     }
+
+//     const q = `
+//       -- ✅ Fetch saved forums
+//       SELECT 
+//         'forum' AS data_type,
+//         f.id,
+//         f.content,
+//         f.forum_title,
+//         f.subject_tag,
+//         f.grade_level,
+//         f.created_at,
+//         COALESCE(fvc.view_count, 0) AS view_count,
+//         COALESCE(fl.like_count, 0) AS like_count,
+//         COALESCE(ff.files, '[]') AS files,
+//         COALESCE(u.name, a.name) AS author_name,
+//         CASE 
+//           WHEN u.id IS NOT NULL THEN 'user'
+//           WHEN a.id IS NOT NULL THEN 'admin'
+//         END AS author_type,
+//         false AS has_voted,
+//         NULL AS user_selected_option
+//       FROM user_saved_forums usf
+//       JOIN forum_posts f ON f.id = usf.forum_post_id
+//       LEFT JOIN (
+//         SELECT forum_post_id, COUNT(*) AS view_count
+//         FROM forum_views
+//         GROUP BY forum_post_id
+//       ) fvc ON fvc.forum_post_id = f.id
+//       LEFT JOIN (
+//         SELECT post_id, COUNT(*) AS like_count
+//         FROM forum_likes
+//         GROUP BY post_id
+//       ) fl ON fl.post_id = f.id
+//       LEFT JOIN (
+//         SELECT post_id,
+//           JSON_AGG(
+//             JSON_BUILD_OBJECT(
+//               'id', id,
+//               'url', url,
+//               'filename', filename
+//             )
+//           ) AS files
+//         FROM forum_files
+//         GROUP BY post_id
+//       ) ff ON ff.post_id = f.id
+//       LEFT JOIN users u ON u.id = f.user_id
+//       LEFT JOIN admins a ON a.id = f.admin_id
+//       WHERE usf.user_id = $1
+//       ${forumSearchCondition}
+
+//       UNION ALL
+
+//       -- ✅ Fetch saved polls
+//       SELECT
+//         'poll' AS data_type,
+//         p.id,
+//         p.question AS content,
+//         NULL AS forum_title,
+//         p.subject_id AS subject_tag,
+//         p.grade_level,
+//         p.created_at,
+//         COALESCE(pv.view_count, 0) AS view_count,
+//         COALESCE(pvc.vote_count, 0) AS like_count, -- treat votes as "likes"
+//         COALESCE(po.options, '[]') AS files,
+//         NULL AS author_name,
+//         NULL AS author_type,
+//         CASE WHEN uv.user_id IS NOT NULL THEN true ELSE false END AS has_voted,
+//         uv.option_id AS user_selected_option
+//       FROM user_saved_polls usp
+//       JOIN polls p ON p.id = usp.poll_id
+//       LEFT JOIN (
+//         SELECT poll_id, COUNT(*) AS view_count
+//         FROM poll_views
+//         GROUP BY poll_id
+//       ) pv ON pv.poll_id = p.id
+//       LEFT JOIN (
+//         SELECT poll_id, COUNT(*) AS vote_count
+//         FROM poll_votes
+//         GROUP BY poll_id
+//       ) pvc ON pvc.poll_id = p.id
+//       LEFT JOIN (
+//         SELECT poll_id,
+//           JSON_AGG(
+//             JSON_BUILD_OBJECT(
+//               'id', id,
+//               'option_text', option_text,
+//               'vote_count', (SELECT COUNT(*) FROM poll_votes WHERE poll_votes.option_id = poll_options.id)
+//             )
+//           ) AS options
+//         FROM poll_options
+//         GROUP BY poll_id
+//       ) po ON po.poll_id = p.id
+//       LEFT JOIN (
+//         SELECT poll_id, option_id, user_id
+//         FROM poll_votes
+//         WHERE user_id = $1
+//       ) uv ON uv.poll_id = p.id
+//       WHERE usp.user_id = $1
+//       ${pollSearchCondition}
+
+//       ORDER BY created_at DESC
+//     `;
+
+//     const r = await pool.query(q, params);
+
+//     res.json({ ok: true, saved_items: r.rows });
+//   } catch (error) {
+//     console.error("Error fetching saved forums and polls:", error);
+//     res.status(500).json({ ok: false, error: "Server error" });
+//   }
+// };
+
+
+
+
+
+// get only particular forum notes.......
+
 export const savedForumAndPolls = async (req, res) => {
   try {
     const userId = req.userId; // from auth middleware
@@ -195,7 +331,9 @@ export const savedForumAndPolls = async (req, res) => {
           WHEN a.id IS NOT NULL THEN 'admin'
         END AS author_type,
         false AS has_voted,
-        NULL AS user_selected_option
+        NULL AS user_selected_option,
+        -- ✅ Check if user liked this forum
+        CASE WHEN ful.user_id IS NOT NULL THEN true ELSE false END AS is_liked_by_user
       FROM user_saved_forums usf
       JOIN forum_posts f ON f.id = usf.forum_post_id
       LEFT JOIN (
@@ -222,6 +360,8 @@ export const savedForumAndPolls = async (req, res) => {
       ) ff ON ff.post_id = f.id
       LEFT JOIN users u ON u.id = f.user_id
       LEFT JOIN admins a ON a.id = f.admin_id
+      -- ✅ Join to detect if this user liked it
+      LEFT JOIN forum_likes ful ON ful.post_id = f.id AND ful.user_id = $1
       WHERE usf.user_id = $1
       ${forumSearchCondition}
 
@@ -242,7 +382,9 @@ export const savedForumAndPolls = async (req, res) => {
         NULL AS author_name,
         NULL AS author_type,
         CASE WHEN uv.user_id IS NOT NULL THEN true ELSE false END AS has_voted,
-        uv.option_id AS user_selected_option
+        uv.option_id AS user_selected_option,
+        -- ✅ Check if user liked this poll
+        CASE WHEN pul.user_id IS NOT NULL THEN true ELSE false END AS is_liked_by_user
       FROM user_saved_polls usp
       JOIN polls p ON p.id = usp.poll_id
       LEFT JOIN (
@@ -272,6 +414,8 @@ export const savedForumAndPolls = async (req, res) => {
         FROM poll_votes
         WHERE user_id = $1
       ) uv ON uv.poll_id = p.id
+      -- ✅ Join to detect if this user liked the poll
+      LEFT JOIN poll_likes pul ON pul.poll_id = p.id AND pul.user_id = $1
       WHERE usp.user_id = $1
       ${pollSearchCondition}
 
@@ -287,11 +431,6 @@ export const savedForumAndPolls = async (req, res) => {
   }
 };
 
-
-
-
-
-// get only particular forum notes.......
 
 export const getonlyForumNotes = async (req, res) => {
   try {

@@ -8,17 +8,24 @@ import { sendNotification } from "../utils/sendNotification.js";
 export const getHomeData = async (req, res) => {
   const userId = req.userId;
   try {
+    // ✅ Fetch today’s session (only daily type + finished)
     const todayRes = await pool.query(
       `SELECT s.*, COUNT(a.*) AS answered_count
        FROM user_quiz_sessions s
        LEFT JOIN user_answers a ON a.session_id = s.id
-       WHERE s.user_id = $1 AND s.started_at::date = current_date
+       WHERE s.user_id = $1
+         AND s.started_at::date = current_date
+         AND s.type = 'daily'
+         AND s.finished_at IS NOT NULL
        GROUP BY s.id
        ORDER BY s.started_at DESC
-       LIMIT 1`, [userId]
+       LIMIT 1`,
+      [userId]
     );
+
     const todaySession = todayRes.rows[0] || null;
 
+    // ✅ Weekly activity data
     const weekDatesRes = await pool.query(
       `SELECT activity_date, correct_count, incorrect_count 
        FROM user_activity
@@ -28,12 +35,12 @@ export const getHomeData = async (req, res) => {
       [userId]
     );
 
-    // build week map
     const weekMap = {};
     weekDatesRes.rows.forEach(r => {
       weekMap[r.activity_date.toISOString().slice(0, 10)] = r;
     });
 
+    // ✅ Calculate consecutive days of activity
     let consecutive = 0;
     for (let i = 6; i >= 0; i--) {
       const date = new Date();
@@ -46,8 +53,11 @@ export const getHomeData = async (req, res) => {
         consecutive = 0;
       }
     }
-    const all7 = Object.keys(weekMap).length === 7 && Object.values(weekMap).every(e => e.correct_count + e.incorrect_count > 0);
 
+    const all7 = Object.keys(weekMap).length === 7 &&
+      Object.values(weekMap).every(e => e.correct_count + e.incorrect_count > 0);
+
+    // ✅ Monthly stats
     const monthRes = await pool.query(
       `SELECT SUM(correct_count) as correct, SUM(incorrect_count) as incorrect
        FROM user_activity 
@@ -59,9 +69,7 @@ export const getHomeData = async (req, res) => {
     const month = monthRes.rows[0] || { correct: 0, incorrect: 0 };
     const completedThisMonth = +(month.correct || 0) + +(month.incorrect || 0);
 
-    // ----------------------------
-    // 🔥 Calculate Full Streak Count
-    // ----------------------------
+    // ✅ Full streak count
     const streakRes = await pool.query(
       `SELECT DISTINCT activity_date
        FROM user_activity
@@ -84,15 +92,12 @@ export const getHomeData = async (req, res) => {
 
         if (activityDate.getTime() === currentDate.getTime()) {
           streakCount++;
-          // move to previous day
           currentDate.setDate(currentDate.getDate() - 1);
         } else if (activityDate.getTime() === currentDate.getTime() - 24 * 60 * 60 * 1000) {
-          // also works if exactly yesterday
           streakCount++;
           currentDate.setDate(currentDate.getDate() - 1);
         } else {
-          // gap → break streak
-          break;
+          break; // gap → streak ends
         }
       }
     }
@@ -104,13 +109,14 @@ export const getHomeData = async (req, res) => {
       all7: all7 ? 7 : 0,
       consecutive,
       monthly: { completed: completedThisMonth, target: 25 },
-      streakCount // 👈 added streak count
+      streakCount
     });
   } catch (err) {
     console.error(err);
     res.status(500).json({ ok: false, message: 'Server error' });
   }
 };
+
 
 
 // start quiz: create session, fetch N questions according to user settings
@@ -420,6 +426,7 @@ export const submitAnswers = async (req, res) => {
       [session_id, userId]
     );
     const session = sessionRes.rows[0];
+    console.log("session", session)
     if (!session) {
       return res.status(404).json({ ok: false, message: 'Session not found' });
     }
@@ -463,6 +470,10 @@ export const submitAnswers = async (req, res) => {
     );
 
     const incorrectCount = answers.length - correctCount;
+    console.log("incorrectCount", incorrectCount)
+    console.log("answers.length ", answers.length)
+    console.log("correctCount", correctCount)
+
     await pool.query(
       `INSERT INTO user_activity (user_id, activity_date, correct_count, incorrect_count)
        VALUES ($1, current_date, $2, $3)
@@ -478,8 +489,8 @@ export const submitAnswers = async (req, res) => {
 
     const percentage = Math.round((correctCount / answers.length) * 100);
     const message = `🎯 Quiz completed! You scored ${correctCount}/${answers.length} (${percentage}%). ${percentage >= 80 ? 'Excellent work! 🌟' :
-        percentage >= 60 ? 'Good job! Keep practicing! 💪' :
-          'Keep studying and try again! 📚'
+      percentage >= 60 ? 'Good job! Keep practicing! 💪' :
+        'Keep studying and try again! 📚'
       }`;
 
     res.json({
@@ -489,7 +500,7 @@ export const submitAnswers = async (req, res) => {
       percentage: percentage,
       data: quizsessionData.rows[0],
       message: message
-    });
+    });   
   } catch (err) {
     console.error(err);
     res.status(500).json({ ok: false, message: 'Server error' });
