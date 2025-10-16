@@ -10,21 +10,21 @@ export const admincreatePoll = async (req, res) => {
     const { question, allow_multiple = false, expires_at = null, options, subject_id, grade_level } = req.body;
     const adminId = req.userId;; // assuming req.user is set after auth & role check
 
-    if (!question || !options || options.length < 2 || !subject_id || !grade_level ) {
+    if (!question || !options || options.length < 2 || !subject_id || !grade_level) {
       return res.status(400).json({ message: "Question and at least 2 options required" });
     }
 
     // Insert poll
     const pollResult = await pool.query(
       `INSERT INTO polls (question, allow_multiple, expires_at, subject_id, grade_level ) VALUES ($1,$2,$3,$4,$5) RETURNING *`,
-      [question, allow_multiple, expires_at, subject_id, grade_level ]
+      [question, allow_multiple, expires_at, subject_id, grade_level]
     );
 
     const poll = pollResult.rows[0];
 
     // Insert poll options
     const optionValues = options.map((opt) => `('${poll.id}', '${opt}')`).join(",");
-await pool.query(`INSERT INTO poll_options (poll_id, option_text) VALUES ${optionValues}`);
+    await pool.query(`INSERT INTO poll_options (poll_id, option_text) VALUES ${optionValues}`);
 
     // const mergeResult = [poll,]
 
@@ -35,6 +35,57 @@ await pool.query(`INSERT INTO poll_options (poll_id, option_text) VALUES ${optio
   }
 };
 
+
+// edit poll...
+
+export const adminEditPoll = async (req, res) => {
+  try {
+    const { poll_id, question, allow_multiple, expires_at, options, subject_id, grade_level } = req.body;
+
+    if (!poll_id) {
+      return res.status(400).json({ message: "Poll ID is required" });
+    }
+
+    // Check if poll exists
+    const pollCheck = await pool.query(`SELECT * FROM polls WHERE id = $1`, [poll_id]);
+    if (pollCheck.rows.length === 0) {
+      return res.status(404).json({ message: "Poll not found" });
+    }
+
+    // Update poll table
+    const updatedPoll = await pool.query(
+      `UPDATE polls
+       SET question = $1,
+           allow_multiple = $2,
+           expires_at = $3,
+           subject_id = $4,
+           grade_level = $5,
+           updated_at = NOW()
+       WHERE id = $6
+       RETURNING *`,
+      [question, allow_multiple, expires_at, subject_id, grade_level, poll_id]
+    );
+
+    // Update poll options
+    if (options && Array.isArray(options) && options.length >= 2) {
+      // Delete existing options
+      await pool.query(`DELETE FROM poll_options WHERE poll_id = $1`, [poll_id]);
+
+      // Insert new options
+      const optionValues = options.map((opt) => `('${poll_id}', '${opt}')`).join(",");
+      await pool.query(`INSERT INTO poll_options (poll_id, option_text) VALUES ${optionValues}`);
+    }
+
+    return res.status(200).json({ message: "Poll updated successfully", poll: updatedPoll.rows[0] });
+
+  } catch (error) {
+    console.error("adminEditPoll error:", error);
+    return res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+
+
 // get all active poll....
 
 export const getAllpoll = async (req, res) => {
@@ -44,10 +95,12 @@ export const getAllpoll = async (req, res) => {
     // get all active polls
     const polls = await pool.query(
       `SELECT * FROM polls 
-       WHERE expires_at IS NULL OR expires_at > $1
-       ORDER BY created_at DESC`,
+   WHERE (expires_at IS NULL OR expires_at > $1)
+     AND active_status = true
+   ORDER BY created_at DESC`,
       [now]
     );
+
 
     const pollsWithOptions = [];
     for (let poll of polls.rows) {
@@ -300,3 +353,32 @@ export const deleteTopic = async (req, res) => {
     res.status(500).json({ message: "Internal Server Error" });
   }
 };
+
+
+// delete poll......
+
+export const deletePoll = async (req, res) => {
+  try {
+    const { id } = req.body;
+
+    // 1️⃣ Check if the poll exists
+    const poll = await pool.query("SELECT * FROM polls WHERE id = $1", [id]);
+
+    if (poll.rows.length === 0) {
+      return res.status(404).json({ message: "Poll not found" });
+    }
+
+    // 2️⃣ Perform soft delete
+    await pool.query(
+      "UPDATE polls SET active_status = false, updated_at = NOW() WHERE id = $1",
+      [id]
+    );
+
+    // 3️⃣ Send response
+    res.status(200).json({ message: "Poll deleted successfully" });
+  } catch (error) {
+    console.error("Error deleting poll:", error);
+    res.status(500).json({ message: "Internal Server Error" });
+  }
+};
+

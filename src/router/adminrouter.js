@@ -1,5 +1,5 @@
 import express from "express"
-import { adminAnnouncementpoll, admincreatePoll, createGrades, deleteGrade, deleteSubject, deleteTopic, getAllpoll, updateGrade, updateSubject, updateTopics } from "../controller/admincontroller.js"
+import { adminAnnouncementpoll, admincreatePoll, adminEditPoll, createGrades, deleteGrade, deletePoll, deleteSubject, deleteTopic, getAllpoll, updateGrade, updateSubject, updateTopics } from "../controller/admincontroller.js"
 import auth from "../middleware/auth.js"
 import { admincreateSubject, admincreateTopic, getAllTopic, getParticularquestions, updatequestion } from "../controller/usercontroller.js"
 import multer from "multer";
@@ -13,6 +13,7 @@ const router = express.Router()
 
 
 router.post( "/admincreatepoll", auth ,admincreatePoll )
+router.put( "/admineditpoll" ,adminEditPoll )
 router.get( "/admingetallpoll", getAllpoll )
 router.get( "/alltopics", getAllTopic )
 router.post( "/adminannouncementpoll", adminAnnouncementpoll )
@@ -33,6 +34,7 @@ router.delete('/delete-upload/:uploadId', deleteUpload);
 router.post("/creategrade", createGrades);
 router.put("/updategrades", updateGrade);
 router.delete("/deletegrades", deleteGrade);
+router.delete("/deletepoll", deletePoll);
 
 // Subject Routes
 router.put("/updatesubject", upload.single("icon"), updateSubject);
