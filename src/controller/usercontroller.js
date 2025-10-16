@@ -120,6 +120,94 @@ export const login = async (req, res) => {
 };
 
 
+// export const Commonlogin = async (req, res) => {
+//   try {
+//     const { email, password } = req.body;
+
+//     if (!email || !password) {
+//       return res.status(400).json({ status: false, message: "Email and password are required" });
+//     }
+
+//     // ✅ Fetch user with grade join
+//     const { rows } = await pool.query(
+//       `SELECT 
+//          u.*,
+//          g.grade_level AS grade_value,
+//          us.quiz_time_seconds
+//        FROM users u
+//        LEFT JOIN grades g ON g.id = u.grade_id
+//        LEFT JOIN user_settings us ON us.user_id = u.id
+//        WHERE u.email = $1`,
+//       [email]
+//     );
+
+//     const user = rows[0];
+//     if (!user) {
+//       return res.status(401).json({
+//         status: false,
+//         message: "User not found. Please sign up to continue.",
+//       });
+//     }
+
+//     // ✅ Compare password with hashed password
+//     const isMatch = await bcrypt.compare(password, user.password);
+//     if (!isMatch) {
+//       return res.status(401).json({ status: false, message: "Invalid credentials" });
+//     }
+
+//     // ✅ Fetch subject details only if selected_subjects exist
+//     let selectedSubjectsNames = [];
+//     if (user.selected_subjects && user.selected_subjects.length > 0) {
+//       const { rows: subjectRows } = await pool.query(
+//         `SELECT id, icon, subject 
+//          FROM subjects 
+//          WHERE id = ANY($1::int[])`,
+//         [user.selected_subjects.map(Number)]
+//       );
+//       selectedSubjectsNames = subjectRows.map((r) => ({
+//         id: r.id,
+//         subject: r.subject,
+//         icon: r.icon,
+//       }));
+//     }
+
+//     // ✅ Generate JWT token
+//     const token = jwt.sign({ userId: user.id }, JWT_SECRET, { expiresIn: "7d" });
+
+//     // 🎯 Generate smart notifications after successful login
+//     // Run in background to avoid delaying login response
+//     setTimeout(async () => {
+//       try {
+//         await NotificationService.generateLoginNotifications(user.id);
+//       } catch (error) {
+//         console.error("Error generating login notifications:", error);
+//       }
+//     }, 3000); // 1 second delay
+
+//     // ✅ Return response without password
+//     const { password: _, ...userData } = user;
+
+//     return res.json({
+//       status: true,
+//       data: {
+//         ...userData,
+//         selected_subjects: selectedSubjectsNames,
+//         grade_value: user.grade_value || null, // return grade_level name
+//       },
+//       token,
+//     });
+//   } catch (err) {
+//     console.error("Login error:", err);
+//     res.status(500).json({ status: false, message: "Server error" });
+//   }
+// };
+
+
+// Helper to convert browser credential format to server format
+
+
+// In your backend userController.js or userrouter.js
+
 export const Commonlogin = async (req, res) => {
   try {
     const { email, password } = req.body;
@@ -128,7 +216,7 @@ export const Commonlogin = async (req, res) => {
       return res.status(400).json({ status: false, message: "Email and password are required" });
     }
 
-    // ✅ Fetch user with grade join
+    // Fetch user with grade join
     const { rows } = await pool.query(
       `SELECT 
          u.*,
@@ -149,13 +237,13 @@ export const Commonlogin = async (req, res) => {
       });
     }
 
-    // ✅ Compare password with hashed password
+    // Compare password with hashed password
     const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch) {
       return res.status(401).json({ status: false, message: "Invalid credentials" });
     }
 
-    // ✅ Fetch subject details only if selected_subjects exist
+    // Fetch subject details only if selected_subjects exist
     let selectedSubjectsNames = [];
     if (user.selected_subjects && user.selected_subjects.length > 0) {
       const { rows: subjectRows } = await pool.query(
@@ -171,20 +259,52 @@ export const Commonlogin = async (req, res) => {
       }));
     }
 
-    // ✅ Generate JWT token
+    // Generate JWT token
     const token = jwt.sign({ userId: user.id }, JWT_SECRET, { expiresIn: "7d" });
 
-    // 🎯 Generate smart notifications after successful login
-    // Run in background to avoid delaying login response
-    setTimeout(async () => {
-      try {
-        await NotificationService.generateLoginNotifications(user.id);
-      } catch (error) {
-        console.error("Error generating login notifications:", error);
-      }
-    }, 1000); // 1 second delay
+    // ✅ CRITICAL: Generate and send notifications BEFORE returning response
+    // This ensures notifications are sent immediately on login
+    try {
+      console.log(`🔔 Generating login notifications for user ${user.id}`);
+      
+      // Generate all notification types
+      await NotificationService.generateLoginNotifications(user.id);
+      
+      // ✅ Send notifications via Firebase if user has FCM token
+      if (user.fcm_token) {
+        const notificationsResult = await pool.query(
+          `SELECT id, message, type, subject 
+           FROM notifications 
+           WHERE user_id = $1 
+           AND created_at >= NOW() - INTERVAL '10 seconds'
+           ORDER BY created_at DESC 
+           LIMIT 1`,
+          [user.id]
+        );
 
-    // ✅ Return response without password
+        if (notificationsResult.rows.length > 0) {
+          const latestNotif = notificationsResult.rows[0];
+          
+          // Send via Firebase push notification
+          const { sendPushNotification } = await import('../config/firebaseAdmin.js');
+          
+          await sendPushNotification(user.fcm_token, {
+            title: 'Acehive',
+            message: latestNotif.message,
+            type: latestNotif.type,
+            subject: latestNotif.subject,
+            url: '/notifications',
+          });
+          
+          console.log(`✅ Firebase notification sent to user ${user.id}`);
+        }
+      }
+    } catch (error) {
+      console.error("❌ Error generating/sending login notifications:", error);
+      // Don't fail login if notifications fail
+    }
+
+    // Return response without password
     const { password: _, ...userData } = user;
 
     return res.json({
@@ -192,7 +312,7 @@ export const Commonlogin = async (req, res) => {
       data: {
         ...userData,
         selected_subjects: selectedSubjectsNames,
-        grade_value: user.grade_value || null, // return grade_level name
+        grade_value: user.grade_value || null,
       },
       token,
     });
@@ -202,8 +322,6 @@ export const Commonlogin = async (req, res) => {
   }
 };
 
-
-// Helper to convert browser credential format to server format
 const convertCredentialForVerification = (credential) => {
   return {
     id: credential.id,
