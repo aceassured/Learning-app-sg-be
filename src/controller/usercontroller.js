@@ -2117,7 +2117,7 @@ export const getAllSubject = async (req, res) => {
 
   try {
     const { rows: allSubjects } = await client.query(
-      `SELECT * FROM subjects ORDER BY subject ASC`
+      `SELECT * FROM subjects WHERE active_status != false ORDER BY subject ASC `
     );
 
     return res.status(200).json({
@@ -2139,7 +2139,7 @@ export const getAllTopic = async (req, res) => {
 
   try {
     const { rows: allSubjects } = await client.query(
-      `SELECT * FROM topics ORDER BY topic ASC`
+      `SELECT * FROM topics WHERE active_status != false ORDER BY topic ASC`
     );
 
     return res.status(200).json({
@@ -2162,7 +2162,7 @@ export const getAllGrade = async (req, res) => {
   try {
     const { rows: allGrades } = await client.query(
       `SELECT *
-       FROM grades 
+       FROM grades WHERE active_status != false
        ORDER BY grade_level ASC`
     );
 
