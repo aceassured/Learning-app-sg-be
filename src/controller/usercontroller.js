@@ -266,10 +266,10 @@ export const Commonlogin = async (req, res) => {
     // This ensures notifications are sent immediately on login
     try {
       console.log(`🔔 Generating login notifications for user ${user.id}`);
-      
+
       // Generate all notification types
       await NotificationService.generateLoginNotifications(user.id);
-      
+
       // ✅ Send notifications via Firebase if user has FCM token
       if (user.fcm_token) {
         const notificationsResult = await pool.query(
@@ -284,10 +284,10 @@ export const Commonlogin = async (req, res) => {
 
         if (notificationsResult.rows.length > 0) {
           const latestNotif = notificationsResult.rows[0];
-          
+
           // Send via Firebase push notification
           const { sendPushNotification } = await import('../config/firebaseAdmin.js');
-          
+
           await sendPushNotification(user.fcm_token, {
             title: 'Acehive',
             message: latestNotif.message,
@@ -295,7 +295,7 @@ export const Commonlogin = async (req, res) => {
             subject: latestNotif.subject,
             url: '/notifications',
           });
-          
+
           console.log(`✅ Firebase notification sent to user ${user.id}`);
         }
       }
@@ -391,6 +391,8 @@ export const generateBiometricRegistration = async (req, res) => {
       [user.id, options.challenge, expiresAt]
     );
 
+
+
     res.json({ success: true, options });
   } catch (err) {
     console.error('Error in generateBiometricRegistration:', err);
@@ -450,8 +452,6 @@ export const verifyBiometricRegistration = async (req, res) => {
 
     const credentialPublicKey = isoBase64URL.fromBuffer(publicKey);
 
-    console.log('credential public key (Buffer):', credentialPublicKey);
-
 
     // 🧹 Delete any old credentials for this user to prevent duplicates
     await pool.query(`DELETE FROM webauthn_credentials WHERE user_id=$1`, [user.id]);
@@ -463,8 +463,16 @@ export const verifyBiometricRegistration = async (req, res) => {
       [user.id, id, credentialPublicKey, counter || 0]
     );
 
+    // 🔹 Update the user's biometric_enabled status
+    await pool.query(
+      `UPDATE users SET biometric_enabled = true WHERE id = $1`,
+      [user.id]
+    );
 
     await pool.query(`DELETE FROM webauthn_challenges WHERE id=$1`, [challengeRows[0].id]);
+
+    // Clean up expired challenges
+    await pool.query(`DELETE FROM webauthn_challenges WHERE expires_at < NOW()`);
 
     res.json({ success: true, message: 'Biometric enabled' });
   } catch (err) {
@@ -475,7 +483,7 @@ export const verifyBiometricRegistration = async (req, res) => {
 
 export const generateBiometricAuth = async (req, res) => {
   try {
-     // 1️⃣ Get all registered credentials
+    // 1️⃣ Get all registered credentials
     const { rows: credentials } = await pool.query(
       `SELECT credential_id, transports FROM webauthn_credentials`
     );
@@ -670,6 +678,51 @@ export const bioMetricLogin = async (req, res) => {
   }
 };
 
+export const removeBiometricCrendentials = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // Validate input
+    if (!id) {
+      return res.status(400).json({
+        status: false,
+        message: "Credential ID is required",
+      });
+    }
+
+    // Delete the credential by ID
+    const result = await pool.query(
+      "DELETE FROM webauthn_credentials WHERE user_id = $1 RETURNING *",
+      [id]
+    );
+
+    // If no rows were deleted, credential not found
+    if (result.rowCount === 0) {
+      return res.status(404).json({
+        status: false,
+        message: "Biometric credential not found",
+      });
+    }
+
+    // 🔹 Update the user's biometric_enabled status
+    await pool.query(
+      `UPDATE users SET biometric_enabled = false WHERE id = $1`,
+      [id]
+    );
+
+    // Successful deletion
+    return res.status(200).json({
+      status: true,
+      message: "Biometric credential removed successfully",
+      deletedCredential: result.rows[0],
+    });
+  } catch (err) {
+    console.error("Error in removeBiometricCrendentials:", err);
+    return res
+      .status(500)
+      .json({ status: false, message: "Internal server error" });
+  }
+};
 
 export const cleanupBiometricRecords = async (req, res) => {
   try {

@@ -28,7 +28,8 @@ import {
   bioMetricLogin,
   cleanupBiometricRecords,
   getParticularquestions,
-  getAllquestionsSearch
+  getAllquestionsSearch,
+  removeBiometricCrendentials
 } from '../controller/usercontroller.js';
 import { deleteForum, deleteUser } from '../controller/forumcontroller.js';
 import { admingetTopics, getTopics } from '../controller/quizcontroller.js';
@@ -126,7 +127,7 @@ router.post('/generate-biometric-auth', generateBiometricAuth); // No email requ
 router.post('/biometric-login', bioMetricLogin); // No email required
 
 // optional
-router.post('/cleanup-biometric-records', cleanupBiometricRecords);
+router.delete('/cleanup-biometric-records/:id', removeBiometricCrendentials);
 
 
 
