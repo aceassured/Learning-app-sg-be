@@ -1,5 +1,5 @@
 import express from "express"
-import { adminAnnouncementpoll, admincreatePoll, adminEditPoll, createGrades, deleteGrade, deletePoll, deleteSubject, deleteTopic, getAllpoll, updateGrade, updateSubject, updateTopics } from "../controller/admincontroller.js"
+import { adminAnnouncementpoll, adminCreateEditQuiz, admincreatePoll, adminEditPoll, createGrades, deleteEditQuiz, deleteGrade, deletePoll, deleteSubject, deleteTopic, getAllEditQuizzes, getAllpoll, getParticularEditableQuiz, getUserEditingQuiz, updateEditQuiz, updateGrade, updateSubject, updateTopics } from "../controller/admincontroller.js"
 import auth from "../middleware/auth.js"
 import { admincreateSubject, admincreateTopic, getAllTopic, getParticularquestions, updatequestion } from "../controller/usercontroller.js"
 import multer from "multer";
@@ -45,4 +45,11 @@ router.put("/updatetopic", updateTopics);
 router.delete("/deletetopic", deleteTopic);
 
 
+
+router.post("/createeditquestion", adminCreateEditQuiz);
+router.get("/geteditquestion", getUserEditingQuiz);
+router.get("/getalleditquestions", getAllEditQuizzes);
+router.put("/updateeditquestion/:id", updateEditQuiz);
+router.delete("/deleteeditquestion/:id", deleteEditQuiz);
+router.get("/geteditquestion/:id", getParticularEditableQuiz);
 export default router

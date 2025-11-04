@@ -1070,44 +1070,45 @@ export const getProfile = async (req, res) => {
   }
 };
 
+
+export const getSubjectsByIds = async (subjectIds) => {
+  if (!subjectIds || subjectIds.length === 0) return [];
+
+  const query = `
+    SELECT id, subject, icon
+    FROM subjects
+    WHERE id = ANY($1::int[])
+  `;
+  const { rows } = await pool.query(query, [subjectIds.map(Number)]);
+  return rows;
+};
+
+
 export const editProfile = async (req, res) => {
   try {
     const updates = { ...req.body };
     if (req.fileUrl) updates.profile_photo_url = req.fileUrl;
 
-    // --- Split fields ---
     const userFields = {};
     const settingsFields = {};
 
     if (updates.name !== undefined) userFields.name = updates.name;
     if (updates.school_name !== undefined) userFields.school_name = updates.school_name;
-
-    if (updates.grade_level !== undefined)
-      userFields.grade_level = parseInt(updates.grade_level, 10);
-
-    if (updates.grade_id !== undefined)
-      userFields.grade_id = parseInt(updates.grade_id, 10);
-
-
+    if (updates.grade_level !== undefined) userFields.grade_level = parseInt(updates.grade_level, 10);
+    if (updates.grade_id !== undefined) userFields.grade_id = parseInt(updates.grade_id, 10);
     if (updates.questions_per_day !== undefined)
       userFields.questions_per_day = parseInt(updates.questions_per_day, 10);
-
     if (updates.selected_subjects !== undefined)
       userFields.selected_subjects = updates.selected_subjects.map(Number);
-
     if (updates.profile_photo_url !== undefined)
       userFields.profile_photo_url = updates.profile_photo_url;
 
-    // settings fields
     if (updates.study_reminder !== undefined)
-      settingsFields.study_reminder =
-        updates.study_reminder === "true" || updates.study_reminder === true;
+      settingsFields.study_reminder = updates.study_reminder === "true" || updates.study_reminder === true;
 
     if (updates.forum_update !== undefined)
-      settingsFields.forum_update =
-        updates.forum_update === "true" || updates.forum_update === true;
+      settingsFields.forum_update = updates.forum_update === "true" || updates.forum_update === true;
 
-    // --- Update both tables ---
     let updatedUser = null;
     if (Object.keys(userFields).length > 0) {
       updatedUser = await updateUser(req.userId, userFields);
@@ -1117,6 +1118,15 @@ export const editProfile = async (req, res) => {
     if (Object.keys(settingsFields).length > 0) {
       updatedSettings = await updateUserSettings(req.userId, settingsFields);
     }
+
+    // ✅ Fetch full subject details
+    let detailedSubjects = [];
+    if (updatedUser?.selected_subjects?.length > 0) {
+      detailedSubjects = await getSubjectsByIds(updatedUser.selected_subjects);
+    }
+
+    // ✅ Replace raw subject IDs with full objects
+    if (updatedUser) updatedUser.selected_subjects = detailedSubjects;
 
     res.json({
       ok: true,

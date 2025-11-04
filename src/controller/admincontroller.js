@@ -382,3 +382,276 @@ export const deletePoll = async (req, res) => {
   }
 };
 
+// create editing quiz.......
+
+export const adminCreateEditQuiz = async (req, res) => {
+
+  try {
+    const { title, passage, grade_id, subject_id, topic_id, questions } = req.body;
+
+    if (!title || !passage || !grade_id || !subject_id || !topic_id) {
+      return res.status(400).json({ error: "All fields are required" });
+    }
+
+    // Insert quiz
+    const quizResult = await pool.query(
+      `INSERT INTO editing_quiz (title, passage, grade_id, subject_id, topic_id)
+       VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+      [title, passage, grade_id, subject_id, topic_id]
+    );
+
+    const quiz = quizResult.rows[0];
+
+    // Insert questions
+    if (questions && Array.isArray(questions)) {
+      for (const q of questions) {
+        await pool.query(
+          `INSERT INTO editing_quiz_questions (quiz_id, incorrect_word, correct_word, position)
+           VALUES ($1, $2, $3, $4)`,
+          [quiz.id, q.incorrect_word, q.correct_word, q.position]
+        );
+      }
+    }
+
+    res.status(201).json({ message: "Quiz created successfully", quiz });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Server error" });
+  }
+
+};
+
+
+// user get editing quiz..........
+
+export const getUserEditingQuiz = async (req, res) => {
+  try {
+    const { grade_id, subject_id, topic_id } = req.query;
+
+    let query = `
+      SELECT eq.*, 
+             g.grade_level AS grade_name,
+             s.subject AS subject_name,
+             t.topic AS topic_name
+      FROM editing_quiz eq
+      LEFT JOIN grades g ON eq.grade_id = g.id
+      LEFT JOIN subjects s ON eq.subject_id = s.id
+      LEFT JOIN topics t ON eq.topic_id = t.id
+      WHERE 1=1
+    `;
+    const params = [];
+
+    if (grade_id) {
+      params.push(grade_id);
+      query += ` AND eq.grade_id = $${params.length}`;
+    }
+
+    if (subject_id) {
+      params.push(subject_id);
+      query += ` AND eq.subject_id = $${params.length}`;
+    }
+
+    if (topic_id) {
+      params.push(topic_id);
+      query += ` AND eq.topic_id = $${params.length}`;
+    }
+
+    query += " ORDER BY eq.created_at DESC";
+
+    const { rows } = await pool.query(query, params);
+
+    // optional: also fetch questions for each quiz
+    for (let quiz of rows) {
+      const qRes = await pool.query(
+        "SELECT id, incorrect_word, correct_word, position FROM editing_quiz_questions WHERE quiz_id = $1 ORDER BY position ASC",
+        [quiz.id]
+      );
+      quiz.questions = qRes.rows;
+    }
+
+    res.status(200).json(rows);
+  } catch (err) {
+    console.error("Error fetching editing quizzes:", err);
+    res.status(500).json({ error: "Server error" });
+  }
+}
+
+// get all editable question.......
+
+export const getAllEditQuizzes = async (req, res) => {
+  try {
+    const { search = "" } = req.query;
+
+    const result = await pool.query(
+      `
+      SELECT 
+        eq.id,
+        eq.title,
+        eq.passage,
+        eq.grade_id,
+        g.grade_level AS grade_name,
+        eq.subject_id,
+        s.subject AS subject_name,
+        eq.topic_id,
+        t.topic As topic_name,
+        eq.created_at
+      FROM editing_quiz eq
+      LEFT JOIN editing_quiz_questions qq ON eq.id = qq.quiz_id
+      LEFT JOIN grades g ON eq.grade_id = g.id
+      LEFT JOIN subjects s ON eq.subject_id = s.id
+      LEFT JOIN topics t ON eq.topic_id = t.id
+      WHERE LOWER(eq.title) LIKE LOWER($1) 
+         OR LOWER(eq.passage) LIKE LOWER($1)
+         OR LOWER(g.grade_level) LIKE LOWER($1)
+         OR LOWER(s.subject) LIKE LOWER($1)
+         OR LOWER(t.topic) LIKE LOWER($1)
+      GROUP BY 
+        eq.id, g.grade_level, s.subject, t.topic
+      ORDER BY eq.created_at DESC
+      `,
+      [`%${search}%`]
+    );
+
+    res.status(200).json({
+      message: "All editable quizzes fetched successfully",
+      quizzes: result.rows,
+    });
+  } catch (err) {
+    console.error("Error fetching editable quizzes:", err);
+    res.status(500).json({ error: "Server error" });
+  }
+};
+
+
+// update editable question.....
+
+export const updateEditQuiz = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { title, passage, grade_id, subject_id, topic_id, questions } = req.body;
+
+    const existingQuiz = await pool.query(`SELECT * FROM editing_quiz WHERE id = $1`, [id]);
+    if (existingQuiz.rowCount === 0) {
+      return res.status(404).json({ error: "Quiz not found" });
+    }
+
+    // Update quiz details
+    await pool.query(
+      `UPDATE editing_quiz
+       SET title = $1, passage = $2, grade_id = $3, subject_id = $4, topic_id = $5, updated_at = NOW()
+       WHERE id = $6`,
+      [title, passage, grade_id, subject_id, topic_id, id]
+    );
+
+    // Delete old questions
+    await pool.query(`DELETE FROM editing_quiz_questions WHERE quiz_id = $1`, [id]);
+
+    // Insert new questions
+    if (questions && Array.isArray(questions)) {
+      for (const q of questions) {
+        await pool.query(
+          `INSERT INTO editing_quiz_questions (quiz_id, incorrect_word, correct_word, position)
+           VALUES ($1, $2, $3, $4)`,
+          [id, q.incorrect_word, q.correct_word, q.position]
+        );
+      }
+    }
+
+    res.status(200).json({ message: "Quiz updated successfully" });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Server error" });
+  }
+};
+
+
+// delete editabe qustion.......
+
+
+export const deleteEditQuiz = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const quiz = await pool.query(`SELECT * FROM editing_quiz WHERE id = $1`, [id]);
+    if (quiz.rowCount === 0) {
+      return res.status(404).json({ error: "Quiz not found" });
+    }
+
+    // Delete related questions first
+    await pool.query(`DELETE FROM editing_quiz_questions WHERE quiz_id = $1`, [id]);
+    // Delete quiz
+    await pool.query(`DELETE FROM editing_quiz WHERE id = $1`, [id]);
+
+    res.status(200).json({ message: "Quiz deleted successfully" });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Server error" });
+  }
+};
+
+
+// get particularquestions..........
+
+export const getParticularEditableQuiz = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    if (!id) {
+      return res.status(400).json({ error: "Quiz ID is required" });
+    }
+
+    // Fetch quiz details with joins
+    const quizResult = await pool.query(
+      `
+      SELECT 
+        eq.id,
+        eq.title,
+        eq.passage,
+        eq.grade_id,
+        g.grade_level AS grade_name,
+        eq.subject_id,
+        s.subject AS subject_name,
+        eq.topic_id,
+        t.topic AS topic_name,
+        eq.created_at
+      FROM editing_quiz eq
+      LEFT JOIN grades g ON eq.grade_id = g.id
+      LEFT JOIN subjects s ON eq.subject_id = s.id
+      LEFT JOIN topics t ON eq.topic_id = t.id
+      WHERE eq.id = $1
+      `,
+      [id]
+    );
+
+    if (quizResult.rowCount === 0) {
+      return res.status(404).json({ error: "Quiz not found" });
+    }
+
+    const quiz = quizResult.rows[0];
+
+    // Fetch all questions for the quiz
+    const questionsResult = await pool.query(
+      `
+      SELECT 
+        id,
+        incorrect_word,
+        correct_word,
+        position
+      FROM editing_quiz_questions
+      WHERE quiz_id = $1
+      ORDER BY position ASC
+      `,
+      [id]
+    );
+
+    quiz.questions = questionsResult.rows;
+
+    res.status(200).json({
+      message: "Editable quiz fetched successfully",
+      quiz,
+    });
+  } catch (err) {
+    console.error("Error fetching particular editable quiz:", err);
+    res.status(500).json({ error: "Server error" });
+  }
+};
