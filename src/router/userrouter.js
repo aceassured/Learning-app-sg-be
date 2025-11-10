@@ -29,7 +29,8 @@ import {
   cleanupBiometricRecords,
   getParticularquestions,
   getAllquestionsSearch,
-  removeBiometricCrendentials
+  removeBiometricCrendentials,
+  superadminRegister
 } from '../controller/usercontroller.js';
 import { deleteForum, deleteUser } from '../controller/forumcontroller.js';
 import { admingetTopics, getTopics } from '../controller/quizcontroller.js';
@@ -38,9 +39,13 @@ import jwt from "jsonwebtoken"
 const JWT_SECRET = process.env.JWT_SECRET || 'dev_secret';
 
 import pool from '../../database.js';
+import { commonLoginValidation } from '../middleware/adminMiddleware.js';
+import { attachUserAndAbility } from '../middleware/abilityMiddleware.js';
+import { authorize } from '../middleware/authorize.js';
 
 const upload = multer({ storage: multer.memoryStorage() });
 const router = express.Router();
+
 
 router.post('/login', login);
 router.post('/register', register);
@@ -65,6 +70,7 @@ router.post('/me/edit', auth, upload.single('profile_photo'), async (req, res, n
 
 router.post("/userregisters", userRegister)
 router.post("/adminregister", adminRegister)
+router.post("/superadminregister", superadminRegister)
 router.post("/usercommonlogin", commonLogin)
 router.get("/adminusers", auth, getUserdetails)
 router.get("/admindetail", auth, getAdmindetails)
@@ -80,7 +86,7 @@ router.get("/allquestions", getAllquestions)
 router.get("/questions", getAllquestionsSearch)
 router.get("/home", homeApi)
 router.delete("/deletequestion", deleteQuestions)
-router.delete("/deleteuser", deleteUser)
+router.delete("/deleteuser",   authorize('delete', 'User'), deleteUser)
 router.post("/addNewUser", addNewUser)
 router.put("/changeUserRole", changeUserRole)
 router.delete("/deleteAdminUser", deleteAdminUser)
@@ -97,7 +103,7 @@ router.post('/uservotepoll', auth, userVoteforpoll);
 // production....
 
 router.post("/commonlogin", Commonlogin)
-router.post("/admincommonlogin", adminCommonlogin)
+router.post("/admincommonlogin",commonLoginValidation, adminCommonlogin)
 router.post("/userregister", userregisterApi)
 router.post("/userjustregister", userJustregisterApi)
 router.post("/userverifyotp", userverifyOtp)
@@ -270,6 +276,7 @@ router.get("/webhooks/instagram", async (req, res) => {
   }
 });
 
+router.use(attachUserAndAbility)
 
 
 export default router;

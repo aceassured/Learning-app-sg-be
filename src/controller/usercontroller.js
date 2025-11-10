@@ -1373,31 +1373,36 @@ export const getAdmindetails = async (req, res) => {
       });
     }
 
-    const { rows } = await pool.query(
-      `SELECT *
-     FROM admins 
-     WHERE id = $1`,
+    // Try fetching from admins first
+    const adminResult = await pool.query(
+      `SELECT *, 'Admin' AS user_type FROM admins WHERE id = $1`,
       [userId]
     );
 
-    if (rows.length === 0) {
+    // If not found, try fetching from superadmin
+    const user =
+      adminResult.rows[0] ||
+      (
+        await pool.query(
+          `SELECT *, 'Superadmin' AS user_type FROM superadmin WHERE id = $1`,
+          [userId]
+        )
+      ).rows[0];
+
+    if (!user) {
       return res.status(404).json({
         success: false,
-        message: "User not found",
+        message: "User not found in both tables",
       });
     }
 
-    const user = rows[0];
-    console.log("user", user)
-
     return res.status(200).json({
       success: true,
-      message: "Admin details fetched successfully",
+      message: `${user.user_type} details fetched successfully`,
       data: user,
     });
-
   } catch (error) {
-    console.error("❌ Get admin details error:", error);
+    console.error("❌ Get admin/superadmin details error:", error);
 
     return res.status(500).json({
       success: false,
@@ -1405,6 +1410,7 @@ export const getAdmindetails = async (req, res) => {
     });
   }
 };
+
 
 // user edit.......
 
@@ -1722,7 +1728,71 @@ export const adminRegister = async (req, res) => {
   }
 };
 
+export const superadminRegister = async (req, res) => {
 
+  try {
+    const { email, password, name, phone, department, employee_id } = req.body;
+
+    if (!email || !password) {
+      return res.status(400).json({
+        success: false,
+        message: "Email and password are required",
+      });
+    }
+
+    await pool.query("BEGIN");
+
+    const { rows: existing } = await pool.query(
+      `SELECT id FROM superadmin WHERE email = $1`,
+      [email]
+    );
+
+    if (existing.length > 0) {
+      await pool.query("ROLLBACK");
+      return res.status(409).json({
+        success: false,
+        message: "Email already registered",
+      });
+    }
+
+    const hashedPassword = await bcrypt.hash(password, 10);
+
+    const { rows } = await pool.query(
+      `INSERT INTO superadmin 
+       (email, password, name, phone, department, employee_id, created_at)
+       VALUES ($1, $2, $3, $4, $5, $6, NOW())
+       RETURNING *`,
+      [email, hashedPassword, name || null, phone, department, employee_id]
+    );
+
+    const newUser = rows[0];
+
+    await pool.query("COMMIT");
+
+    const token = jwt.sign(
+      { userId: newUser.id, role: newUser.role },
+      process.env.JWT_SECRET,
+      { expiresIn: "1d" }
+    );
+
+    return res.status(201).json({
+      success: true,
+      message: "Super Admin registered successfully",
+      data: {
+        user: newUser,
+        token,
+      },
+    });
+  } catch (error) {
+    await pool.query("ROLLBACK");
+    console.error("❌ Admin register error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error",
+    });
+  }
+};
 
 
 // Add new user in admin
@@ -1742,7 +1812,6 @@ const generatePassword = (name) => {
 
 export const addNewUser = async (req, res) => {
   const client = await pool.connect();
-
   try {
     const { name, email, role } = req.body;
 
@@ -1755,41 +1824,86 @@ export const addNewUser = async (req, res) => {
 
     await client.query("BEGIN");
 
-    // Check if email already exists
-    const { rows: existing } = await client.query(
-      `SELECT id FROM admins WHERE email = $1`,
+    // ✅ Check for duplicate email in both tables
+    const { rows: existingAdmins } = await client.query(
+      "SELECT id FROM admins WHERE email = $1",
+      [email]
+    );
+    const { rows: existingUsers } = await client.query(
+      "SELECT id FROM users WHERE email = $1",
       [email]
     );
 
-    if (existing.length > 0) {
+    const { rows: existingSuperAdmin } = await client.query(
+      "SELECT id FROM superadmin WHERE email = $1",
+      [email]
+    );
+
+
+    if (existingAdmins.length > 0) {
       await client.query("ROLLBACK");
       return res.status(409).json({
         success: false,
-        message: "Email already registered",
+        message: "Email already registered as Admin",
       });
     }
 
-    // Generate password
-    const plainPassword = generatePassword(name);
+    if (existingUsers.length > 0) {
+      await client.query("ROLLBACK");
+      return res.status(409).json({
+        success: false,
+        message: "Email already registered as Student",
+      });
+    }
 
-    // Hash password before storing
+    if (existingSuperAdmin.length > 0) {
+      await client.query("ROLLBACK");
+      return res.status(409).json({
+        success: false,
+        message: "Email already registered as Superadmin",
+      });
+    }
+
+
+    // ✅ Generate and hash password
+    const plainPassword = generatePassword(name);
     const hashedPassword = await bcrypt.hash(plainPassword, 10);
 
-    // Insert into admins table
-    const { rows } = await client.query(
-      `INSERT INTO admins (name, email, role, password, created_at)
-       VALUES ($1, $2, $3, $4, NOW())
-       RETURNING id, name, email, role, created_at`,
-      [name, email, role, hashedPassword]
-    );
+    let insertQuery = "";
+    let values = [];
+    let insertedUser = null;
 
-    const newUser = rows[0];
+    // ✅ Insert based on role
+    if (role === "Admin") {
+      insertQuery = `
+        INSERT INTO admins (name, email, role, password, created_at)
+        VALUES ($1, $2, $3, $4, NOW())
+        RETURNING id, name, email, role, created_at
+      `;
+      values = [name, email, role, hashedPassword];
+    } else if (role === "Student") {
+      insertQuery = `
+        INSERT INTO users (name, email, role, password, created_at)
+        VALUES ($1, $2, $3, $4, NOW())
+        RETURNING id, name, email, role, created_at
+      `;
+      values = [name, email, role, hashedPassword];
+    } else {
+      await client.query("ROLLBACK");
+      return res.status(400).json({
+        success: false,
+        message: "Invalid role provided",
+      });
+    }
+
+    const { rows } = await client.query(insertQuery, values);
+    insertedUser = rows[0];
 
     await client.query("COMMIT");
 
-    // Send email with password
+    // ✅ Send email with credentials
     const transporter = nodemailer.createTransport({
-      service: "gmail", // or SMTP config
+      service: "gmail",
       auth: {
         user: process.env.EMAIL_USER,
         pass: process.env.EMAIL_PASS,
@@ -1799,19 +1913,29 @@ export const addNewUser = async (req, res) => {
     await transporter.sendMail({
       from: `"Admin Panel" <${process.env.EMAIL_USER}>`,
       to: email,
-      subject: "Your Admin Account Credentials",
-      text: `Hello ${name},\n\nYour admin account has been created.\n\nEmail: ${email}\nPassword: ${plainPassword}\n\nPlease login and change your password.\n\nRegards,\nTeam`,
+      subject: "Your Account Credentials",
+      text: `Hello ${name},
+
+Your ${role} account has been created successfully.
+
+Login Credentials:
+Email: ${email}
+Password: ${plainPassword}
+
+Please login and change your password after first login.
+
+Best regards,
+Team`,
     });
 
     return res.status(201).json({
       success: true,
-      message: "Admin created successfully. Credentials sent via email.",
-      data: newUser,
+      message: `${role} created successfully. Credentials sent via email.`,
+      data: insertedUser,
     });
   } catch (error) {
     await client.query("ROLLBACK");
-    console.error("Add new admin error:", error);
-
+    console.error("Add new user error:", error);
     return res.status(500).json({
       success: false,
       message: "Internal server error",
@@ -1820,7 +1944,6 @@ export const addNewUser = async (req, res) => {
     client.release();
   }
 };
-
 
 
 
@@ -2108,14 +2231,14 @@ export const getAllUsers = async (req, res) => {
     const { rows: adminRows } = await client.query(
       `SELECT id, name, email, 'admin' AS role, created_at, profile_photo_url
        FROM admins 
-       ORDER BY id ASC`
+       ORDER BY id DESC`
     );
 
     // Fetch users
     const { rows: userRows } = await client.query(
       `SELECT id, name, email, 'user' AS role, created_at , profile_photo_url
        FROM users 
-       ORDER BY id ASC`
+       ORDER BY id DESC`
     );
 
     // Merge results
@@ -2250,43 +2373,64 @@ export const getAllGrade = async (req, res) => {
 export const adminEdit = async (req, res) => {
   try {
     const adminId = req.userId;
-    console.log("adminId", adminId)
     const { name, email, phone } = req.body;
 
-    const { rows: existingAdmins } = await pool.query(
-      `SELECT * FROM admins WHERE id = $1`,
-      [adminId]
-    );
-
-    if (existingAdmins.length === 0) {
-      return res.status(404).json({
+    if (!adminId) {
+      return res.status(400).json({
         success: false,
-        message: "Admin not found",
+        message: "User ID is required",
       });
     }
 
-    let profilePhotoUrl = existingAdmins[0].profile_photo_url;
+    // First, check if user exists in admins
+    let userType = "admin";
+    let existingUser = (
+      await pool.query(`SELECT * FROM admins WHERE id = $1`, [adminId])
+    ).rows[0];
 
+    // If not found, check in superadmin table
+    if (!existingUser) {
+      const superAdminResult = await pool.query(
+        `SELECT * FROM superadmin WHERE id = $1`,
+        [adminId]
+      );
+      if (superAdminResult.rows.length === 0) {
+        return res.status(404).json({
+          success: false,
+          message: "User not found",
+        });
+      }
+      userType = "superadmin";
+      existingUser = superAdminResult.rows[0];
+    }
+
+    // Handle profile photo upload
+    let profilePhotoUrl = existingUser.profile_photo_url;
     if (req.file) {
       const file = req.file;
       profilePhotoUrl = await uploadBufferToVercel(file.buffer, file.originalname);
     }
 
+    // Build dynamic table name
+    const tableName = userType === "superadmin" ? "superadmin" : "admins";
+
+    // Update query
     const { rows } = await pool.query(
-      `UPDATE admins 
-       SET name = COALESCE($1, name),
-           email = COALESCE($2, email),
-           phone = COALESCE($3, phone),
-           profile_photo_url = COALESCE($4, profile_photo_url),
-           updated_at = NOW()
+      `UPDATE ${tableName}
+       SET 
+         name = COALESCE($1, name),
+         email = COALESCE($2, email),
+         phone = COALESCE($3, phone),
+         profile_photo_url = COALESCE($4, profile_photo_url),
+         updated_at = NOW()
        WHERE id = $5
        RETURNING id, name, email, phone, profile_photo_url, role, created_at, updated_at`,
       [name || null, email || null, phone || null, profilePhotoUrl || null, adminId]
     );
 
-    return res.json({
+    return res.status(200).json({
       success: true,
-      message: "Admin updated successfully",
+      message: `${userType === "superadmin" ? "Super Admin" : "Admin"} updated successfully`,
       data: rows[0],
     });
   } catch (error) {
@@ -2297,6 +2441,7 @@ export const adminEdit = async (req, res) => {
     });
   }
 };
+
 
 
 
@@ -3594,57 +3739,65 @@ export const adminCommonlogin = async (req, res) => {
     const { email, password } = req.body;
 
     if (!email || !password) {
-      return res.status(400).json({ status: false, message: "Email and password are required" });
+      return res.status(400).json({
+        status: false,
+        message: "Email and password are required",
+      });
     }
 
-    // const existingUser = await pool.query(
-    //   "SELECT id, name, email, password, selected_subjects FROM users WHERE email = $1",
-    //   [email]
-    // );
+    // ✅ Check if user exists in admins or superadmins table
+    const adminQuery = "SELECT id, name, email, password, 'admin' as role FROM admins WHERE email = $1";
+    const superAdminQuery = "SELECT id, name, email, password, 'superadmin' as role FROM superadmin WHERE email = $1";
 
-    // const exisitingUserRuesult = existingUser.rows[0]
-    // if (!exisitingUserRuesult) {
-    //   return res.status(404).json({
-    //     status: false,
-    //     message: "User not found. Please sign up to continue.",
-    //   });
+    const [adminResult, superAdminResult] = await Promise.all([
+      pool.query(adminQuery, [email]),
+      pool.query(superAdminQuery, [email]),
+    ]);
 
-    // }
-    // ✅ Fetch user by email
-    const { rows } = await pool.query(
-      "SELECT id, name, email, password FROM admins WHERE email = $1",
-      [email]
-    );
+    const user = adminResult.rows[0] || superAdminResult.rows[0];
 
-    const user = rows[0];
     if (!user) {
-      return res.status(401).json({ status: false, message: "Admin not found. Please sign up to continue.", });
+      return res.status(401).json({
+        status: false,
+        message: "User not found. Please check your credentials.",
+      });
     }
 
-    // ✅ Compare password with hashed password
+    // ✅ Compare passwords
     const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch) {
-      return res.status(401).json({ status: false, message: "Invalid credentials" });
+      return res.status(401).json({
+        status: false,
+        message: "Invalid credentials",
+      });
     }
 
-    // ✅ Generate JWT token
-    const token = jwt.sign({ userId: user.id }, JWT_SECRET, { expiresIn: "7d" });
+    // ✅ Generate JWT with role
+    const token = jwt.sign(
+      { userId: user.id, role: user.role },
+      JWT_SECRET,
+      { expiresIn: "7d" }
+    );
 
-    // ✅ Return response without password
+    // ✅ Return response (omit password)
     const { password: _, ...userData } = user;
 
     return res.json({
       status: true,
-      data: {
-        ...userData
-      },
-      token
+      message: `${user.role} login successful`,
+      data: userData,
+      token,
     });
+
   } catch (err) {
     console.error("Login error:", err);
-    res.status(500).json({ status: false, message: "Server error" });
+    res.status(500).json({
+      status: false,
+      message: "Server error",
+    });
   }
 };
+
 
 export const seedTopics = async (req, res) => {
   const client = await pool.connect();

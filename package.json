@@ -12,6 +12,7 @@
   "license": "ISC",
   "description": "",
   "dependencies": {
+    "@casl/ability": "^6.7.3",
     "@simplewebauthn/server": "^13.2.1",
     "@vercel/blob": "^1.1.1",
     "base64url": "^3.0.1",
@@ -19,6 +20,7 @@
     "cors": "^2.8.5",
     "dotenv": "^17.2.1",
     "express": "^5.1.0",
+    "express-validator": "^7.3.0",
     "firebase-admin": "^13.5.0",
     "fs": "^0.0.1-security",
     "helmet": "^8.1.0",

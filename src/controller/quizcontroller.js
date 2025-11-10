@@ -230,100 +230,262 @@ export const getHomeData = async (req, res) => {
 // };
 
 
+//  working quiz start.............
+
+// export const startQuiz = async (req, res) => {
+//   try {
+//     const userId = req.userId;
+//     const { subjects, topics } = req.body; // subjects = [id...], topics = [id...]
+
+//     // ✅ Get user's questions_per_day
+//     const userRes = await pool.query(
+//       "SELECT questions_per_day FROM users WHERE id=$1",
+//       [userId]
+//     );
+//     const qpd = userRes.rows[0]?.questions_per_day || 10;
+
+//     console.log("question per day", qpd)
+//     // ✅ Already answered question_ids
+//     const answeredRes = await pool.query(
+//       "SELECT question_id FROM user_answered_questions WHERE user_id=$1",
+//       [userId]
+//     );
+//     const answeredIds = answeredRes.rows.map((r) => r.question_id);
+
+//     let qRes;
+
+//     if (topics && topics.length > 0) {
+//       // 🎯 Pick by topics, exclude answered
+//       qRes = await pool.query(
+//         `
+//         SELECT id, subject, topic_id, question_text, options, question_url, 
+//                answer_file_url, answer_explanation
+//         FROM questions 
+//         WHERE topic_id = ANY($1::int[])
+//           AND NOT (id = ANY($2::int[]))
+//         ORDER BY random()
+//         LIMIT $3
+//         `,
+//         [topics, answeredIds, qpd]
+//       );
+//     } else if (subjects && subjects.length > 0) {
+//       // 🎯 Pick by subjects, exclude answered
+//       const subjectNameRes = await pool.query(
+//         "SELECT subject FROM subjects WHERE id = ANY($1)",
+//         [subjects]
+//       );
+//       const subjectNames = subjectNameRes.rows.map((row) =>
+//         row.subject.toLowerCase()
+//       );
+
+//       qRes = await pool.query(
+//         `
+//         SELECT id, subject, topic_id, question_text, options, question_url, 
+//                answer_file_url, answer_explanation
+//         FROM questions 
+//         WHERE LOWER(subject) = ANY($1)
+//           AND NOT (id = ANY($2::int[]))
+//         ORDER BY random()
+//         LIMIT $3
+//         `,
+//         [subjectNames, answeredIds, qpd]
+//       );
+//     } else {
+//       // 🎯 Default: all questions, exclude answered
+//       qRes = await pool.query(
+//         `
+//         SELECT id, subject, topic_id, question_text, options, question_url, 
+//                answer_file_url, answer_explanation
+//         FROM questions 
+//         WHERE NOT (id = ANY($1::int[]))
+//         ORDER BY random()
+//         LIMIT $2
+//         `,
+//         [answeredIds, qpd]
+//       );
+//     }
+
+//     const questions = qRes.rows;
+
+//     // ✅ Insert quiz session
+//     const sessionRes = await pool.query(
+//       `
+//       INSERT INTO user_quiz_sessions 
+//       (user_id, started_at, allowed_duration_seconds, total_questions, type)
+//       VALUES ($1, now(), 300, $2, 'daily')
+//       RETURNING *
+//       `,
+//       [userId, questions.length]
+//     );
+
+//     const session = sessionRes.rows[0];
+
+//     return res.json({ ok: true, session, questions });
+//   } catch (err) {
+//     console.error("startQuiz error:", err);
+//     return res.status(500).json({ ok: false, message: "Server error" });
+//   }
+// };
+
 export const startQuiz = async (req, res) => {
   try {
     const userId = req.userId;
-    const { subjects, topics } = req.body; // subjects = [id...], topics = [id...]
+    const { subjects, topics } = req.body;
 
-    // ✅ Get user's questions_per_day
+    // ✅ 1️⃣ Get user's daily question limit
     const userRes = await pool.query(
       "SELECT questions_per_day FROM users WHERE id=$1",
       [userId]
     );
     const qpd = userRes.rows[0]?.questions_per_day || 10;
 
-    console.log("question per day", qpd)
-    // ✅ Already answered question_ids
+    // ✅ 2️⃣ Get already answered normal question_ids
     const answeredRes = await pool.query(
       "SELECT question_id FROM user_answered_questions WHERE user_id=$1",
       [userId]
     );
     const answeredIds = answeredRes.rows.map((r) => r.question_id);
 
-    let qRes;
+    // ==========================================================
+    // 🎯 3️⃣ Fetch Normal Questions
+    // ==========================================================
+    let normalQuery = `
+      SELECT 
+        id,
+        subject,
+        topic_id,
+        question_text,
+        options,
+        question_url,
+        answer_file_url,
+        answer_explanation
+      FROM questions
+      WHERE NOT (id = ANY($1::int[]))
+    `;
+    const queryParams = [answeredIds];
 
-    if (topics && topics.length > 0) {
-      // 🎯 Pick by topics, exclude answered
-      qRes = await pool.query(
-        `
-        SELECT id, subject, topic_id, question_text, options, question_url, 
-               answer_file_url, answer_explanation
-        FROM questions 
-        WHERE topic_id = ANY($1::int[])
-          AND NOT (id = ANY($2::int[]))
-        ORDER BY random()
-        LIMIT $3
-        `,
-        [topics, answeredIds, qpd]
-      );
-    } else if (subjects && subjects.length > 0) {
-      // 🎯 Pick by subjects, exclude answered
-      const subjectNameRes = await pool.query(
+    if (topics?.length) {
+      normalQuery += ` AND topic_id = ANY($2::int[])`;
+      queryParams.push(topics);
+    } else if (subjects?.length) {
+      const subjectNamesRes = await pool.query(
         "SELECT subject FROM subjects WHERE id = ANY($1)",
         [subjects]
       );
-      const subjectNames = subjectNameRes.rows.map((row) =>
-        row.subject.toLowerCase()
+      const subjectNames = subjectNamesRes.rows.map((r) =>
+        r.subject.toLowerCase()
       );
-
-      qRes = await pool.query(
-        `
-        SELECT id, subject, topic_id, question_text, options, question_url, 
-               answer_file_url, answer_explanation
-        FROM questions 
-        WHERE LOWER(subject) = ANY($1)
-          AND NOT (id = ANY($2::int[]))
-        ORDER BY random()
-        LIMIT $3
-        `,
-        [subjectNames, answeredIds, qpd]
-      );
-    } else {
-      // 🎯 Default: all questions, exclude answered
-      qRes = await pool.query(
-        `
-        SELECT id, subject, topic_id, question_text, options, question_url, 
-               answer_file_url, answer_explanation
-        FROM questions 
-        WHERE NOT (id = ANY($1::int[]))
-        ORDER BY random()
-        LIMIT $2
-        `,
-        [answeredIds, qpd]
-      );
+      normalQuery += ` AND LOWER(subject) = ANY($${queryParams.length + 1})`;
+      queryParams.push(subjectNames);
     }
 
-    const questions = qRes.rows;
+    normalQuery += ` ORDER BY random() LIMIT $${queryParams.length + 1}`;
+    queryParams.push(Math.ceil(qpd / 2)); // half from normal
 
-    // ✅ Insert quiz session
+    const normalRes = await pool.query(normalQuery, queryParams);
+
+    // ==========================================================
+    // 🎯 4️⃣ Fetch Editable Quizzes
+    // ==========================================================
+
+    const desiredEditableCount = Math.floor(qpd / 2);
+
+const editableQuizRes = await pool.query(
+  `
+  WITH answered AS (
+    SELECT question_id
+    FROM editing_quiz_answers
+    WHERE user_id = $1
+    GROUP BY question_id
+  )
+  SELECT 
+    eq.id AS quiz_id,
+    eq.title,
+    eq.passage,
+    eq.grade_id,
+    eq.subject_id,
+    eq.topic_id,
+    json_agg(
+      json_build_object(
+        'id', eqq.id,
+        'incorrect_word', eqq.incorrect_word,
+        'correct_word', eqq.correct_word,
+        'position', eqq.position
+      )
+      ORDER BY eqq.position
+    ) AS questions
+  FROM editing_quiz eq
+  JOIN editing_quiz_questions eqq ON eqq.quiz_id = eq.id
+  LEFT JOIN answered a ON a.question_id = eqq.id
+  WHERE a.question_id IS NULL                         -- keep only unanswered targets
+  GROUP BY eq.id
+  HAVING COUNT(eqq.id) > 0                            -- drop passages with no remaining targets
+  ORDER BY random()
+  LIMIT $2
+  `,
+  [userId, desiredEditableCount]
+);
+
+    // ==========================================================
+    // 🎯 5️⃣ Combine & Format Data
+    // ==========================================================
+    const normalQuestions = normalRes.rows.map((q) => ({
+      id: q.id,
+      subject: q.subject,
+      topic_id: q.topic_id,
+      question_text: q.question_text,
+      options: q.options,
+      question_url: q.question_url,
+      answer_file_url: q.answer_file_url,
+      answer_explanation: q.answer_explanation,
+      type: "normal",
+    }));
+
+    const editableQuizzes = editableQuizRes.rows.map((quiz) => ({
+      id: quiz.quiz_id,
+      title: quiz.title,
+      passage: quiz.passage,
+      grade_id: quiz.grade_id,
+      subject_id: quiz.subject_id,
+      topic_id: quiz.topic_id,
+      questions: quiz.questions,
+      type: "editable",
+    }));
+
+    // ✅ Merge and Shuffle both types
+    const combinedQuestions = [...editableQuizzes, ...normalQuestions].sort(
+      () => Math.random() - 0.5
+    );
+
+    // ==========================================================
+    // 🎯 6️⃣ Insert Quiz Session
+    // ==========================================================
     const sessionRes = await pool.query(
       `
       INSERT INTO user_quiz_sessions 
       (user_id, started_at, allowed_duration_seconds, total_questions, type)
-      VALUES ($1, now(), 300, $2, 'daily')
+      VALUES ($1, now(), 300, $2, 'mixed')
       RETURNING *
       `,
-      [userId, questions.length]
+      [userId, combinedQuestions.length]
     );
 
     const session = sessionRes.rows[0];
 
-    return res.json({ ok: true, session, questions });
+    // ==========================================================
+    // ✅ 7️⃣ Final Response (Frontend-Compatible)
+    // ==========================================================
+    return res.status(200).json({
+      ok: true,
+      session,
+      questions: combinedQuestions,
+    });
   } catch (err) {
     console.error("startQuiz error:", err);
     return res.status(500).json({ ok: false, message: "Server error" });
   }
 };
+
 
 
 
@@ -411,57 +573,202 @@ export const startQuiz = async (req, res) => {
 //   }
 // };
 
+// working submit answers
+
+// export const submitAnswers = async (req, res) => {
+//   try {
+//     const userId = req.userId;
+//     const { session_id, answers } = req.body;
+
+//     if (!session_id || !Array.isArray(answers)) {
+//       return res.status(400).json({ ok: false, message: 'Invalid payload' });
+//     }
+
+//     const sessionRes = await pool.query(
+//       'SELECT * FROM user_quiz_sessions WHERE id=$1 AND user_id=$2',
+//       [session_id, userId]
+//     );
+//     const session = sessionRes.rows[0];
+//     console.log("session", session)
+//     if (!session) {
+//       return res.status(404).json({ ok: false, message: 'Session not found' });
+//     }
+
+//     let correctCount = 0;
+//     for (const ans of answers) {
+//       const qRes = await pool.query(
+//         'SELECT correct_option_id FROM questions WHERE id=$1',
+//         [ans.question_id]
+//       );
+//       if (!qRes.rowCount) continue;
+
+//       const correct = qRes.rows[0].correct_option_id;
+//       const is_correct = (correct === ans.selected_option_id);
+//       if (is_correct) correctCount++;
+
+//       await pool.query(
+//         `INSERT INTO user_answers (session_id, question_id, selected_option_id, is_correct, answered_at)
+//          VALUES ($1, $2, $3, $4, now())
+//          ON CONFLICT (session_id, question_id)
+//          DO UPDATE SET 
+//             selected_option_id = EXCLUDED.selected_option_id,
+//             is_correct = EXCLUDED.is_correct,
+//             answered_at = now()`,
+//         [session_id, ans.question_id, ans.selected_option_id, is_correct]
+//       );
+
+//       await pool.query(
+//         `INSERT INTO user_answered_questions (user_id, question_id, answered_at)
+//          VALUES ($1, $2, now())
+//          ON CONFLICT (user_id, question_id) DO NOTHING`,
+//         [userId, ans.question_id]
+//       );
+//     }
+
+//     const quizsessionData = await pool.query(
+//       `UPDATE user_quiz_sessions 
+//        SET finished_at = now(), score = $1 
+//        WHERE id = $2 RETURNING *`,
+//       [correctCount, session_id]
+//     );
+
+//     const incorrectCount = answers.length - correctCount;
+//     console.log("incorrectCount", incorrectCount)
+//     console.log("answers.length ", answers.length)
+//     console.log("correctCount", correctCount)
+
+//     await pool.query(
+//       `INSERT INTO user_activity (user_id, activity_date, correct_count, incorrect_count)
+//        VALUES ($1, current_date, $2, $3)
+//        ON CONFLICT (user_id, activity_date)
+//        DO UPDATE SET 
+//           correct_count = user_activity.correct_count + $2, 
+//           incorrect_count = user_activity.incorrect_count + $3`,
+//       [userId, correctCount, incorrectCount]
+//     );
+
+//     // 🎯 Generate quiz completion notifications
+//     await NotificationService.generateQuizCompletionNotifications(userId, session_id);
+
+//     const percentage = Math.round((correctCount / answers.length) * 100);
+//     const message = `🎯 Quiz completed! You scored ${correctCount}/${answers.length} (${percentage}%). ${percentage >= 80 ? 'Excellent work! 🌟' :
+//       percentage >= 60 ? 'Good job! Keep practicing! 💪' :
+//         'Keep studying and try again! 📚'
+//       }`;
+
+//     res.json({
+//       ok: true,
+//       score: correctCount,
+//       total: answers.length,
+//       percentage: percentage,
+//       data: quizsessionData.rows[0],
+//       message: message
+//     });   
+//   } catch (err) {
+//     console.error(err);
+//     res.status(500).json({ ok: false, message: 'Server error' });
+//   }
+// };
 
 export const submitAnswers = async (req, res) => {
   try {
     const userId = req.userId;
-    const { session_id, answers } = req.body;
+    const { session_id, answers } = req.body; // answers: [{question_id, selected_option_id OR user_answer, type}]
 
     if (!session_id || !Array.isArray(answers)) {
-      return res.status(400).json({ ok: false, message: 'Invalid payload' });
+      return res.status(400).json({ ok: false, message: "Invalid payload" });
     }
 
+    // 🔹 Validate session
     const sessionRes = await pool.query(
-      'SELECT * FROM user_quiz_sessions WHERE id=$1 AND user_id=$2',
+      "SELECT * FROM user_quiz_sessions WHERE id=$1 AND user_id=$2",
       [session_id, userId]
     );
     const session = sessionRes.rows[0];
-    console.log("session", session)
     if (!session) {
-      return res.status(404).json({ ok: false, message: 'Session not found' });
+      return res
+        .status(404)
+        .json({ ok: false, message: "Session not found" });
     }
 
     let correctCount = 0;
+    let totalCount = answers.length;
+
+    console.log("answers", answers)
+    // 🔹 Loop through each answer
     for (const ans of answers) {
-      const qRes = await pool.query(
-        'SELECT correct_option_id FROM questions WHERE id=$1',
-        [ans.question_id]
-      );
-      if (!qRes.rowCount) continue;
+      if (ans.type === "normal") {
+        // 🎯 Normal question type
+        const qRes = await pool.query(
+          "SELECT correct_option_id FROM questions WHERE id=$1",
+          [ans.question_id]
+        );
+        if (!qRes.rowCount) continue;
 
-      const correct = qRes.rows[0].correct_option_id;
-      const is_correct = (correct === ans.selected_option_id);
-      if (is_correct) correctCount++;
+        const correct = qRes.rows[0].correct_option_id;
+        const is_correct = correct === ans.selected_option_id;
+        if (is_correct) correctCount++;
 
-      await pool.query(
-        `INSERT INTO user_answers (session_id, question_id, selected_option_id, is_correct, answered_at)
-         VALUES ($1, $2, $3, $4, now())
-         ON CONFLICT (session_id, question_id)
-         DO UPDATE SET 
-            selected_option_id = EXCLUDED.selected_option_id,
-            is_correct = EXCLUDED.is_correct,
-            answered_at = now()`,
-        [session_id, ans.question_id, ans.selected_option_id, is_correct]
-      );
+        await pool.query(
+          `INSERT INTO user_answers (session_id, question_id, selected_option_id, is_correct, answered_at)
+           VALUES ($1, $2, $3, $4, now())
+           ON CONFLICT (session_id, question_id)
+           DO UPDATE SET 
+              selected_option_id = EXCLUDED.selected_option_id,
+              is_correct = EXCLUDED.is_correct,
+              answered_at = now()`,
+          [session_id, ans.question_id, ans.selected_option_id, is_correct]
+        );
 
-      await pool.query(
-        `INSERT INTO user_answered_questions (user_id, question_id, answered_at)
-         VALUES ($1, $2, now())
-         ON CONFLICT (user_id, question_id) DO NOTHING`,
-        [userId, ans.question_id]
-      );
+        await pool.query(
+          `INSERT INTO user_answered_questions (user_id, question_id, answered_at)
+           VALUES ($1, $2, now())
+           ON CONFLICT (user_id, question_id) DO NOTHING`,
+          [userId, ans.question_id]
+        );
+      }
+
+      if (ans.type === "editable") {
+        // 📝 Editable quiz type (Grammar correction)
+        const qRes = await pool.query(
+          "SELECT correct_word FROM editing_quiz_questions WHERE id=$1",
+          [ans.question_id]
+        );
+        if (!qRes.rowCount) continue;
+
+        const correctWord = qRes.rows[0].correct_word.trim().toLowerCase();
+        const userAnswer = ans.provided_word.trim().toLowerCase();
+        console.log("correctWord", correctWord, "userAnswer", userAnswer)
+        const is_correct = correctWord === userAnswer;
+
+        console.log("correctWord", correctWord, "userAnswer", userAnswer, "is_correct", is_correct)
+
+        if (is_correct) correctCount++;
+
+        await pool.query(
+          `INSERT INTO editing_quiz_answers 
+   (user_id, quiz_id, question_id, user_answer, is_correct, session_id, created_at)
+   VALUES ($1, $2, $3, $4, $5, $6, NOW())
+   ON CONFLICT (user_id, quiz_id, question_id)
+   DO UPDATE SET 
+      user_answer = EXCLUDED.user_answer,
+      is_correct = EXCLUDED.is_correct,
+      created_at = NOW()`,
+          [
+            userId,
+            ans.quiz_id,
+            ans.question_id,
+            ans.provided_word,
+            is_correct,
+            session_id
+          ]
+        );
+
+
+      }
     }
 
+    // 🔹 Update quiz session
     const quizsessionData = await pool.query(
       `UPDATE user_quiz_sessions 
        SET finished_at = now(), score = $1 
@@ -469,11 +776,9 @@ export const submitAnswers = async (req, res) => {
       [correctCount, session_id]
     );
 
-    const incorrectCount = answers.length - correctCount;
-    console.log("incorrectCount", incorrectCount)
-    console.log("answers.length ", answers.length)
-    console.log("correctCount", correctCount)
+    const incorrectCount = totalCount - correctCount;
 
+    // 🔹 Log activity
     await pool.query(
       `INSERT INTO user_activity (user_id, activity_date, correct_count, incorrect_count)
        VALUES ($1, current_date, $2, $3)
@@ -484,48 +789,130 @@ export const submitAnswers = async (req, res) => {
       [userId, correctCount, incorrectCount]
     );
 
-    // 🎯 Generate quiz completion notifications
-    await NotificationService.generateQuizCompletionNotifications(userId, session_id);
+    // 🔔 Notification
+    await NotificationService.generateQuizCompletionNotifications(
+      userId,
+      session_id
+    );
 
-    const percentage = Math.round((correctCount / answers.length) * 100);
-    const message = `🎯 Quiz completed! You scored ${correctCount}/${answers.length} (${percentage}%). ${percentage >= 80 ? 'Excellent work! 🌟' :
-      percentage >= 60 ? 'Good job! Keep practicing! 💪' :
-        'Keep studying and try again! 📚'
+    const percentage = Math.round((correctCount / totalCount) * 100);
+    const message = `🎯 Quiz completed! You scored ${correctCount}/${totalCount} (${percentage}%). ${percentage >= 80
+      ? "Excellent work! 🌟"
+      : percentage >= 60
+        ? "Good job! Keep practicing! 💪"
+        : "Keep studying and try again! 📚"
       }`;
 
     res.json({
       ok: true,
       score: correctCount,
-      total: answers.length,
-      percentage: percentage,
+      total: totalCount,
+      percentage,
       data: quizsessionData.rows[0],
-      message: message
-    });   
+      message,
+    });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ ok: false, message: 'Server error' });
+    res.status(500).json({ ok: false, message: "Server error" });
   }
 };
 
 
-
 // quiz review: return questions + user answers for a session
+
+
+// export const reviewSession = async (req, res) => {
+//   try {
+//     const { sessionId } = req.params;
+//     const userId = req.userId;
+//     const sRes = await pool.query('SELECT * FROM user_quiz_sessions WHERE id=$1 AND user_id=$2', [sessionId, userId]);
+//     if (!sRes.rowCount) return res.status(404).json({ ok: false, message: 'Session not found' });
+
+//     const qRes = await pool.query(
+//       `SELECT a.*, q.question_text, q.options, q.correct_option_id, q.question_url, q.answer_file_url, q.answer_explanation
+//        FROM user_answers a
+//        JOIN questions q ON q.id = a.question_id
+//        WHERE a.session_id = $1`, [sessionId]
+//     );
+
+//     res.json({ ok: true, answers: qRes.rows });
+//   } catch (err) {
+//     console.error(err);
+//     res.status(500).json({ ok: false, message: 'Server error' });
+//   }
+// };
 
 export const reviewSession = async (req, res) => {
   try {
     const { sessionId } = req.params;
     const userId = req.userId;
-    const sRes = await pool.query('SELECT * FROM user_quiz_sessions WHERE id=$1 AND user_id=$2', [sessionId, userId]);
-    if (!sRes.rowCount) return res.status(404).json({ ok: false, message: 'Session not found' });
 
-    const qRes = await pool.query(
-      `SELECT a.*, q.question_text, q.options, q.correct_option_id, q.question_url, q.answer_file_url, q.answer_explanation
+    // ✅ Validate session
+    const sRes = await pool.query(
+      'SELECT * FROM user_quiz_sessions WHERE id=$1 AND user_id=$2',
+      [sessionId, userId]
+    );
+    if (!sRes.rowCount)
+      return res
+        .status(404)
+        .json({ ok: false, message: 'Session not found' });
+
+    const session = sRes.rows[0];
+
+    // ✅ 1️⃣ Fetch normal quiz answers
+    const normalRes = await pool.query(
+      `SELECT 
+        a.*, 
+        q.question_text, 
+        q.options, 
+        q.correct_option_id, 
+        q.question_url, 
+        q.answer_file_url, 
+        q.answer_explanation
        FROM user_answers a
        JOIN questions q ON q.id = a.question_id
-       WHERE a.session_id = $1`, [sessionId]
+       WHERE a.session_id = $1`,
+      [sessionId]
     );
 
-    res.json({ ok: true, answers: qRes.rows });
+    // ✅ 2️⃣ Fetch editable quiz answers
+    const editableRes = await pool.query(
+      `SELECT 
+    ea.id AS answer_id,
+    ea.quiz_id,
+    ea.question_id,
+    ea.user_answer,
+    ea.is_correct,
+    eq.incorrect_word,
+    eq.correct_word,
+    eq.position,
+    eq.quiz_id AS eq_quiz_id,
+    eq.id AS eq_id,
+    eq.correct_word AS correct_answer,
+    eq.incorrect_word AS question_text,
+    e.title AS quiz_title,
+    e.passage AS passage_text
+   FROM editing_quiz_answers ea
+   JOIN editing_quiz_questions eq ON eq.id = ea.question_id
+   JOIN editing_quiz e ON e.id = ea.quiz_id
+   WHERE ea.user_id = $1 AND ea.session_id = $2`, // ✅ use session_id here
+      [userId, sessionId]
+    );
+
+
+
+    // ✅ Combine both
+    const combinedAnswers = [
+      ...normalRes.rows.map((r) => ({ type: 'normal', ...r })),
+      ...editableRes.rows.map((r) => ({ type: 'editable', ...r })),
+    ];
+
+    res.json({
+      ok: true,
+      session,
+      totalAnswers: combinedAnswers.length,
+      answers: combinedAnswers,
+    });
   } catch (err) {
     console.error(err);
     res.status(500).json({ ok: false, message: 'Server error' });
