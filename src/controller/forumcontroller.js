@@ -671,6 +671,50 @@ export const createPost = async (req, res) => {
   }
 };
 
+export const createNotes = async (req, res) => {
+  try {
+    const { grade_level, content, subject_tag, type_of_upload, author_type, forum_title, topic_id } = req.body;
+    const authorId = req.userId;
+
+    let postRes;
+    // Force UTC timestamp
+    const created_at = new Date().toISOString();
+
+    if (author_type === "user") {
+      postRes = await pool.query(
+        `INSERT INTO forum_posts (user_id, grade_level, content, subject_tag, type_of_upload, forum_title, topic_id, created_at) 
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
+        [authorId, grade_level, content, subject_tag, type_of_upload, forum_title, topic_id, created_at]
+      );
+    } else if (author_type === "admin") {
+      postRes = await pool.query(
+        `INSERT INTO forum_posts (admin_id, grade_level, content, subject_tag, type_of_upload, forum_title, topic_id, created_at) 
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
+        [authorId, grade_level, content, subject_tag, type_of_upload, forum_title, topic_id, created_at]
+      );
+    } else {
+      return res.status(400).json({ ok: false, message: "Invalid author_type" });
+    }
+
+    const post = postRes.rows[0];
+
+    if (req.files && req.files.length) {
+      for (const f of req.files) {
+        const url = await uploadBufferToVercel(f.buffer, f.originalname);
+        await pool.query(
+          `INSERT INTO forum_files (post_id, url, filename) VALUES ($1, $2, $3)`,
+          [post.id, url, f.originalname]
+        );
+      }
+    }
+
+    res.json({ ok: true, post });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ ok: false, message: "Server error" });
+  }
+};
+
 
 export const editPost = async (req, res) => {
   try {
@@ -1051,15 +1095,15 @@ export const deleteComment = async (req, res) => {
     console.log("data_type:", data_type);
 
     if (!commentId || !userId) {
-      return res.status(400).json({ 
-        success: false, 
-        message: "commentId and userId are required" 
+      return res.status(400).json({
+        success: false,
+        message: "commentId and userId are required"
       });
     }
 
     // Determine which table to use based on data_type
     const tableName = data_type === "poll" ? "poll_comments" : "forum_comments";
-    
+
     console.log("Deleting from table:", tableName);
 
     // Check if comment exists and belongs to user
@@ -1068,34 +1112,34 @@ export const deleteComment = async (req, res) => {
     console.log("topicCheck:", topicCheck.rows[0]);
 
     if (topicCheck.rowCount === 0) {
-      return res.status(404).json({ 
-        success: false, 
-        message: "Comment not found or you don't have permission to delete it" 
+      return res.status(404).json({
+        success: false,
+        message: "Comment not found or you don't have permission to delete it"
       });
     }
 
     // Delete from the same table
     const deleteQuery = `DELETE FROM ${tableName} WHERE id=$1 AND user_id=$2`;
     const { rowCount } = await pool.query(deleteQuery, [commentId, userId]);
-    
+
     console.log("Deleted rows:", rowCount);
 
     if (rowCount === 0) {
-      return res.status(403).json({ 
-        success: false, 
-        message: "Not authorized or comment not found" 
+      return res.status(403).json({
+        success: false,
+        message: "Not authorized or comment not found"
       });
     }
 
-    return res.status(200).json({ 
-      success: true, 
-      message: "Comment deleted successfully" 
+    return res.status(200).json({
+      success: true,
+      message: "Comment deleted successfully"
     });
   } catch (error) {
     console.error("❌ deleteComment error:", error);
-    return res.status(500).json({ 
-      success: false, 
-      message: "Internal server error" 
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error"
     });
   }
 };
@@ -1515,6 +1559,11 @@ export const saveForumOrPoll = async (req, res) => {
 export const getForumAndPollFeed = async (req, res) => {
   try {
     const userId = req.userId;
+
+    // ✅ grade_id comes from req.body (static)
+    const { grade_id } = req.body;
+
+    // ✅ other filters from req.query
     const { subject, search, sortBy } = req.query;
 
     // =======================
@@ -1529,6 +1578,7 @@ export const getForumAndPollFeed = async (req, res) => {
         p.type_of_upload,
         p.created_at AT TIME ZONE 'UTC' AS created_at,
         p.forum_title AS forum_title,
+        t.topic AS topic,  
 
         COALESCE(
           JSON_AGG(
@@ -1555,52 +1605,46 @@ export const getForumAndPollFeed = async (req, res) => {
           '[]'
         ) AS comments,
 
-        COALESCE(u.id, a.id) AS author_id,
-        COALESCE(u.name, a.name) AS author_name,
-        COALESCE(u.profile_photo_url, a.profile_photo_url) AS profile_photo_url,
+        COALESCE(u.id, a.id, sa.id) AS author_id,
+        COALESCE(u.name, a.name, sa.name) AS author_name,
+        COALESCE(u.profile_photo_url, a.profile_photo_url, sa.profile_photo_url) AS profile_photo_url,
         u.school_name,
         u.grade_level AS user_grade_level,
-        COALESCE(u.created_at, a.created_at) AT TIME ZONE 'UTC' AS author_created_at,
+        COALESCE(u.created_at, a.created_at, sa.created_at) AT TIME ZONE 'UTC' AS author_created_at,
         CASE 
           WHEN u.id IS NOT NULL THEN 'user'
           WHEN a.id IS NOT NULL THEN 'admin'
+          WHEN sa.id IS NOT NULL THEN 'superadmin'
         END AS author_type,
 
         COALESCE(l.like_count, 0) AS like_count,
         COALESCE(c.comment_count, 0) AS comment_count,
         CASE WHEN ul.user_id IS NOT NULL THEN true ELSE false END AS is_liked_by_user,
         CASE WHEN sf.user_id IS NOT NULL THEN true ELSE false END AS is_forum_saved,
-
         COALESCE(v.view_count, 0) AS view_count
 
       FROM forum_posts p
       LEFT JOIN users u ON u.id = p.user_id
       LEFT JOIN admins a ON a.id = p.admin_id
+      LEFT JOIN superadmin sa ON sa.id = p.superadmin_id
       LEFT JOIN forum_files ff ON ff.post_id = p.id
       LEFT JOIN forum_comments fc ON fc.post_id = p.id
       LEFT JOIN users cu ON cu.id = fc.user_id
-
       LEFT JOIN (
         SELECT post_id, COUNT(*) AS like_count
         FROM forum_likes
         GROUP BY post_id
       ) l ON l.post_id = p.id
-
       LEFT JOIN (
         SELECT post_id, COUNT(*) AS comment_count
         FROM forum_comments
         GROUP BY post_id
       ) c ON c.post_id = p.id
-
-      LEFT JOIN forum_likes ul 
-        ON ul.post_id = p.id AND ul.user_id = $1
-
+      LEFT JOIN forum_likes ul ON ul.post_id = p.id AND ul.user_id = $1
       LEFT JOIN subjects s ON s.id = p.subject_tag
       LEFT JOIN grades g ON g.id = p.grade_level
-
-      LEFT JOIN user_saved_forums sf 
-        ON sf.forum_post_id = p.id AND sf.user_id = $1
-
+      LEFT JOIN topics t ON t.id = p.topic_id   
+      LEFT JOIN user_saved_forums sf ON sf.forum_post_id = p.id AND sf.user_id = $1
       LEFT JOIN (
         SELECT forum_post_id, COUNT(*) AS view_count
         FROM forum_views
@@ -1619,6 +1663,10 @@ export const getForumAndPollFeed = async (req, res) => {
       params.push(`%${search}%`);
       conditions.push(`p.forum_title ILIKE $${params.length}`);
     }
+    if (grade_id) {
+      params.push(grade_id);
+      conditions.push(`p.grade_level = $${params.length}`);
+    }
 
     if (conditions.length > 0) {
       forumQuery += ` WHERE ${conditions.join(" AND ")}`;
@@ -1626,17 +1674,21 @@ export const getForumAndPollFeed = async (req, res) => {
 
     forumQuery += ` GROUP BY 
       p.id, s.subject, g.grade_level,
-      u.id, a.id, l.like_count, c.comment_count, ul.user_id, sf.user_id, v.view_count
+      u.id, a.id, sa.id, l.like_count, c.comment_count, ul.user_id, sf.user_id, v.view_count, t.topic
     `;
 
     const forumRes = await pool.query(forumQuery, params);
     const forums = forumRes.rows.map(f => ({
       ...f,
       data_type: "forum",
-      created_at: f.created_at ? new Date(f.created_at).toISOString() : new Date().toISOString(),
+      created_at: f.created_at
+        ? new Date(f.created_at).toISOString()
+        : new Date().toISOString(),
       comments: f.comments.map(c => ({
         ...c,
-        created_at: c.created_at ? new Date(c.created_at).toISOString() : null
+        created_at: c.created_at
+          ? new Date(c.created_at).toISOString()
+          : null
       }))
     }));
 
@@ -1695,7 +1747,6 @@ export const getForumAndPollFeed = async (req, res) => {
         FROM poll_views
         GROUP BY poll_id
       ) v ON v.poll_id = p.id
-
       LEFT JOIN poll_options po ON po.poll_id = p.id
       LEFT JOIN (
         SELECT 
@@ -1706,34 +1757,27 @@ export const getForumAndPollFeed = async (req, res) => {
         LEFT JOIN users u ON u.id = pv.user_id
         GROUP BY pv.option_id
       ) pvc ON pvc.option_id = po.id
-
       LEFT JOIN (
         SELECT pv.poll_id, pv.option_id, pv.user_id
         FROM poll_votes pv
         WHERE pv.user_id = $2
       ) uv ON uv.poll_id = p.id
-
       LEFT JOIN user_saved_polls usp
         ON usp.poll_id = p.id AND usp.user_id = $2
-
       LEFT JOIN (
         SELECT poll_id, COUNT(*) AS like_count
         FROM poll_likes
         GROUP BY poll_id
       ) l ON l.poll_id = p.id
-
       LEFT JOIN poll_likes ul 
         ON ul.poll_id = p.id AND ul.user_id = $2
-
       LEFT JOIN (
         SELECT poll_id, COUNT(*) AS comment_count
         FROM poll_comments
         GROUP BY poll_id
       ) c ON c.poll_id = p.id
-
       LEFT JOIN poll_comments pc ON pc.poll_id = p.id
       LEFT JOIN users cu ON cu.id = pc.user_id
-
       WHERE (p.expires_at IS NULL OR p.expires_at > $1)
     `;
 
@@ -1746,6 +1790,10 @@ export const getForumAndPollFeed = async (req, res) => {
       pollParams.push(`%${search}%`);
       pollQuery += ` AND p.question ILIKE $${pollParams.length}`;
     }
+    if (grade_id) {
+      pollParams.push(grade_id);
+      pollQuery += ` AND p.grade_level = $${pollParams.length}`;
+    }
 
     pollQuery += `
       GROUP BY p.id, v.view_count, uv.user_id, uv.option_id, usp.user_id, l.like_count, c.comment_count, ul.user_id
@@ -1757,11 +1805,17 @@ export const getForumAndPollFeed = async (req, res) => {
       data_type: "poll",
       has_voted: p.has_voted || false,
       user_selected_option: p.user_selected_option || null,
-      created_at: p.created_at ? new Date(p.created_at).toISOString() : new Date().toISOString(),
-      expires_at: p.expires_at ? new Date(p.expires_at).toISOString() : null,
+      created_at: p.created_at
+        ? new Date(p.created_at).toISOString()
+        : new Date().toISOString(),
+      expires_at: p.expires_at
+        ? new Date(p.expires_at).toISOString()
+        : null,
       comments: p.comments.map(c => ({
         ...c,
-        created_at: c.created_at ? new Date(c.created_at).toISOString() : null
+        created_at: c.created_at
+          ? new Date(c.created_at).toISOString()
+          : null
       }))
     }));
 
@@ -1786,7 +1840,6 @@ export const getForumAndPollFeed = async (req, res) => {
     return res.status(500).json({ ok: false, message: "Server error" });
   }
 };
-
 
 
 // add views count.......
@@ -1866,12 +1919,13 @@ export const getNotesfromTopics = async (req, res) => {
 
     // ✅ Fetch notes for the topic with optional search
     let notesQuery = `
-      SELECT ff.*
-      FROM forum_posts fp
-      JOIN forum_files ff ON ff.post_id = fp.id
-      WHERE fp.topic_id = $1
-        AND fp.type_of_upload = 'Notes'
-        AND ff.url IS NOT NULL
+SELECT ff.*
+FROM forum_posts fp
+JOIN forum_files ff ON ff.post_id = fp.id
+WHERE fp.topic_id = $1
+  AND fp.type_of_upload = 'Notes'
+  AND ff.url IS NOT NULL
+ORDER BY ff.created_at DESC;
     `;
     const values = [topic_id];
 

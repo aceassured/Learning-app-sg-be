@@ -26,7 +26,7 @@ const router = express.Router();
 
 router.get('/', auth, listPosts);
 router.post('/savedforumorpolls', auth, savedForumAndPolls);
-router.get('/forumpolls', auth, getForumAndPollFeed);
+router.post('/forumpolls', auth, getForumAndPollFeed);
 router.post('/forumnotes',  getonlyForumNotes);
 router.post('/getnotesfile',  getNotesfromTopics);
 router.post('/accessnote', auth, trackNoteAccess);
