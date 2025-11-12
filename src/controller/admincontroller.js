@@ -1,32 +1,120 @@
 import pool from "../../database.js";
 import { uploadBufferToVercel } from "../utils/vercel-blob.js";
-
+import sharp from "sharp";
 
 // create poll...........
 
 
+// export const admincreatePoll = async (req, res) => {
+//   try {
+//     const { question, allow_multiple = false, expires_at = null, options, subject_id, grade_level } = req.body;
+//     const adminId = req.userId;; // assuming req.user is set after auth & role check
+
+//     if (!question || !options || options.length < 2 || !subject_id || !grade_level) {
+//       return res.status(400).json({ message: "Question and at least 2 options required" });
+//     }
+
+//     // Insert poll
+//     const pollResult = await pool.query(
+//       `INSERT INTO polls (question, allow_multiple, expires_at, subject_id, grade_level ) VALUES ($1,$2,$3,$4,$5) RETURNING *`,
+//       [question, allow_multiple, expires_at, subject_id, grade_level]
+//     );
+
+//     const poll = pollResult.rows[0];
+
+//     // Insert poll options
+//     const optionValues = options.map((opt) => `('${poll.id}', '${opt}')`).join(",");
+//     await pool.query(`INSERT INTO poll_options (poll_id, option_text) VALUES ${optionValues}`);
+
+//     // const mergeResult = [poll,]
+
+//     return res.status(201).json({ message: "Poll created successfully", poll });
+//   } catch (error) {
+//     console.error("admincreatePoll error:", error);
+//     return res.status(500).json({ message: "Internal server error" });
+//   }
+// };
+
+
+// Admin create poll
 export const admincreatePoll = async (req, res) => {
   try {
-    const { question, allow_multiple = false, expires_at = null, options, subject_id, grade_level } = req.body;
-    const adminId = req.userId;; // assuming req.user is set after auth & role check
+    const {
+      question,
+      allow_multiple = false,
+      expires_at = null,
+      subject_id,
+      grade_level,
+    } = req.body;
+    const adminId = req.userId;
 
-    if (!question || !options || options.length < 2 || !subject_id || !grade_level) {
-      return res.status(400).json({ message: "Question and at least 2 options required" });
+    let { options } = req.body;
+    console.log("options", options);
+
+    // Parse options if sent as a JSON string
+    if (typeof options === "string") {
+      try {
+        options = JSON.parse(options);
+      } catch {
+        return res.status(400).json({
+          message: "Invalid options format. Must be a JSON array.",
+        });
+      }
     }
 
-    // Insert poll
+    if ((!question && !req.file) || !subject_id || !grade_level) {
+      return res.status(400).json({
+        message:
+          "Either question text or image, subject_id, and grade_level are required.",
+      });
+    }
+
+    if (!Array.isArray(options)) {
+      return res.status(400).json({ message: "Options must be an array." });
+    }
+
+    if (options.length < 2) {
+      return res
+        .status(400)
+        .json({ message: "At least 2 options are required." });
+    }
+
+    let pollImageUrl = null;
+
+    if (req.file) {
+      // ✅ Step 1: Optimize the image
+      const optimizedBuffer = await sharp(req.file.buffer)
+        .resize({
+          width: 1200, // max width
+          withoutEnlargement: true,
+        })
+        .toFormat("jpeg", { quality: 85 }) // or .webp({ quality: 80 })
+        .toBuffer();
+
+      // ✅ Step 2: Upload the optimized buffer to Vercel Blob
+      pollImageUrl = await uploadBufferToVercel(
+        optimizedBuffer,
+        req.file.originalname
+      );
+    }
+
+    // ✅ Step 3: Store in PostgreSQL
     const pollResult = await pool.query(
-      `INSERT INTO polls (question, allow_multiple, expires_at, subject_id, grade_level ) VALUES ($1,$2,$3,$4,$5) RETURNING *`,
-      [question, allow_multiple, expires_at, subject_id, grade_level]
+      `INSERT INTO polls (question, allow_multiple, expires_at, subject_id, grade_level, poll_image_url)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       RETURNING *`,
+      [question || null, allow_multiple, expires_at, subject_id, grade_level, pollImageUrl]
     );
 
     const poll = pollResult.rows[0];
 
-    // Insert poll options
-    const optionValues = options.map((opt) => `('${poll.id}', '${opt}')`).join(",");
-    await pool.query(`INSERT INTO poll_options (poll_id, option_text) VALUES ${optionValues}`);
+    const optionValues = options
+      .map((opt) => `(${poll.id}, '${opt.replace(/'/g, "''")}')`)
+      .join(",");
 
-    // const mergeResult = [poll,]
+    await pool.query(
+      `INSERT INTO poll_options (poll_id, option_text) VALUES ${optionValues}`
+    );
 
     return res.status(201).json({ message: "Poll created successfully", poll });
   } catch (error) {
@@ -36,23 +124,97 @@ export const admincreatePoll = async (req, res) => {
 };
 
 
+
 // edit poll...
+
+// export const adminEditPoll = async (req, res) => {
+//   try {
+//     const { poll_id, question, allow_multiple, expires_at, options, subject_id, grade_level } = req.body;
+
+//     if (!poll_id) {
+//       return res.status(400).json({ message: "Poll ID is required" });
+//     }
+
+//     // Check if poll exists
+//     const pollCheck = await pool.query(`SELECT * FROM polls WHERE id = $1`, [poll_id]);
+//     if (pollCheck.rows.length === 0) {
+//       return res.status(404).json({ message: "Poll not found" });
+//     }
+
+//     // Update poll table
+//     const updatedPoll = await pool.query(
+//       `UPDATE polls
+//        SET question = $1,
+//            allow_multiple = $2,
+//            expires_at = $3,
+//            subject_id = $4,
+//            grade_level = $5,
+//            updated_at = NOW()
+//        WHERE id = $6
+//        RETURNING *`,
+//       [question, allow_multiple, expires_at, subject_id, grade_level, poll_id]
+//     );
+
+//     // Update poll options
+//     if (options && Array.isArray(options) && options.length >= 2) {
+//       // Delete existing options
+//       await pool.query(`DELETE FROM poll_options WHERE poll_id = $1`, [poll_id]);
+
+//       // Insert new options
+//       const optionValues = options.map((opt) => `('${poll_id}', '${opt}')`).join(",");
+//       await pool.query(`INSERT INTO poll_options (poll_id, option_text) VALUES ${optionValues}`);
+//     }
+
+//     return res.status(200).json({ message: "Poll updated successfully", poll: updatedPoll.rows[0] });
+
+//   } catch (error) {
+//     console.error("adminEditPoll error:", error);
+//     return res.status(500).json({ message: "Internal server error" });
+//   }
+// };
 
 export const adminEditPoll = async (req, res) => {
   try {
-    const { poll_id, question, allow_multiple, expires_at, options, subject_id, grade_level } = req.body;
+    const {
+      poll_id,
+      question,
+      allow_multiple,
+      expires_at,
+      options,
+      subject_id,
+      grade_level,
+    } = req.body;
 
     if (!poll_id) {
       return res.status(400).json({ message: "Poll ID is required" });
     }
 
-    // Check if poll exists
+    // 🧠 Check if poll exists
     const pollCheck = await pool.query(`SELECT * FROM polls WHERE id = $1`, [poll_id]);
     if (pollCheck.rows.length === 0) {
       return res.status(404).json({ message: "Poll not found" });
     }
 
-    // Update poll table
+    const existingPoll = pollCheck.rows[0];
+    let pollImageUrl = existingPoll.poll_image_url;
+
+    // 🖼️ If a new image file is uploaded → optimize & re-upload
+    if (req.file) {
+      const optimizedBuffer = await sharp(req.file.buffer)
+        .resize({
+          width: 1200,
+          withoutEnlargement: true,
+        })
+        .toFormat("jpeg", { quality: 85 }) // or .webp({ quality: 80 })
+        .toBuffer();
+
+      pollImageUrl = await uploadBufferToVercel(
+        optimizedBuffer,
+        req.file.originalname
+      );
+    }
+
+    // 🧩 Update poll main details
     const updatedPoll = await pool.query(
       `UPDATE polls
        SET question = $1,
@@ -60,31 +222,63 @@ export const adminEditPoll = async (req, res) => {
            expires_at = $3,
            subject_id = $4,
            grade_level = $5,
+           poll_image_url = $6,
            updated_at = NOW()
-       WHERE id = $6
+       WHERE id = $7
        RETURNING *`,
-      [question, allow_multiple, expires_at, subject_id, grade_level, poll_id]
+      [
+        question || null,
+        allow_multiple,
+        expires_at,
+        subject_id,
+        grade_level,
+        pollImageUrl,
+        poll_id,
+      ]
     );
 
-    // Update poll options
-    if (options && Array.isArray(options) && options.length >= 2) {
-      // Delete existing options
+    // 🗳️ Update poll options (if provided)
+    if (options) {
+      let parsedOptions = options;
+
+      if (typeof options === "string") {
+        try {
+          parsedOptions = JSON.parse(options);
+        } catch {
+          return res.status(400).json({
+            message: "Invalid options format. Must be a JSON array.",
+          });
+        }
+      }
+
+      if (!Array.isArray(parsedOptions) || parsedOptions.length < 2) {
+        return res
+          .status(400)
+          .json({ message: "At least 2 options are required." });
+      }
+
+      // Delete old options
       await pool.query(`DELETE FROM poll_options WHERE poll_id = $1`, [poll_id]);
 
-      // Insert new options
-      const optionValues = options.map((opt) => `('${poll_id}', '${opt}')`).join(",");
-      await pool.query(`INSERT INTO poll_options (poll_id, option_text) VALUES ${optionValues}`);
+      // Insert new options safely
+      const optionValues = parsedOptions
+        .map((opt) => `(${poll_id}, '${opt.replace(/'/g, "''")}')`)
+        .join(",");
+
+      await pool.query(
+        `INSERT INTO poll_options (poll_id, option_text) VALUES ${optionValues}`
+      );
     }
 
-    return res.status(200).json({ message: "Poll updated successfully", poll: updatedPoll.rows[0] });
-
+    return res.status(200).json({
+      message: "Poll updated successfully",
+      poll: updatedPoll.rows[0],
+    });
   } catch (error) {
     console.error("adminEditPoll error:", error);
     return res.status(500).json({ message: "Internal server error" });
   }
 };
-
-
 
 // get all active poll....
 

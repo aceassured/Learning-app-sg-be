@@ -390,8 +390,8 @@ export const startQuiz = async (req, res) => {
 
     const desiredEditableCount = Math.floor(qpd / 2);
 
-const editableQuizRes = await pool.query(
-  `
+    const editableQuizRes = await pool.query(
+      `
   WITH answered AS (
     SELECT question_id
     FROM editing_quiz_answers
@@ -423,8 +423,8 @@ const editableQuizRes = await pool.query(
   ORDER BY random()
   LIMIT $2
   `,
-  [userId, desiredEditableCount]
-);
+      [userId, desiredEditableCount]
+    );
 
     // ==========================================================
     // 🎯 5️⃣ Combine & Format Data
@@ -748,12 +748,7 @@ export const submitAnswers = async (req, res) => {
         await pool.query(
           `INSERT INTO editing_quiz_answers 
    (user_id, quiz_id, question_id, user_answer, is_correct, session_id, created_at)
-   VALUES ($1, $2, $3, $4, $5, $6, NOW())
-   ON CONFLICT (user_id, quiz_id, question_id)
-   DO UPDATE SET 
-      user_answer = EXCLUDED.user_answer,
-      is_correct = EXCLUDED.is_correct,
-      created_at = NOW()`,
+   VALUES ($1, $2, $3, $4, $5, $6, NOW())`,
           [
             userId,
             ans.quiz_id,
@@ -1133,7 +1128,7 @@ export const startMiniQuiz = async (req, res) => {
     // Helpers
     const MINI_TOTAL = 5;
     const desiredEditable = 2; // default target split
-    const desiredNormal   = MINI_TOTAL - desiredEditable;
+    const desiredNormal = MINI_TOTAL - desiredEditable;
 
     // ===== 2) Fetch EDITABLE passages (unanswered targets only)
     // Build dynamic SQL for editable with filters and (optionally) exclusions
@@ -1420,7 +1415,7 @@ export const startRevisionQuiz = async (req, res) => {
 
     const TOTAL = 30;
     const desiredEditable = 15;
-    const desiredNormal   = TOTAL - desiredEditable;
+    const desiredNormal = TOTAL - desiredEditable;
 
     // ===== helpers
 
@@ -1552,7 +1547,7 @@ export const startRevisionQuiz = async (req, res) => {
 
     // ===== 2) First pass: aim for 15 editable + 15 normal
     const editable1 = await getEditableAnswered({ limit: desiredEditable });
-    const normal1   = await getNormalAnswered(desiredNormal);
+    const normal1 = await getNormalAnswered(desiredNormal);
 
     let combined = [...editable1, ...normal1];
 

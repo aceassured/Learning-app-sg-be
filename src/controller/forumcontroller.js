@@ -1702,6 +1702,7 @@ export const getForumAndPollFeed = async (req, res) => {
         p.created_at AT TIME ZONE 'UTC' AS created_at,
         p.expires_at AT TIME ZONE 'UTC' AS expires_at,
         p.subject_id,
+        p.poll_image_url,
         p.grade_level,
 
         COALESCE(v.view_count, 0) AS view_count,
@@ -1778,7 +1779,10 @@ export const getForumAndPollFeed = async (req, res) => {
       ) c ON c.poll_id = p.id
       LEFT JOIN poll_comments pc ON pc.poll_id = p.id
       LEFT JOIN users cu ON cu.id = pc.user_id
-      WHERE (p.expires_at IS NULL OR p.expires_at > $1)
+WHERE 
+  p.active_status = true
+  AND (p.expires_at IS NULL OR p.expires_at > $1)
+
     `;
 
     const pollParams = [new Date().toISOString(), userId];

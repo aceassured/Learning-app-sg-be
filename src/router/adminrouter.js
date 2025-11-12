@@ -12,8 +12,8 @@ const router = express.Router()
 
 
 
-router.post( "/admincreatepoll", auth ,admincreatePoll )
-router.put( "/admineditpoll" ,adminEditPoll )
+router.post( "/admincreatepoll", auth ,upload.single("poll_image"), admincreatePoll )
+router.put( "/admineditpoll" ,upload.single("poll_image"),adminEditPoll )
 router.get( "/admingetallpoll", getAllpoll )
 router.get( "/alltopics", getAllTopic )
 router.post( "/adminannouncementpoll", adminAnnouncementpoll )
