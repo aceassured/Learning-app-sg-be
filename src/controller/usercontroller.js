@@ -2227,26 +2227,73 @@ export const deleteAdminUser = async (req, res) => {
 export const getAllUsers = async (req, res) => {
   const client = await pool.connect();
   try {
-    // Fetch admins
-    const { rows: adminRows } = await client.query(
-      `SELECT id, name, email, 'admin' AS role, created_at, profile_photo_url
-       FROM admins 
-       ORDER BY id DESC`
-    );
+    const search = req.query.search?.trim() || "";
+    const role = req.query.role?.toLowerCase() || "all"; // 'admin', 'user', or 'all'
+    const page = Math.max(parseInt(req.query.page) || 1, 1);
+    const limit = Math.max(parseInt(req.query.limit) || 10, 1);
+    const offset = (page - 1) * limit;
 
-    // Fetch users
-    const { rows: userRows } = await client.query(
-      `SELECT id, name, email, 'user' AS role, created_at , profile_photo_url
-       FROM users 
-       ORDER BY id DESC`
-    );
+    // Dynamic search condition
+    const searchCondition = search
+      ? `WHERE LOWER(name) LIKE LOWER($1) OR LOWER(email) LIKE LOWER($1)`
+      : "";
 
-    // Merge results
-    const allUsers = [...adminRows, ...userRows];
+    const params = search ? [`%${search}%`] : [];
+
+    // Build base query depending on role
+    let baseQuery = "";
+    if (role === "admin") {
+      baseQuery = `
+        SELECT id, name, email, 'admin' AS role, created_at, profile_photo_url, active_status, is_active_request
+        FROM admins
+        ${searchCondition}
+      `;
+    } else if (role === "user") {
+      baseQuery = `
+        SELECT id, name, email, 'user' AS role, created_at, profile_photo_url, active_status, is_active_request
+        FROM users
+        ${searchCondition}
+      `;
+    } else {
+      // all users (admin + user)
+      baseQuery = `
+        SELECT id, name, email, 'admin' AS role, created_at, profile_photo_url, active_status, is_active_request
+        FROM admins
+        ${searchCondition}
+        UNION ALL
+        SELECT id, name, email, 'user' AS role, created_at, profile_photo_url, active_status, is_active_request
+        FROM users
+        ${searchCondition ? "WHERE LOWER(name) LIKE LOWER($1) OR LOWER(email) LIKE LOWER($1)" : ""}
+      `;
+    }
+
+    // Count total users
+    const countQuery = `SELECT COUNT(*) AS total FROM (${baseQuery}) AS combined`;
+    const { rows: countRows } = await client.query(countQuery, params);
+    const total = parseInt(countRows[0]?.total || 0, 10);
+
+    // Paginated query
+    const limitIndex = search ? 2 : 1;
+    const offsetIndex = search ? 3 : 2;
+
+    const dataQuery = `
+      ${baseQuery}
+      ORDER BY created_at DESC
+      LIMIT $${limitIndex} OFFSET $${offsetIndex}
+    `;
+
+    const queryParams = search ? [params[0], limit, offset] : [limit, offset];
+    const { rows: users } = await client.query(dataQuery, queryParams);
 
     return res.status(200).json({
       success: true,
-      data: allUsers,
+      data: users,
+      pagination: {
+        total,
+        totalPages: Math.ceil(total / limit),
+        currentPage: page,
+        perPage: limit,
+      },
     });
   } catch (error) {
     console.error("Get users error:", error);
@@ -2258,6 +2305,8 @@ export const getAllUsers = async (req, res) => {
     client.release();
   }
 };
+
+
 
 
 export const getAllSubjectnew = async (req, res) => {
@@ -2300,72 +2349,164 @@ export const getAllSubjectnew = async (req, res) => {
 
 export const getAllSubject = async (req, res) => {
   const client = await pool.connect();
-
   try {
-    const { rows: allSubjects } = await client.query(
-      `SELECT * FROM subjects WHERE active_status != false ORDER BY subject ASC `
-    );
+    const search = req.query.search || "";
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const offset = (page - 1) * limit;
+
+    let whereClause = "WHERE active_status != false";
+    let values = [];
+    let countValues = [];
+
+    if (search) {
+      whereClause += " AND LOWER(subject) LIKE LOWER($1)";
+      values = [`%${search}%`, limit, offset];
+      countValues = [`%${search}%`];
+    } else {
+      values = [limit, offset];
+    }
+
+    const countQuery = `SELECT COUNT(*) AS total FROM subjects ${whereClause}`;
+    const dataQuery = `
+      SELECT * FROM subjects
+      ${whereClause}
+      ORDER BY subject ASC
+      LIMIT $${search ? 2 : 1} OFFSET $${search ? 3 : 2}
+    `;
+
+    const { rows: countResult } = await client.query(countQuery, countValues);
+    const total = parseInt(countResult[0].total);
+
+    const { rows: allSubjects } = await client.query(dataQuery, values);
 
     return res.status(200).json({
       success: true,
       data: allSubjects,
+      pagination: {
+        total,
+        page,
+        limit,
+        totalPages: Math.ceil(total / limit),
+      },
     });
   } catch (error) {
     console.error("Get subjects error:", error);
-    return res.status(500).json({
-      success: false,
-      message: "Internal server error",
-    });
+    res.status(500).json({ success: false, message: "Internal server error" });
   } finally {
     client.release();
   }
 };
+
+
+
 export const getAllTopic = async (req, res) => {
   const client = await pool.connect();
-
   try {
-    const { rows: allSubjects } = await client.query(
-      `SELECT * FROM topics WHERE active_status != false ORDER BY topic ASC`
-    );
+    const search = req.query.search || "";
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const offset = (page - 1) * limit;
+
+    let whereClause = "WHERE active_status != false";
+    let values = [];
+    let countValues = [];
+
+    if (search) {
+      whereClause += " AND LOWER(topic) LIKE LOWER($1)";
+      values = [`%${search}%`, limit, offset];
+      countValues = [`%${search}%`];
+    } else {
+      values = [limit, offset];
+    }
+
+    const countQuery = `SELECT COUNT(*) AS total FROM topics ${whereClause}`;
+    const dataQuery = `
+      SELECT * FROM topics
+      ${whereClause}
+      ORDER BY topic ASC
+      LIMIT $${search ? 2 : 1} OFFSET $${search ? 3 : 2}
+    `;
+
+    const { rows: countResult } = await client.query(countQuery, countValues);
+    const total = parseInt(countResult[0].total);
+
+    const { rows: allTopics } = await client.query(dataQuery, values);
 
     return res.status(200).json({
       success: true,
-      data: allSubjects,
+      data: allTopics,
+      pagination: {
+        total,
+        page,
+        limit,
+        totalPages: Math.ceil(total / limit),
+      },
     });
   } catch (error) {
     console.error("Get topics error:", error);
-    return res.status(500).json({
-      success: false,
-      message: "Internal server error",
-    });
+    res.status(500).json({ success: false, message: "Internal server error" });
   } finally {
     client.release();
   }
 };
+
+
 
 export const getAllGrade = async (req, res) => {
   const client = await pool.connect();
   try {
-    const { rows: allGrades } = await client.query(
-      `SELECT *
-       FROM grades WHERE active_status != false
-       ORDER BY grade_level ASC`
-    );
+    const search = req.query.search || "";
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const offset = (page - 1) * limit;
+
+    let whereClause = "WHERE active_status != false";
+    let values = [];
+    let countValues = [];
+
+    if (search) {
+      whereClause +=
+        " AND (CAST(grade_level AS TEXT) ILIKE $1 OR LOWER(grade_level) LIKE LOWER($1))";
+      values = [`%${search}%`, limit, offset];
+      countValues = [`%${search}%`];
+    } else {
+      values = [limit, offset];
+    }
+
+    const countQuery = `SELECT COUNT(*) AS total FROM grades ${whereClause}`;
+    const dataQuery = `
+      SELECT * FROM grades
+      ${whereClause}
+      ORDER BY grade_level ASC
+      LIMIT $${search ? 2 : 1} OFFSET $${search ? 3 : 2}
+    `;
+
+    const { rows: countResult } = await client.query(countQuery, countValues);
+    const total = parseInt(countResult[0].total);
+
+    const { rows: allGrades } = await client.query(dataQuery, values);
 
     return res.status(200).json({
       success: true,
       data: allGrades,
+      pagination: {
+        total,
+        page,
+        limit,
+        totalPages: Math.ceil(total / limit),
+      },
     });
   } catch (error) {
     console.error("Get grades error:", error);
-    return res.status(500).json({
-      success: false,
-      message: "Internal server error",
-    });
+    res.status(500).json({ success: false, message: "Internal server error" });
   } finally {
     client.release();
   }
 };
+
+
+
 
 
 // admin edit...
@@ -2714,7 +2855,7 @@ export const newQuestionsadd = async (req, res) => {
       options,
       correct_option_id,
       difficulty_level,
-      grade_level,   // grade_id
+      grade_id,   // grade_id
       category,      // subject_id
       answer_explanation,
     } = req.body;
@@ -2734,7 +2875,7 @@ export const newQuestionsadd = async (req, res) => {
       !correct_option_id ||
       !category ||
       !topics ||
-      !grade_level
+      !grade_id
     ) {
       return res.status(400).json({ message: "Invalid request body" });
     }
@@ -2762,12 +2903,12 @@ export const newQuestionsadd = async (req, res) => {
     // ✅ Fetch grade level name
     const gradeRes = await pool.query(
       "SELECT grade_level FROM grades WHERE id=$1",
-      [grade_level]
+      [grade_id]
     );
     if (gradeRes.rowCount === 0) {
       return res.status(400).json({ message: "Invalid grade id" });
     }
-    const gradeLevelName = gradeRes.rows[0].grade_level;
+    // const gradeLevelName = gradeRes.rows[0].grade_level;
 
     // ✅ Handle file uploads
     let questionFileUrl = null;
@@ -2792,7 +2933,7 @@ export const newQuestionsadd = async (req, res) => {
     // ✅ Insert into questions
     const query = `
       INSERT INTO questions 
-      (subject, question_text, options, correct_option_id, created_at, difficulty_level, grade_level, question_type, question_url, topic_id, answer_explanation, answer_file_url, topics) 
+      (subject, question_text, options, correct_option_id, created_at, difficulty_level, grade_id, question_type, question_url, topic_id, answer_explanation, answer_file_url, topics) 
       VALUES ($1, $2, $3, $4, NOW(), $5, $6, $7, $8, $9, $10, $11, $12)
       RETURNING *;
     `;
@@ -2803,7 +2944,7 @@ export const newQuestionsadd = async (req, res) => {
       JSON.stringify(parsedOptions),
       correct_option_id,
       difficulty_level || "Easy",
-      gradeLevelName,                // grade_level (string from grades table)
+      grade_id,                // grade_level (string from grades table)
       question_type,
       questionFileUrl,               // question file
       topics,                        // topic_id (FK)
@@ -2842,6 +2983,7 @@ export const getAllquestions = async (req, res) => {
     return res.status(500).json({ message: "Internal Server Error" });
   }
 };
+
 
 export const getAllquestionsSearch = async (req, res) => {
   try {

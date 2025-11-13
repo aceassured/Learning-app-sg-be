@@ -285,20 +285,73 @@ export const adminEditPoll = async (req, res) => {
 export const getAllpoll = async (req, res) => {
   try {
     const now = new Date();
+    let { page = 1, limit = 10, search = "", subjectId, gradeId } = req.query;
 
-    // get all active polls
-    const polls = await pool.query(
-      `SELECT * FROM polls 
-   WHERE (expires_at IS NULL OR expires_at > $1)
-     AND active_status = true
-   ORDER BY created_at DESC`,
-      [now]
-    );
+    page = parseInt(page);
+    limit = parseInt(limit);
+    const offset = (page - 1) * limit;
 
+    // Base query
+    let baseQuery = `
+      SELECT 
+        p.id,
+        p.is_poll_ended,
+        p.question,
+        p.allow_multiple,
+        p.poll_image_url,
+        p.expires_at,
+        p.created_at,
+        p.active_status,
+        s.subject AS subject_name,
+        g.grade_level AS grade_name
+      FROM polls p
+      LEFT JOIN subjects s ON s.id = p.subject_id
+      LEFT JOIN grades g ON g.id = p.grade_level
+      WHERE (p.expires_at IS NULL OR p.expires_at > $1)
+        AND p.active_status = true
+    `;
 
+    const params = [now];
+    const conditions = [];
+
+    // ✅ Search by question text
+    if (search && search.trim() !== "") {
+      params.push(`%${search.toLowerCase()}%`);
+      conditions.push(`LOWER(p.question) LIKE $${params.length}`);
+    }
+
+    // ✅ Subject filter
+    if (subjectId) {
+      params.push(subjectId);
+      conditions.push(`p.subject_id = $${params.length}`);
+    }
+
+    // ✅ Grade filter
+    if (gradeId) {
+      params.push(gradeId);
+      conditions.push(`p.grade_level = $${params.length}`);
+    }
+
+    // Add conditions if any
+    if (conditions.length > 0) {
+      baseQuery += " AND " + conditions.join(" AND ");
+    }
+
+    // Count total for pagination
+    const countQuery = `SELECT COUNT(*) FROM (${baseQuery}) AS total`;
+    const countResult = await pool.query(countQuery, params);
+    const total = parseInt(countResult.rows[0].count);
+
+    // Add pagination + sorting
+    baseQuery += ` ORDER BY p.created_at DESC LIMIT $${params.length + 1} OFFSET $${params.length + 2}`;
+    params.push(limit, offset);
+
+    // Fetch paginated polls
+    const polls = await pool.query(baseQuery, params);
+
+    // ✅ Attach poll options + votes for each poll
     const pollsWithOptions = [];
     for (let poll of polls.rows) {
-      // fetch options + votes + user names
       const options = await pool.query(
         `SELECT 
            po.id, 
@@ -323,13 +376,21 @@ export const getAllpoll = async (req, res) => {
         ...poll,
         options: options.rows.map((o) => ({
           ...o,
-          vote_count: Number(o.vote_count), // convert from string to number
-          voters: o.voters, // array of {id, name}
+          vote_count: Number(o.vote_count),
+          voters: o.voters,
         })),
       });
     }
 
-    return res.json(pollsWithOptions);
+    // ✅ Final paginated response
+    return res.json({
+      ok: true,
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit),
+      polls: pollsWithOptions,
+    });
   } catch (error) {
     console.error("getAllpoll error:", error);
     return res.status(500).json({ message: "Internal server error" });
@@ -716,6 +777,121 @@ export const getAllEditQuizzes = async (req, res) => {
   }
 };
 
+// getAllEditQuizzes new............
+
+export const getAllEditQuizzesnew = async (req, res) => {
+  try {
+    let {
+      search = "",
+      subject_id,
+      topic_id,
+      grade_id,
+      page = 1,
+      limit = 10,
+    } = req.query;
+
+    // Convert pagination values
+    page = parseInt(page, 10);
+    limit = parseInt(limit, 10);
+    const offset = (page - 1) * limit;
+
+    // Dynamic WHERE conditions
+    const whereClauses = [];
+    const values = [];
+    let idx = 1;
+
+    if (subject_id) {
+      whereClauses.push(`eq.subject_id = $${idx++}`);
+      values.push(subject_id);
+    }
+
+    if (topic_id) {
+      whereClauses.push(`eq.topic_id = $${idx++}`);
+      values.push(topic_id);
+    }
+
+    if (grade_id) {
+      whereClauses.push(`eq.grade_id = $${idx++}`);
+      values.push(grade_id);
+    }
+
+    if (search) {
+      whereClauses.push(`
+        (
+          LOWER(eq.title) LIKE LOWER($${idx})
+          OR LOWER(eq.passage) LIKE LOWER($${idx})
+          OR LOWER(g.grade_level) LIKE LOWER($${idx})
+          OR LOWER(s.subject) LIKE LOWER($${idx})
+          OR LOWER(t.topic) LIKE LOWER($${idx})
+        )
+      `);
+      values.push(`%${search}%`);
+      idx++;
+    }
+
+    const whereQuery = whereClauses.length > 0 ? `WHERE ${whereClauses.join(" AND ")}` : "";
+
+    // Add placeholders for pagination
+    const limitPlaceholder = `$${idx++}`;
+    const offsetPlaceholder = `$${idx++}`;
+
+    // Main query (with pagination)
+    const query = `
+      SELECT 
+        eq.id,
+        eq.title,
+        eq.passage,
+        eq.grade_id,
+        g.grade_level AS grade_name,
+        eq.subject_id,
+        s.subject AS subject_name,
+        eq.topic_id,
+        t.topic AS topic_name,
+        eq.created_at
+      FROM editing_quiz eq
+      LEFT JOIN grades g ON eq.grade_id = g.id
+      LEFT JOIN subjects s ON eq.subject_id = s.id
+      LEFT JOIN topics t ON eq.topic_id = t.id
+      ${whereQuery}
+      GROUP BY eq.id, g.grade_level, s.subject, t.topic
+      ORDER BY eq.created_at DESC
+      LIMIT ${limitPlaceholder} OFFSET ${offsetPlaceholder};
+    `;
+    const mainValues = [...values, limit, offset];
+
+    // Count query (for pagination)
+    const countQuery = `
+      SELECT COUNT(DISTINCT eq.id) AS total
+      FROM editing_quiz eq
+      LEFT JOIN grades g ON eq.grade_id = g.id
+      LEFT JOIN subjects s ON eq.subject_id = s.id
+      LEFT JOIN topics t ON eq.topic_id = t.id
+      ${whereQuery};
+    `;
+
+    // Execute both queries in parallel
+    const [result, countResult] = await Promise.all([
+      pool.query(query, mainValues),
+      pool.query(countQuery, values),
+    ]);
+
+    const total = parseInt(countResult.rows[0].total, 10);
+    const totalPages = Math.ceil(total / limit);
+
+    res.status(200).json({
+      message: "Editable quizzes fetched successfully",
+      total,
+      totalPages,
+      currentPage: page,
+      perPage: limit,
+      quizzes: result.rows,
+    });
+  } catch (err) {
+    console.error("Error fetching editable quizzes:", err);
+    res.status(500).json({ error: "Server error" });
+  }
+};
+
 
 // update editable question.....
 
@@ -849,3 +1025,165 @@ export const getParticularEditableQuiz = async (req, res) => {
     res.status(500).json({ error: "Server error" });
   }
 };
+
+// admin update active inactive user.......
+
+export const adminUpdateUserStatus = async (req, res) => {
+  try {
+    const { id, user_type } = req.body;
+
+    if (!id || !user_type) {
+      return res.status(400).json({ message: "id and user_type are required" });
+    }
+
+    let tableName;
+    if (user_type === "user") {
+      tableName = "users";
+    } else if (user_type === "admin") {
+      tableName = "admins";
+    } else {
+      return res.status(400).json({ message: "Invalid user_type" });
+    }
+
+    // Get current active_status
+    const findQuery = `SELECT active_status FROM ${tableName} WHERE id = $1`;
+    const result = await pool.query(findQuery, [id]);
+
+    if (result.rowCount === 0) {
+      return res.status(404).json({ message: `${user_type} not found` });
+    }
+
+    const currentStatus = result.rows[0].active_status;
+    const newStatus = !currentStatus; // toggle true/false
+
+    // Update query
+    const updateQuery = `
+      UPDATE ${tableName}
+      SET active_status = $1
+      WHERE id = $2
+      RETURNING id, active_status, is_active_request;
+    `;
+    const updated = await pool.query(updateQuery, [newStatus, id]);
+
+    return res.status(200).json({
+      message: "Status updated successfully",
+      data: updated.rows[0],
+    });
+  } catch (error) {
+    console.error("Error updating user status:", error);
+    return res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+
+// get all questions..........
+
+
+export const getAllQuestionsnew = async (req, res) => {
+  try {
+    let {
+      subject_id,
+      topic_id,
+      grade_id,
+      search = "",
+      page = 1,
+      limit = 10,
+    } = req.query;
+
+    // Convert pagination inputs safely
+    page = Math.max(parseInt(page, 10) || 1, 1);
+    limit = Math.max(parseInt(limit, 10) || 10, 1);
+    const offset = (page - 1) * limit;
+
+    // Build dynamic filters
+    const whereClauses = [];
+    const values = [];
+    let idx = 1;
+
+    if (subject_id) {
+      whereClauses.push(`q.subject_id = $${idx++}`);
+      values.push(subject_id);
+    }
+
+    if (topic_id) {
+      whereClauses.push(`q.topic_id = $${idx++}`);
+      values.push(topic_id);
+    }
+
+    if (grade_id) {
+      whereClauses.push(`q.grade_id = $${idx++}`);
+      values.push(grade_id);
+    }
+
+    if (search.trim() !== "") {
+      whereClauses.push(`q.question_text ILIKE $${idx++}`);
+      values.push(`%${search.trim()}%`);
+    }
+
+    // Combine WHERE conditions
+    const whereQuery =
+      whereClauses.length > 0 ? `WHERE ${whereClauses.join(" AND ")}` : "";
+
+    // Add limit and offset placeholders
+    const limitPlaceholder = `$${idx++}`;
+    const offsetPlaceholder = `$${idx++}`;
+
+    // Main query
+    const query = `
+      SELECT 
+        q.id,
+        q.question_text,
+        q.subject_id,
+        q.options,
+        q.correct_option_id,
+        s.subject AS subject_name,
+        q.topic_id,
+        t.topic AS topic_name,
+        q.grade_id,
+        g.grade_level AS grade_name,
+        q.created_at
+      FROM questions q
+      LEFT JOIN subjects s ON q.subject_id = s.id
+      LEFT JOIN topics t ON q.topic_id = t.id
+      LEFT JOIN grades g ON q.grade_id = g.id
+      ${whereQuery}
+      ORDER BY q.created_at DESC
+      LIMIT ${limitPlaceholder} OFFSET ${offsetPlaceholder};
+    `;
+
+    // Values for main query (filters + pagination)
+    const mainValues = [...values, limit, offset];
+
+    // Count query
+    const countQuery = `
+      SELECT COUNT(*) AS total
+      FROM questions q
+      ${whereQuery};
+    `;
+
+    // Execute both queries
+    const [result, countResult] = await Promise.all([
+      pool.query(query, mainValues),
+      pool.query(countQuery, values),
+    ]);
+
+    const total = parseInt(countResult.rows[0]?.total || 0, 10);
+    const totalPages = Math.ceil(total / limit);
+
+    return res.status(200).json({
+      message: "Questions fetched successfully",
+      total,
+      totalPages,
+      currentPage: page,
+      perPage: limit,
+      questions: result.rows,
+    });
+  } catch (error) {
+    console.error("Error fetching questions:", error);
+    return res.status(500).json({ message: "Internal Server Error" });
+  }
+};
+
+
+
+

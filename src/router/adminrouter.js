@@ -1,5 +1,5 @@
 import express from "express"
-import { adminAnnouncementpoll, adminCreateEditQuiz, admincreatePoll, adminEditPoll, createGrades, deleteEditQuiz, deleteGrade, deletePoll, deleteSubject, deleteTopic, getAllEditQuizzes, getAllpoll, getParticularEditableQuiz, getUserEditingQuiz, updateEditQuiz, updateGrade, updateSubject, updateTopics } from "../controller/admincontroller.js"
+import { adminAnnouncementpoll, adminCreateEditQuiz, admincreatePoll, adminEditPoll, adminUpdateUserStatus, createGrades, deleteEditQuiz, deleteGrade, deletePoll, deleteSubject, deleteTopic, getAllEditQuizzes, getAllEditQuizzesnew, getAllpoll, getAllQuestionsnew, getParticularEditableQuiz, getUserEditingQuiz, updateEditQuiz, updateGrade, updateSubject, updateTopics } from "../controller/admincontroller.js"
 import auth from "../middleware/auth.js"
 import { admincreateSubject, admincreateTopic, getAllTopic, getParticularquestions, updatequestion } from "../controller/usercontroller.js"
 import multer from "multer";
@@ -13,9 +13,11 @@ const router = express.Router()
 
 
 router.post( "/admincreatepoll", auth ,upload.single("poll_image"), admincreatePoll )
+router.post( "/adminactiveordeactive", adminUpdateUserStatus )
 router.put( "/admineditpoll" ,upload.single("poll_image"),adminEditPoll )
 router.get( "/admingetallpoll", getAllpoll )
 router.get( "/alltopics", getAllTopic )
+router.get("/allquestionsnew", getAllQuestionsnew)
 router.post( "/adminannouncementpoll", adminAnnouncementpoll )
 router.post("/particularquestions", getParticularquestions)
 router.put("/editquestion",   upload.fields([
@@ -49,6 +51,7 @@ router.delete("/deletetopic", deleteTopic);
 router.post("/createeditquestion", adminCreateEditQuiz);
 router.get("/geteditquestion", getUserEditingQuiz);
 router.get("/getalleditquestions", getAllEditQuizzes);
+router.get("/getalleditquestionsnew", getAllEditQuizzesnew);
 router.put("/updateeditquestion/:id", updateEditQuiz);
 router.delete("/deleteeditquestion/:id", deleteEditQuiz);
 router.get("/geteditquestion/:id", getParticularEditableQuiz);

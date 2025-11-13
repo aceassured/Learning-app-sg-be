@@ -1,7 +1,7 @@
 import express from 'express';
 import multer from 'multer';
 import auth from '../middleware/auth.js';
-import { addComment, addLike, addView, createPost, deleteComment, deleteForum, editComment, editPost, getAlllikesandComments, getForumAndPollFeed, getNotesfromTopics, getonlyForumNotes, listPosts, removeLike, savedForumAndPolls, saveForumOrPoll, trackNoteAccess } from '../controller/forumcontroller.js';
+import { addComment, addLike, addView, createPost, deleteComment, deleteForum, editComment, editPost, endThePoll, getAlllikesandComments, getForumAndPollFeed, getNotesfromTopics, getonlyForumNotes, listPosts, removeLike, savedForumAndPolls, saveForumOrPoll, trackNoteAccess } from '../controller/forumcontroller.js';
 
 const storage = multer.memoryStorage();
 
@@ -27,6 +27,7 @@ const router = express.Router();
 router.get('/', auth, listPosts);
 router.post('/savedforumorpolls', auth, savedForumAndPolls);
 router.post('/forumpolls', auth, getForumAndPollFeed);
+router.post('/endthepoll', endThePoll);
 router.post('/forumnotes',  getonlyForumNotes);
 router.post('/getnotesfile',  getNotesfromTopics);
 router.post('/accessnote', auth, trackNoteAccess);

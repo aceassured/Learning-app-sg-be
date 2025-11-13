@@ -20,142 +20,179 @@ import { uploadBufferToVercel } from '../utils/vercel-blob.js';
 //   }
 // };
 
-export const listPosts = async (req, res) => {
-  try {
-    const { id, subjectId, gradeId, type_of_upload } = req.query;
-    const userId = req.userId; // from auth middleware
+  export const listPosts = async (req, res) => {
+    try {
+      const {
+        id,
+        subjectId,
+        gradeId,
+        topicId,
+        type_of_upload,
+        search = "",
+        page = 1,
+        limit = 10,
+      } = req.query;
 
-    let q = `
-      SELECT 
-        p.id,
-        p.content,
-        s.subject AS subject_tag,     -- ✅ join subject name
-        g.grade_level AS grade_level,       -- ✅ join grade name
-        p.type_of_upload,
-        p.created_at,
+      const userId = req.userId; // from auth middleware
 
-        -- Aggregate attached files
-        COALESCE(
-          JSON_AGG(
-            DISTINCT JSONB_BUILD_OBJECT(
-              'id', ff.id,
-              'url', ff.url,
-              'filename', ff.filename
-            )
-          ) FILTER (WHERE ff.id IS NOT NULL),
-          '[]'
-        ) AS files,
+      // Convert pagination safely
+      const currentPage = Math.max(parseInt(page, 10) || 1, 1);
+      const perPage = Math.max(parseInt(limit, 10) || 10, 1);
+      const offset = (currentPage - 1) * perPage;
 
-        -- Aggregate comments
-        COALESCE(
-          JSON_AGG(
-            DISTINCT JSONB_BUILD_OBJECT(
-              'id', fc.id,
-              'content', fc.content,
-              'created_at', fc.created_at,
-              'user_id', cu.id,
-              'user_name', cu.name,
-              'profile_photo_url', cu.profile_photo_url
-            )
-          ) FILTER (WHERE fc.id IS NOT NULL),
-          '[]'
-        ) AS comments,
+      // ✅ Base query
+      let baseQuery = `
+        FROM forum_posts p
+        LEFT JOIN users u ON u.id = p.user_id
+        LEFT JOIN admins a ON a.id = p.admin_id
+        LEFT JOIN forum_files ff ON ff.post_id = p.id
+        LEFT JOIN forum_comments fc ON fc.post_id = p.id
+        LEFT JOIN users cu ON cu.id = fc.user_id
+        LEFT JOIN (
+          SELECT post_id, COUNT(*) AS like_count
+          FROM forum_likes
+          GROUP BY post_id
+        ) l ON l.post_id = p.id
+        LEFT JOIN (
+          SELECT post_id, COUNT(*) AS comment_count
+          FROM forum_comments
+          GROUP BY post_id
+        ) c ON c.post_id = p.id
+        LEFT JOIN forum_likes ul 
+          ON ul.post_id = p.id AND ul.user_id = $1
+        LEFT JOIN subjects s ON s.id = p.subject_tag
+        LEFT JOIN grades g ON g.id = p.grade_level
+        LEFT JOIN topics t ON t.id = p.topic_id
+      `;
 
-        -- Author details
-        COALESCE(u.id, a.id) AS author_id,
-        COALESCE(u.name, a.name) AS author_name,
-        COALESCE(u.profile_photo_url, a.profile_photo_url) AS profile_photo_url,
-        u.school_name,
-        u.grade_level AS user_grade_level,
-        COALESCE(u.created_at, a.created_at) AS author_created_at,
-        CASE 
-          WHEN u.id IS NOT NULL THEN 'user'
-          WHEN a.id IS NOT NULL THEN 'admin'
-        END AS author_type,
+      // ✅ Dynamic filters
+      const conditions = [];
+      const params = [userId];
 
-        -- Counts
-        COALESCE(l.like_count, 0) AS like_count,
-        COALESCE(c.comment_count, 0) AS comment_count,
+      if (id) {
+        params.push(id);
+        conditions.push(`p.id = $${params.length}`);
+      }
 
-        -- ✅ Did this user like it?
-        CASE WHEN ul.user_id IS NOT NULL THEN true ELSE false END AS is_liked_by_user
+      if (subjectId) {
+        params.push(subjectId);
+        conditions.push(`p.subject_tag = $${params.length}`);
+      }
 
-      FROM forum_posts p
-      LEFT JOIN users u ON u.id = p.user_id
-      LEFT JOIN admins a ON a.id = p.admin_id
-      LEFT JOIN forum_files ff ON ff.post_id = p.id
+      if (gradeId) {
+        params.push(gradeId);
+        conditions.push(`p.grade_level = $${params.length}`);
+      }
 
-      -- comments + user info
-      LEFT JOIN forum_comments fc ON fc.post_id = p.id
-      LEFT JOIN users cu ON cu.id = fc.user_id
+      if (topicId) {
+        params.push(topicId);
+        conditions.push(`p.topic_id = $${params.length}`);
+      }
 
-      -- join like counts
-      LEFT JOIN (
-        SELECT post_id, COUNT(*) AS like_count
-        FROM forum_likes
-        GROUP BY post_id
-      ) l ON l.post_id = p.id
+      if (type_of_upload) {
+        params.push(type_of_upload);
+        conditions.push(`p.type_of_upload = $${params.length}`);
+      }
 
-      -- join comment counts
-      LEFT JOIN (
-        SELECT post_id, COUNT(*) AS comment_count
-        FROM forum_comments
-        GROUP BY post_id
-      ) c ON c.post_id = p.id
+      if (search.trim() !== "") {
+        params.push(`%${search.trim()}%`);
+        conditions.push(`p.forum_title ILIKE $${params.length}`);
+      }
 
-      -- ✅ join specific user like
-      LEFT JOIN forum_likes ul 
-        ON ul.post_id = p.id AND ul.user_id = $1
+      const whereClause =
+        conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
 
-      -- ✅ join subjects & grades
-      LEFT JOIN subjects s ON s.id = p.subject_tag
-      LEFT JOIN grades g ON g.id = p.grade_level
-    `;
+      // ✅ Count query for pagination
+      const countQuery = `
+        SELECT COUNT(DISTINCT p.id) AS total
+        ${baseQuery}
+        ${whereClause};
+      `;
 
-    const conditions = [];
-    const params = [userId]; // first param = userId
+      const countResult = await pool.query(countQuery, params);
+      const total = parseInt(countResult.rows[0]?.total || 0, 10);
+      const totalPages = Math.ceil(total / perPage);
 
-    if (id) {
-      params.push(id);
-      conditions.push(`p.id = $${params.length}`);
+      // ✅ Main query with pagination
+      const mainQuery = `
+        SELECT 
+          p.id,
+          p.forum_title,
+          p.content,
+          s.subject AS subject_tag,
+          g.grade_level AS grade_level,
+          t.topic AS topic_name,
+          p.type_of_upload,
+          p.created_at,
+
+          COALESCE(
+            JSON_AGG(
+              DISTINCT JSONB_BUILD_OBJECT(
+                'id', ff.id,
+                'url', ff.url,
+                'filename', ff.filename
+              )
+            ) FILTER (WHERE ff.id IS NOT NULL),
+            '[]'
+          ) AS files,
+
+          COALESCE(
+            JSON_AGG(
+              DISTINCT JSONB_BUILD_OBJECT(
+                'id', fc.id,
+                'content', fc.content,
+                'created_at', fc.created_at,
+                'user_id', cu.id,
+                'user_name', cu.name,
+                'profile_photo_url', cu.profile_photo_url
+              )
+            ) FILTER (WHERE fc.id IS NOT NULL),
+            '[]'
+          ) AS comments,
+
+          COALESCE(u.id, a.id) AS author_id,
+          COALESCE(u.name, a.name) AS author_name,
+          COALESCE(u.profile_photo_url, a.profile_photo_url) AS profile_photo_url,
+          u.school_name,
+          u.grade_level AS user_grade_level,
+          COALESCE(u.created_at, a.created_at) AS author_created_at,
+          CASE 
+            WHEN u.id IS NOT NULL THEN 'user'
+            WHEN a.id IS NOT NULL THEN 'admin'
+          END AS author_type,
+
+          COALESCE(l.like_count, 0) AS like_count,
+          COALESCE(c.comment_count, 0) AS comment_count,
+          CASE WHEN ul.user_id IS NOT NULL THEN true ELSE false END AS is_liked_by_user
+
+        ${baseQuery}
+        ${whereClause}
+        GROUP BY 
+          p.id, s.subject, g.grade_level, t.topic,
+          u.id, a.id, l.like_count, c.comment_count, ul.user_id
+        ORDER BY p.created_at DESC
+        LIMIT $${params.length + 1} OFFSET $${params.length + 2};
+      `;
+
+      const mainParams = [...params, perPage, offset];
+      const result = await pool.query(mainQuery, mainParams);
+
+      // ✅ Final response
+      res.json({
+        ok: true,
+        message: "Forum posts fetched successfully",
+        total,
+        totalPages,
+        currentPage,
+        perPage,
+        posts: result.rows,
+      });
+    } catch (err) {
+      console.error("Error fetching posts:", err);
+      res.status(500).json({ ok: false, message: "Server error" });
     }
+  };
 
-    if (subjectId) {
-      params.push(subjectId);
-      conditions.push(`p.subject_tag = $${params.length}`);
-    }
-
-    if (gradeId) {
-      params.push(gradeId);
-      conditions.push(`p.grade_level = $${params.length}`);
-    }
-
-    if (type_of_upload) {
-      params.push(type_of_upload);
-      conditions.push(`p.type_of_upload = $${params.length}`);
-    }
-
-    if (conditions.length > 0) {
-      q += ` WHERE ${conditions.join(" AND ")}`;
-    }
-
-    q += ` GROUP BY 
-             p.id, 
-             s.subject, g.grade_level,   -- ✅ must group by joined columns
-             u.id, a.id, 
-             l.like_count, 
-             c.comment_count, 
-             ul.user_id
-           ORDER BY p.created_at DESC`;
-
-    const r = await pool.query(q, params);
-
-    res.json({ ok: true, posts: r.rows });
-  } catch (err) {
-    console.error("Error fetching posts:", err);
-    res.status(500).json({ ok: false });
-  }
-};
 
 // export const savedForumAndPolls = async (req, res) => {
 //   try {
@@ -1978,5 +2015,48 @@ export const trackNoteAccess = async (req, res) => {
   } catch (error) {
     console.error("Error tracking note access:", error);
     return res.status(500).json({ success: false, message: "Internal server error" });
+  }
+};
+
+
+// end the poll........
+
+
+export const endThePoll = async (req, res) => {
+  try {
+    const { poll_id } = req.body;
+
+    // Validate input
+    if (!poll_id) {
+      return res.status(400).json({ message: "Poll ID is required" });
+    }
+
+    // Check if poll exists
+    const checkPoll = await pool.query(
+      "SELECT id, is_poll_ended FROM polls WHERE id = $1",
+      [poll_id]
+    );
+
+    if (checkPoll.rows.length === 0) {
+      return res.status(404).json({ message: "Poll not found" });
+    }
+
+    const poll = checkPoll.rows[0];
+    if (poll.is_poll_ended) {
+      return res.status(400).json({ message: "Poll already ended" });
+    }
+
+    // Update poll status
+    await pool.query(
+      `UPDATE polls 
+       SET is_poll_ended = true, updated_at = NOW() 
+       WHERE id = $1`,
+      [poll_id]
+    );
+
+    return res.status(200).json({ message: "Poll ended successfully" });
+  } catch (error) {
+    console.error("Error ending poll:", error);
+    return res.status(500).json({ message: "Internal server error" });
   }
 };
