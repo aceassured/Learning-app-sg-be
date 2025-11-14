@@ -3877,6 +3877,7 @@ export const updateGradesubject = async (req, res) => {
 // admin login.......
 
 export const adminCommonlogin = async (req, res) => {
+  const client = await pool.connect(); // ✅ Get client for transaction
   try {
     const { email, password } = req.body;
 
@@ -3887,13 +3888,31 @@ export const adminCommonlogin = async (req, res) => {
       });
     }
 
-    // ✅ Check if user exists in admins or superadmins table
-    const adminQuery = "SELECT id, name, email, password, 'admin' as role FROM admins WHERE email = $1";
-    const superAdminQuery = "SELECT id, name, email, password, 'superadmin' as role FROM superadmin WHERE email = $1";
+    // Validate email format
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+      return res.status(400).json({
+        status: false,
+        message: "Please enter a valid email address",
+      });
+    }
+
+    // Check both admin & superadmin tables
+    const adminQuery = `
+      SELECT id, name, email, password, active_status, is_active_request, 'admin' AS role 
+      FROM admins 
+      WHERE email = $1
+    `;
+
+    const superAdminQuery = `
+      SELECT id, name, email, password, 'superadmin' AS role 
+      FROM superadmin 
+      WHERE email = $1
+    `;
 
     const [adminResult, superAdminResult] = await Promise.all([
-      pool.query(adminQuery, [email]),
-      pool.query(superAdminQuery, [email]),
+      client.query(adminQuery, [email]),
+      client.query(superAdminQuery, [email]),
     ]);
 
     const user = adminResult.rows[0] || superAdminResult.rows[0];
@@ -3901,33 +3920,49 @@ export const adminCommonlogin = async (req, res) => {
     if (!user) {
       return res.status(401).json({
         status: false,
-        message: "User not found. Please check your credentials.",
+        message: "Invalid email or password",
       });
     }
 
-    // ✅ Compare passwords
+    // 🔥 CHECK ACTIVE ONLY FOR ADMIN
+    if (user.role === "admin") {
+      if (user.active_status === false) {
+        return res.status(403).json({
+          status: false,
+          message: "Your account is inactive. Please contact support.",
+          data: {
+            id: user.id,
+            email: user.email,
+            name: user.name,
+            role: user.role,
+            is_active_request: user.is_active_request
+          }
+        });
+      }
+    }
+
+    // Compare password
     const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch) {
       return res.status(401).json({
         status: false,
-        message: "Invalid credentials",
+        message: "Invalid email or password",
       });
     }
 
-    // ✅ Generate JWT with role
+    // Generate JWT
     const token = jwt.sign(
       { userId: user.id, role: user.role },
       JWT_SECRET,
       { expiresIn: "7d" }
     );
 
-    // ✅ Return response (omit password)
-    const { password: _, ...userData } = user;
+    const { password: _, ...cleanUser } = user;
 
     return res.json({
       status: true,
       message: `${user.role} login successful`,
-      data: userData,
+      data: cleanUser,
       token,
     });
 
@@ -3935,10 +3970,13 @@ export const adminCommonlogin = async (req, res) => {
     console.error("Login error:", err);
     res.status(500).json({
       status: false,
-      message: "Server error",
+      message: "Internal server error",
     });
+  } finally {
+    client.release(); // ✅ Always release client
   }
 };
+
 
 
 export const seedTopics = async (req, res) => {
@@ -4569,6 +4607,76 @@ export const admincreateTopic = async (req, res) => {
   } catch (error) {
     console.error("Create Topic Error:", error);
     res.status(500).json({ status: false, message: "Server error" });
+  }
+};
+
+// admin request for active..........
+
+export const adminRequestActive = async (req, res) => {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN'); // ✅ Start transaction
+
+    const { admin_id } = req.body;
+
+    if (!admin_id) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({
+        status: false,
+        message: "Admin ID is required",
+      });
+    }
+
+    // 1️⃣ Check if admin exists
+    const checkQuery = `SELECT id, is_active_request FROM admins WHERE id = $1 FOR UPDATE`;
+    const checkResult = await client.query(checkQuery, [admin_id]);
+
+    if (checkResult.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({
+        status: false,
+        message: "Admin not found",
+      });
+    }
+
+    const admin = checkResult.rows[0];
+
+    // 2️⃣ If already requested → throw error
+    if (admin.is_active_request === true) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({
+        status: false,
+        message: "You have already requested activation",
+      });
+    }
+
+    // 3️⃣ Update request flag
+    const updateQuery = `
+      UPDATE admins 
+      SET is_active_request = true, updated_at = NOW()
+      WHERE id = $1
+      RETURNING id, is_active_request
+    `;
+
+    const updateResult = await client.query(updateQuery, [admin_id]);
+    
+    await client.query('COMMIT'); // ✅ Commit transaction
+
+    return res.status(200).json({
+      status: true,
+      message: "Activation request sent successfully",
+      data: updateResult.rows[0],
+    });
+
+  } catch (error) {
+    await client.query('ROLLBACK'); // ✅ Rollback on error
+    console.error("adminRequestActive error:", error);
+    return res.status(500).json({
+      status: false,
+      message: "Internal server error",
+    });
+  } finally {
+    client.release(); // ✅ Always release client
   }
 };
 

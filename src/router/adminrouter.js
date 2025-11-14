@@ -1,5 +1,5 @@
 import express from "express"
-import { adminAnnouncementpoll, adminCreateEditQuiz, admincreatePoll, adminEditPoll, adminUpdateUserStatus, createGrades, deleteEditQuiz, deleteGrade, deletePoll, deleteSubject, deleteTopic, getAllEditQuizzes, getAllEditQuizzesnew, getAllpoll, getAllQuestionsnew, getParticularEditableQuiz, getUserEditingQuiz, updateEditQuiz, updateGrade, updateSubject, updateTopics } from "../controller/admincontroller.js"
+import { adminAnnouncementpoll, adminCreateBulkEditableQuizQuestions, adminCreateEditQuiz, admincreatePoll, adminEditPoll, adminUpdateUserStatus, createGrades, deleteEditableUpload, deleteEditQuiz, deleteGrade, deletePoll, deleteSubject, deleteTopic, getAllEditQuizzes, getAllEditQuizzesnew, getAllpoll, getAllQuestionsnew, getEditableUploadData, getEditableUploadHistory, getParticularEditableQuiz, getUserEditingQuiz, updateEditQuiz, updateGrade, updateSubject, updateTopics } from "../controller/admincontroller.js"
 import auth from "../middleware/auth.js"
 import { admincreateSubject, admincreateTopic, getAllTopic, getParticularquestions, updatequestion } from "../controller/usercontroller.js"
 import multer from "multer";
@@ -46,7 +46,11 @@ router.delete("/deletesubject", deleteSubject);
 router.put("/updatetopic", updateTopics);
 router.delete("/deletetopic", deleteTopic);
 
-
+// Bulk upload editable quiz questions
+router.post("/quiz/bulk-upload", upload.single("file"), adminCreateBulkEditableQuizQuestions)
+router.get('/quiz-questions/:uploadBatchId', getEditableUploadData);
+router.get('/quiz-upload-history', getEditableUploadHistory);
+router.delete('/quiz-delete-upload/:uploadId', deleteEditableUpload);
 
 router.post("/createeditquestion", adminCreateEditQuiz);
 router.get("/geteditquestion", getUserEditingQuiz);
@@ -55,4 +59,5 @@ router.get("/getalleditquestionsnew", getAllEditQuizzesnew);
 router.put("/updateeditquestion/:id", updateEditQuiz);
 router.delete("/deleteeditquestion/:id", deleteEditQuiz);
 router.get("/geteditquestion/:id", getParticularEditableQuiz);
+
 export default router

@@ -20,28 +20,30 @@ import { uploadBufferToVercel } from '../utils/vercel-blob.js';
 //   }
 // };
 
-  export const listPosts = async (req, res) => {
-    try {
-      const {
-        id,
-        subjectId,
-        gradeId,
-        topicId,
-        type_of_upload,
-        search = "",
-        page = 1,
-        limit = 10,
-      } = req.query;
+export const listPosts = async (req, res) => {
+  try {
+    const {
+      id,
+      subjectId,
+      gradeId,
+      topicId,
+      type_of_upload,
+      search = "",
+      page = 1,
+      limit = 10,
+      startDate = "",
+      endDate = ""
+    } = req.query;
 
-      const userId = req.userId; // from auth middleware
+    const userId = req.userId; // from auth middleware
 
-      // Convert pagination safely
-      const currentPage = Math.max(parseInt(page, 10) || 1, 1);
-      const perPage = Math.max(parseInt(limit, 10) || 10, 1);
-      const offset = (currentPage - 1) * perPage;
+    // Convert pagination safely
+    const currentPage = Math.max(parseInt(page, 10) || 1, 1);
+    const perPage = Math.max(parseInt(limit, 10) || 10, 1);
+    const offset = (currentPage - 1) * perPage;
 
-      // ✅ Base query
-      let baseQuery = `
+    // ✅ Base query
+    let baseQuery = `
         FROM forum_posts p
         LEFT JOIN users u ON u.id = p.user_id
         LEFT JOIN admins a ON a.id = p.admin_id
@@ -65,56 +67,67 @@ import { uploadBufferToVercel } from '../utils/vercel-blob.js';
         LEFT JOIN topics t ON t.id = p.topic_id
       `;
 
-      // ✅ Dynamic filters
-      const conditions = [];
-      const params = [userId];
+    // ✅ Dynamic filters
+    const conditions = [];
+    const params = [userId];
 
-      if (id) {
-        params.push(id);
-        conditions.push(`p.id = $${params.length}`);
-      }
+    if (id) {
+      params.push(id);
+      conditions.push(`p.id = $${params.length}`);
+    }
 
-      if (subjectId) {
-        params.push(subjectId);
-        conditions.push(`p.subject_tag = $${params.length}`);
-      }
+    if (subjectId) {
+      params.push(subjectId);
+      conditions.push(`p.subject_tag = $${params.length}`);
+    }
 
-      if (gradeId) {
-        params.push(gradeId);
-        conditions.push(`p.grade_level = $${params.length}`);
-      }
+    if (gradeId) {
+      params.push(gradeId);
+      conditions.push(`p.grade_level = $${params.length}`);
+    }
 
-      if (topicId) {
-        params.push(topicId);
-        conditions.push(`p.topic_id = $${params.length}`);
-      }
+    if (topicId) {
+      params.push(topicId);
+      conditions.push(`p.topic_id = $${params.length}`);
+    }
 
-      if (type_of_upload) {
-        params.push(type_of_upload);
-        conditions.push(`p.type_of_upload = $${params.length}`);
-      }
+    if (type_of_upload) {
+      params.push(type_of_upload);
+      conditions.push(`p.type_of_upload = $${params.length}`);
+    }
 
-      if (search.trim() !== "") {
-        params.push(`%${search.trim()}%`);
-        conditions.push(`p.forum_title ILIKE $${params.length}`);
-      }
+    if (search.trim() !== "") {
+      params.push(`%${search.trim()}%`);
+      conditions.push(`p.forum_title ILIKE $${params.length}`);
+    }
+    // Date range filters
+    if (startDate) {
+      params.push(startDate);
+      conditions.push(`DATE(p.created_at) >= $${params.length}`);
+    }
 
-      const whereClause =
-        conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+    if (endDate) {
+      params.push(endDate);
+      conditions.push(`DATE(p.created_at) <= $${params.length}`);
+    }
 
-      // ✅ Count query for pagination
-      const countQuery = `
+
+    const whereClause =
+      conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+
+    // ✅ Count query for pagination
+    const countQuery = `
         SELECT COUNT(DISTINCT p.id) AS total
         ${baseQuery}
         ${whereClause};
       `;
 
-      const countResult = await pool.query(countQuery, params);
-      const total = parseInt(countResult.rows[0]?.total || 0, 10);
-      const totalPages = Math.ceil(total / perPage);
+    const countResult = await pool.query(countQuery, params);
+    const total = parseInt(countResult.rows[0]?.total || 0, 10);
+    const totalPages = Math.ceil(total / perPage);
 
-      // ✅ Main query with pagination
-      const mainQuery = `
+    // ✅ Main query with pagination
+    const mainQuery = `
         SELECT 
           p.id,
           p.forum_title,
@@ -174,24 +187,24 @@ import { uploadBufferToVercel } from '../utils/vercel-blob.js';
         LIMIT $${params.length + 1} OFFSET $${params.length + 2};
       `;
 
-      const mainParams = [...params, perPage, offset];
-      const result = await pool.query(mainQuery, mainParams);
+    const mainParams = [...params, perPage, offset];
+    const result = await pool.query(mainQuery, mainParams);
 
-      // ✅ Final response
-      res.json({
-        ok: true,
-        message: "Forum posts fetched successfully",
-        total,
-        totalPages,
-        currentPage,
-        perPage,
-        posts: result.rows,
-      });
-    } catch (err) {
-      console.error("Error fetching posts:", err);
-      res.status(500).json({ ok: false, message: "Server error" });
-    }
-  };
+    // ✅ Final response
+    res.json({
+      ok: true,
+      message: "Forum posts fetched successfully",
+      total,
+      totalPages,
+      currentPage,
+      perPage,
+      posts: result.rows,
+    });
+  } catch (err) {
+    console.error("Error fetching posts:", err);
+    res.status(500).json({ ok: false, message: "Server error" });
+  }
+};
 
 
 // export const savedForumAndPolls = async (req, res) => {
@@ -685,7 +698,14 @@ export const createPost = async (req, res) => {
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
         [authorId, grade_level, content, subject_tag, type_of_upload, forum_title, topic_id, created_at]
       );
-    } else {
+    } 
+     else if (author_type === "superadmin") {
+      postRes = await pool.query(
+        `INSERT INTO forum_posts (super_admin_id, grade_level, content, subject_tag, type_of_upload, forum_title, topic_id, created_at) 
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
+        [authorId, grade_level, content, subject_tag, type_of_upload, forum_title, topic_id, created_at]
+      );
+    }else {
       return res.status(400).json({ ok: false, message: "Invalid author_type" });
     }
 
