@@ -1,9 +1,15 @@
 import pool from "../../database.js";
 import { uploadBufferToVercel } from "../utils/vercel-blob.js";
 import sharp from "sharp";
+import express from "express";
+import multer from "multer";
+import xlsx from "xlsx";
+import { v4 as uuidv4 } from "uuid";
+import crypto from "crypto";
 
 // create poll...........
 
+const norm = (s) => (typeof s === "string" ? s.trim().toLowerCase() : "");
 
 // export const admincreatePoll = async (req, res) => {
 //   try {
