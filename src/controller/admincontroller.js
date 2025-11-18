@@ -1081,6 +1081,8 @@ export const adminUpdateUserStatus = async (req, res) => {
 
     const currentStatus = result.rows[0].active_status;
     const newStatus = !currentStatus; // toggle true/false
+    console.log("currentStatus", currentStatus)
+    console.log("newStatus")
 
     // Update query
     const updateQuery = `
@@ -1691,3 +1693,15 @@ export const getEditableUploadData = async (req, res) => {
     });
   }
 };
+
+
+// adminDashboard api........
+
+export const adminDashboardApi = async ( req, res ) => {
+
+  try {
+    
+  } catch (error) {
+    
+  }
+}

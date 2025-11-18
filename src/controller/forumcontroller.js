@@ -1970,24 +1970,35 @@ export const getNotesfromTopics = async (req, res) => {
       return res.status(400).json({ message: "topic_id is required" });
     }
 
-    // ✅ Check if topic exists
-    const topicCheckQuery = `SELECT id FROM topics WHERE id = $1 LIMIT 1`;
+    // -----------------------------------
+    // Check topic exists
+    // -----------------------------------
+    const topicCheckQuery = `
+      SELECT id, topic 
+      FROM topics 
+      WHERE id = $1 
+      LIMIT 1
+    `;
     const topicCheck = await pool.query(topicCheckQuery, [topic_id]);
 
     if (topicCheck.rowCount === 0) {
       return res.status(404).json({ message: "Topic not found" });
     }
 
-    // ✅ Fetch notes for the topic with optional search
+    const topicName = topicCheck.rows[0].topic;
+
+    // -----------------------------------
+    // Fetch notes for topic
+    // -----------------------------------
     let notesQuery = `
-SELECT ff.*
-FROM forum_posts fp
-JOIN forum_files ff ON ff.post_id = fp.id
-WHERE fp.topic_id = $1
-  AND fp.type_of_upload = 'Notes'
-  AND ff.url IS NOT NULL
-ORDER BY ff.created_at DESC;
+      SELECT ff.*
+      FROM forum_posts fp
+      JOIN forum_files ff ON ff.post_id = fp.id
+      WHERE fp.topic_id = $1
+        AND fp.type_of_upload = 'Notes'
+        AND ff.url IS NOT NULL
     `;
+
     const values = [topic_id];
 
     if (search) {
@@ -1995,12 +2006,31 @@ ORDER BY ff.created_at DESC;
       values.push(`%${search}%`);
     }
 
-    const { rows } = await pool.query(notesQuery, values);
+    notesQuery += ` ORDER BY ff.created_at DESC`;
 
+    const result = await pool.query(notesQuery, values);
+    const rows = result.rows;
+
+    // -----------------------------------
+    // If no URL/notes found → return topic only
+    // -----------------------------------
+    if (rows.length === 0) {
+      return res.status(200).json({
+        success: true,
+        topic_name: topicName,
+        data: [],
+        message: "No notes found for this topic",
+      });
+    }
+
+    // -----------------------------------
+    // Return notes if exists
+    // -----------------------------------
     return res.status(200).json({
       success: true,
+      topic_name: topicName,
       search: search || null,
-      data: rows, // array of objects with { url, filename, etc. }
+      data: rows,
     });
 
   } catch (error) {
@@ -2011,6 +2041,7 @@ ORDER BY ff.created_at DESC;
     });
   }
 };
+
 
 
 
