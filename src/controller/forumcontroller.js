@@ -345,8 +345,11 @@ export const listPosts = async (req, res) => {
 
 export const savedForumAndPolls = async (req, res) => {
   try {
-    const userId = req.userId; // from auth middleware
+    const userId = req.userId;
     const search = req.body?.search || null;
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const offset = (page - 1) * limit;
 
     if (!userId) {
       return res.status(400).json({ ok: false, error: "User ID is required" });
@@ -362,124 +365,265 @@ export const savedForumAndPolls = async (req, res) => {
       pollSearchCondition = `AND p.question ILIKE $${params.length}`;
     }
 
-    const q = `
-      -- ✅ Fetch saved forums
-      SELECT 
-        'forum' AS data_type,
-        f.id,
-        f.content,
-        f.forum_title,
-        f.subject_tag,
-        f.grade_level,
-        f.created_at,
-        COALESCE(fvc.view_count, 0) AS view_count,
-        COALESCE(fl.like_count, 0) AS like_count,
-        COALESCE(ff.files, '[]') AS files,
-        COALESCE(u.name, a.name) AS author_name,
-        CASE 
-          WHEN u.id IS NOT NULL THEN 'user'
-          WHEN a.id IS NOT NULL THEN 'admin'
-        END AS author_type,
-        false AS has_voted,
-        NULL AS user_selected_option,
-        -- ✅ Check if user liked this forum
-        CASE WHEN ful.user_id IS NOT NULL THEN true ELSE false END AS is_liked_by_user
+    // =================================================================================
+    // 1) Get total counts for pagination
+    // =================================================================================
+    const countQuery = `
+      /* =======================================================
+         COUNT SAVED FORUMS
+         ======================================================= */
+      SELECT COUNT(*) as count
       FROM user_saved_forums usf
       JOIN forum_posts f ON f.id = usf.forum_post_id
-      LEFT JOIN (
-        SELECT forum_post_id, COUNT(*) AS view_count
-        FROM forum_views
-        GROUP BY forum_post_id
-      ) fvc ON fvc.forum_post_id = f.id
-      LEFT JOIN (
-        SELECT post_id, COUNT(*) AS like_count
-        FROM forum_likes
-        GROUP BY post_id
-      ) fl ON fl.post_id = f.id
-      LEFT JOIN (
-        SELECT post_id,
-          JSON_AGG(
-            JSON_BUILD_OBJECT(
-              'id', id,
-              'url', url,
-              'filename', filename
-            )
-          ) AS files
-        FROM forum_files
-        GROUP BY post_id
-      ) ff ON ff.post_id = f.id
-      LEFT JOIN users u ON u.id = f.user_id
-      LEFT JOIN admins a ON a.id = f.admin_id
-      -- ✅ Join to detect if this user liked it
-      LEFT JOIN forum_likes ful ON ful.post_id = f.id AND ful.user_id = $1
       WHERE usf.user_id = $1
       ${forumSearchCondition}
 
       UNION ALL
 
-      -- ✅ Fetch saved polls
+      /* =======================================================
+         COUNT SAVED POLLS
+         ======================================================= */
+      SELECT COUNT(*) as count
+      FROM user_saved_polls usp
+      JOIN polls p ON p.id = usp.poll_id
+      WHERE usp.user_id = $1
+      ${pollSearchCondition}
+    `;
+
+    const countResult = await pool.query(countQuery, params);
+    
+    // Calculate total records
+    const forumCount = parseInt(countResult.rows[0]?.count || 0, 10);
+    const pollCount = parseInt(countResult.rows[1]?.count || 0, 10);
+    const totalRecords = forumCount + pollCount;
+    const totalPages = Math.ceil(totalRecords / limit);
+
+    // =================================================================================
+    // 2) Fetch paginated data
+    // =================================================================================
+    const dataQuery = `
+      /* =======================================================
+         SAVED FORUMS
+         ======================================================= */
+      SELECT
+        'forum' AS data_type,
+        f.id AS id,
+        f.content AS content,
+        f.forum_title AS forum_title,
+        f.subject_tag AS subject_tag,
+        f.grade_level AS grade_level,
+        NULL AS poll_image_url, 
+        f.created_at AT TIME ZONE 'UTC' AS created_at,
+        COALESCE(fvc.view_count, 0) AS view_count,
+        COALESCE(fl.like_count, 0) AS like_count,
+
+        COALESCE(ff.files, '[]') AS files,
+        COALESCE(fc.comments, '[]') AS comments,
+
+        COALESCE(u.name, a.name, sa.name) AS author_name,
+        CASE 
+          WHEN u.id IS NOT NULL THEN 'user'
+          WHEN a.id IS NOT NULL THEN 'admin'
+          WHEN sa.id IS NOT NULL THEN 'superadmin'
+        END AS author_type,
+
+        FALSE AS has_voted,
+        NULL AS user_selected_option,
+
+        CASE WHEN ful.user_id IS NOT NULL THEN true ELSE false END AS is_liked_by_user,
+        FALSE AS is_poll_ended,
+        true AS is_forum_saved,
+        false AS is_poll_saved
+
+      FROM user_saved_forums usf
+      JOIN forum_posts f ON f.id = usf.forum_post_id
+
+      LEFT JOIN (
+        SELECT post_id,
+          JSON_AGG(JSON_BUILD_OBJECT(
+            'id', id,
+            'url', url,
+            'filename', filename
+          )) AS files
+        FROM forum_files
+        GROUP BY post_id
+      ) ff ON ff.post_id = f.id
+
+      LEFT JOIN (
+        SELECT post_id,
+          JSON_AGG(JSON_BUILD_OBJECT(
+            'id', fc.id,
+            'content', fc.content,
+            'created_at', fc.created_at AT TIME ZONE 'UTC',
+            'user_id', u.id,
+            'user_name', u.name,
+            'profile_photo_url', u.profile_photo_url
+          )) AS comments
+        FROM forum_comments fc
+        LEFT JOIN users u ON u.id = fc.user_id
+        GROUP BY post_id
+      ) fc ON fc.post_id = f.id
+
+      LEFT JOIN (
+        SELECT forum_post_id, COUNT(*) AS view_count
+        FROM forum_views
+        GROUP BY forum_post_id
+      ) fvc ON fvc.forum_post_id = f.id
+
+      LEFT JOIN (
+        SELECT post_id, COUNT(*) AS like_count
+        FROM forum_likes
+        GROUP BY post_id
+      ) fl ON fl.post_id = f.id
+
+      LEFT JOIN users u ON u.id = f.user_id
+      LEFT JOIN admins a ON a.id = f.admin_id
+      LEFT JOIN superadmin sa ON sa.id = f.superadmin_id
+
+      LEFT JOIN forum_likes ful ON ful.post_id = f.id AND ful.user_id = $1
+
+      WHERE usf.user_id = $1
+      ${forumSearchCondition}
+
+      UNION ALL
+
+      /* =======================================================
+         SAVED POLLS
+         ======================================================= */
       SELECT
         'poll' AS data_type,
-        p.id,
+        p.id AS id,
         p.question AS content,
         NULL AS forum_title,
         p.subject_id AS subject_tag,
-        p.grade_level,
-        p.created_at,
+        p.grade_level AS grade_level,
+        p.poll_image_url,
+        p.created_at AT TIME ZONE 'UTC' AS created_at,
         COALESCE(pv.view_count, 0) AS view_count,
-        COALESCE(pvc.vote_count, 0) AS like_count, -- treat votes as "likes"
+        COALESCE(pl.like_count, 0) AS like_count,
+
         COALESCE(po.options, '[]') AS files,
+        COALESCE(pc.comments, '[]') AS comments,
+
         NULL AS author_name,
         NULL AS author_type,
+
         CASE WHEN uv.user_id IS NOT NULL THEN true ELSE false END AS has_voted,
         uv.option_id AS user_selected_option,
-        -- ✅ Check if user liked this poll
-        CASE WHEN pul.user_id IS NOT NULL THEN true ELSE false END AS is_liked_by_user
+
+        CASE WHEN pul.user_id IS NOT NULL THEN true ELSE false END AS is_liked_by_user,
+        p.is_poll_ended AS is_poll_ended,
+        false AS is_forum_saved,
+        true AS is_poll_saved
+
       FROM user_saved_polls usp
       JOIN polls p ON p.id = usp.poll_id
+
       LEFT JOIN (
         SELECT poll_id, COUNT(*) AS view_count
         FROM poll_views
         GROUP BY poll_id
       ) pv ON pv.poll_id = p.id
-      LEFT JOIN (
-        SELECT poll_id, COUNT(*) AS vote_count
-        FROM poll_votes
-        GROUP BY poll_id
-      ) pvc ON pvc.poll_id = p.id
+
       LEFT JOIN (
         SELECT poll_id,
-          JSON_AGG(
-            JSON_BUILD_OBJECT(
-              'id', id,
-              'option_text', option_text,
-              'vote_count', (SELECT COUNT(*) FROM poll_votes WHERE poll_votes.option_id = poll_options.id)
+          JSON_AGG(JSON_BUILD_OBJECT(
+            'id', id,
+            'option_text', option_text,
+            'vote_count', (
+              SELECT COUNT(*) FROM poll_votes WHERE option_id = poll_options.id
             )
-          ) AS options
+          )) AS options
         FROM poll_options
         GROUP BY poll_id
       ) po ON po.poll_id = p.id
+
       LEFT JOIN (
-        SELECT poll_id, option_id, user_id
-        FROM poll_votes
-        WHERE user_id = $1
-      ) uv ON uv.poll_id = p.id
-      -- ✅ Join to detect if this user liked the poll
+        SELECT poll_id,
+          JSON_AGG(JSON_BUILD_OBJECT(
+            'id', pc.id,
+            'comment', pc.comment,
+            'created_at', pc.created_at AT TIME ZONE 'UTC',
+            'user_id', u.id,
+            'user_name', u.name,
+            'profile_photo_url', u.profile_photo_url
+          )) AS comments
+        FROM poll_comments pc
+        LEFT JOIN users u ON u.id = pc.user_id
+        GROUP BY poll_id
+      ) pc ON pc.poll_id = p.id
+
+      LEFT JOIN (
+        SELECT poll_id, COUNT(*) AS like_count
+        FROM poll_likes
+        GROUP BY poll_id
+      ) pl ON pl.poll_id = p.id
+
+      LEFT JOIN poll_votes uv ON uv.poll_id = p.id AND uv.user_id = $1
       LEFT JOIN poll_likes pul ON pul.poll_id = p.id AND pul.user_id = $1
+
       WHERE usp.user_id = $1
       ${pollSearchCondition}
 
       ORDER BY created_at DESC
+      LIMIT $${params.length + 1} OFFSET $${params.length + 2}
     `;
 
-    const r = await pool.query(q, params);
+    // Add limit and offset to parameters
+    const dataParams = [...params, limit, offset];
+    const result = await pool.query(dataQuery, dataParams);
 
-    res.json({ ok: true, saved_items: r.rows });
+    // Process and transform the results
+    const savedItems = result.rows.map(item => {
+      const baseItem = {
+        ...item,
+        created_at: item.created_at ? new Date(item.created_at).toISOString() : null,
+        comments: (item.comments || []).map(comment => ({
+          ...comment,
+          created_at: comment.created_at ? new Date(comment.created_at).toISOString() : null
+        }))
+      };
+
+      if (item.data_type === 'forum') {
+        return {
+          ...baseItem,
+          data_type: "forum",
+          is_forum_saved: true,
+          is_poll_saved: false
+        };
+      } else {
+        return {
+          ...baseItem,
+          data_type: "poll",
+          has_voted: item.has_voted || false,
+          user_selected_option: item.user_selected_option || null,
+          is_forum_saved: false,
+          is_poll_saved: true
+        };
+      }
+    });
+
+    return res.json({
+      ok: true,
+      message: "Saved items fetched successfully",
+      total: totalRecords,
+      totalPages: totalPages,
+      currentPage: page,
+      perPage: limit,
+      forumTotal: forumCount,
+      pollTotal: pollCount,
+      returned_records: savedItems.length,
+      data: savedItems
+    });
+
   } catch (error) {
-    console.error("Error fetching saved forums and polls:", error);
-    res.status(500).json({ ok: false, error: "Server error" });
+    console.error("savedForumAndPolls error:", error);
+    return res.status(500).json({ ok: false, error: "Server error" });
   }
 };
+
+
+
 
 
 export const getonlyForumNotes = async (req, res) => {
@@ -500,7 +644,9 @@ export const getonlyForumNotes = async (req, res) => {
         p.forum_title AS forum_title,
         p.content,
         s.subject,
+        s.id AS subject_id,
         g.grade_level,
+        g.id AS grade_id,
         p.type_of_upload,
         p.created_at,
 
@@ -583,7 +729,7 @@ export const getonlyForumNotes = async (req, res) => {
 
       WHERE p.id = $1
       GROUP BY 
-        p.id, s.subject, g.grade_level, t.topic, p.topic_id,
+        p.id, s.subject, g.grade_level, t.topic, p.topic_id, s.id, g.id,
         u.id, a.id, 
         l.like_count, 
         c.comment_count, 
@@ -698,14 +844,14 @@ export const createPost = async (req, res) => {
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
         [authorId, grade_level, content, subject_tag, type_of_upload, forum_title, topic_id, created_at]
       );
-    } 
-     else if (author_type === "superadmin") {
+    }
+    else if (author_type === "superadmin") {
       postRes = await pool.query(
         `INSERT INTO forum_posts (super_admin_id, grade_level, content, subject_tag, type_of_upload, forum_title, topic_id, created_at) 
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
         [authorId, grade_level, content, subject_tag, type_of_upload, forum_title, topic_id, created_at]
       );
-    }else {
+    } else {
       return res.status(400).json({ ok: false, message: "Invalid author_type" });
     }
 
@@ -1617,16 +1763,18 @@ export const getForumAndPollFeed = async (req, res) => {
   try {
     const userId = req.userId;
 
-    // ✅ grade_id comes from req.body (static)
-    const { grade_id } = req.body;
+    const { subject, search, sortBy, page = 1, limit = 10 } = req.query;
 
-    // ✅ other filters from req.query
-    const { subject, search, sortBy } = req.query;
+    const parsedPage = parseInt(page) || 1;
+    const parsedLimit = parseInt(limit) || 10;
+    const offset = (parsedPage - 1) * parsedLimit;
 
-    // =======================
-    // 1) Fetch Forums
-    // =======================
-    let forumQuery = `
+    // =================================================================================
+    // 1) Build base queries for forums and polls separately
+    // =================================================================================
+    
+    // Forum base query
+    let forumBaseQuery = `
       SELECT 
         p.id,
         p.content,
@@ -1635,7 +1783,8 @@ export const getForumAndPollFeed = async (req, res) => {
         p.type_of_upload,
         p.created_at AT TIME ZONE 'UTC' AS created_at,
         p.forum_title AS forum_title,
-        t.topic AS topic,  
+        t.topic AS topic,
+        'forum' as data_type,
 
         COALESCE(
           JSON_AGG(
@@ -1668,6 +1817,7 @@ export const getForumAndPollFeed = async (req, res) => {
         u.school_name,
         u.grade_level AS user_grade_level,
         COALESCE(u.created_at, a.created_at, sa.created_at) AT TIME ZONE 'UTC' AS author_created_at,
+        
         CASE 
           WHEN u.id IS NOT NULL THEN 'user'
           WHEN a.id IS NOT NULL THEN 'admin'
@@ -1687,80 +1837,30 @@ export const getForumAndPollFeed = async (req, res) => {
       LEFT JOIN forum_files ff ON ff.post_id = p.id
       LEFT JOIN forum_comments fc ON fc.post_id = p.id
       LEFT JOIN users cu ON cu.id = fc.user_id
-      LEFT JOIN (
-        SELECT post_id, COUNT(*) AS like_count
-        FROM forum_likes
-        GROUP BY post_id
-      ) l ON l.post_id = p.id
-      LEFT JOIN (
-        SELECT post_id, COUNT(*) AS comment_count
-        FROM forum_comments
-        GROUP BY post_id
-      ) c ON c.post_id = p.id
+      LEFT JOIN (SELECT post_id, COUNT(*) AS like_count FROM forum_likes GROUP BY post_id) l ON l.post_id = p.id
+      LEFT JOIN (SELECT post_id, COUNT(*) AS comment_count FROM forum_comments GROUP BY post_id) c ON c.post_id = p.id
       LEFT JOIN forum_likes ul ON ul.post_id = p.id AND ul.user_id = $1
       LEFT JOIN subjects s ON s.id = p.subject_tag
       LEFT JOIN grades g ON g.id = p.grade_level
-      LEFT JOIN topics t ON t.id = p.topic_id   
+      LEFT JOIN topics t ON t.id = p.topic_id
       LEFT JOIN user_saved_forums sf ON sf.forum_post_id = p.id AND sf.user_id = $1
-      LEFT JOIN (
-        SELECT forum_post_id, COUNT(*) AS view_count
-        FROM forum_views
-        GROUP BY forum_post_id
-      ) v ON v.forum_post_id = p.id
+      LEFT JOIN (SELECT forum_post_id, COUNT(*) AS view_count FROM forum_views GROUP BY forum_post_id) v 
+        ON v.forum_post_id = p.id
     `;
 
-    const conditions = [];
-    const params = [userId];
-
-    if (subject) {
-      params.push(subject);
-      conditions.push(`p.subject_tag = $${params.length}`);
-    }
-    if (search) {
-      params.push(`%${search}%`);
-      conditions.push(`p.forum_title ILIKE $${params.length}`);
-    }
-    if (grade_id) {
-      params.push(grade_id);
-      conditions.push(`p.grade_level = $${params.length}`);
-    }
-
-    if (conditions.length > 0) {
-      forumQuery += ` WHERE ${conditions.join(" AND ")}`;
-    }
-
-    forumQuery += ` GROUP BY 
-      p.id, s.subject, g.grade_level,
-      u.id, a.id, sa.id, l.like_count, c.comment_count, ul.user_id, sf.user_id, v.view_count, t.topic
-    `;
-
-    const forumRes = await pool.query(forumQuery, params);
-    const forums = forumRes.rows.map(f => ({
-      ...f,
-      data_type: "forum",
-      created_at: f.created_at
-        ? new Date(f.created_at).toISOString()
-        : new Date().toISOString(),
-      comments: f.comments.map(c => ({
-        ...c,
-        created_at: c.created_at
-          ? new Date(c.created_at).toISOString()
-          : null
-      }))
-    }));
-
-    // =======================
-    // 2) Fetch Polls
-    // =======================
-    let pollQuery = `
+    // Poll base query
+    let pollBaseQuery = `
       SELECT 
         p.id,
         p.question AS poll_title,
+        NULL as content,
         p.created_at AT TIME ZONE 'UTC' AS created_at,
         p.expires_at AT TIME ZONE 'UTC' AS expires_at,
-        p.subject_id,
+        p.subject_id as subject_tag,
         p.poll_image_url,
         p.grade_level,
+        p.is_poll_ended,
+        'poll' as data_type,
 
         COALESCE(v.view_count, 0) AS view_count,
 
@@ -1797,14 +1897,19 @@ export const getForumAndPollFeed = async (req, res) => {
             )
           ) FILTER (WHERE po.id IS NOT NULL),
           '[]'
-        ) AS options
+        ) AS options,
+
+        '[]'::jsonb as files,
+        NULL as author_id,
+        NULL as author_name,
+        NULL as profile_photo_url,
+        NULL as school_name,
+        NULL as user_grade_level,
+        NULL as author_created_at,
+        NULL as author_type
 
       FROM polls p
-      LEFT JOIN (
-        SELECT poll_id, COUNT(*) AS view_count
-        FROM poll_views
-        GROUP BY poll_id
-      ) v ON v.poll_id = p.id
+      LEFT JOIN (SELECT poll_id, COUNT(*) AS view_count FROM poll_views GROUP BY poll_id) v ON v.poll_id = p.id
       LEFT JOIN poll_options po ON po.poll_id = p.id
       LEFT JOIN (
         SELECT 
@@ -1816,86 +1921,169 @@ export const getForumAndPollFeed = async (req, res) => {
         GROUP BY pv.option_id
       ) pvc ON pvc.option_id = po.id
       LEFT JOIN (
-        SELECT pv.poll_id, pv.option_id, pv.user_id
-        FROM poll_votes pv
-        WHERE pv.user_id = $2
+        SELECT pv.poll_id, pv.option_id, pv.user_id FROM poll_votes pv WHERE pv.user_id = $1
       ) uv ON uv.poll_id = p.id
-      LEFT JOIN user_saved_polls usp
-        ON usp.poll_id = p.id AND usp.user_id = $2
-      LEFT JOIN (
-        SELECT poll_id, COUNT(*) AS like_count
-        FROM poll_likes
-        GROUP BY poll_id
-      ) l ON l.poll_id = p.id
-      LEFT JOIN poll_likes ul 
-        ON ul.poll_id = p.id AND ul.user_id = $2
-      LEFT JOIN (
-        SELECT poll_id, COUNT(*) AS comment_count
-        FROM poll_comments
-        GROUP BY poll_id
-      ) c ON c.poll_id = p.id
+      LEFT JOIN user_saved_polls usp ON usp.poll_id = p.id AND usp.user_id = $1
+      LEFT JOIN (SELECT poll_id, COUNT(*) AS like_count FROM poll_likes GROUP BY poll_id) l ON l.poll_id = p.id
+      LEFT JOIN poll_likes ul ON ul.poll_id = p.id AND ul.user_id = $1
+      LEFT JOIN (SELECT poll_id, COUNT(*) AS comment_count FROM poll_comments GROUP BY poll_id) c ON c.poll_id = p.id
       LEFT JOIN poll_comments pc ON pc.poll_id = p.id
       LEFT JOIN users cu ON cu.id = pc.user_id
-WHERE 
-  p.active_status = true
-  AND (p.expires_at IS NULL OR p.expires_at > $1)
-
+      WHERE 
+        p.active_status = true
+        AND (p.expires_at IS NULL OR p.expires_at > NOW())
     `;
 
-    const pollParams = [new Date().toISOString(), userId];
+    // =================================================================================
+    // 2) Build conditions and parameters for each query type
+    // =================================================================================
+    
+    // Forum conditions and parameters
+    const forumConditions = [];
+    const forumParams = [userId]; // $1 = userId
+
+    // Poll conditions and parameters  
+    const pollConditions = [];
+    const pollParams = [userId]; // $1 = userId
+
+    let paramOffset = 2; // Start from $2 for additional params
+
     if (subject) {
+      // Forum condition
+      forumConditions.push(`p.subject_tag = $${paramOffset}`);
+      forumParams.push(subject);
+      
+      // Poll condition
+      pollConditions.push(`p.subject_id = $${paramOffset}`);
       pollParams.push(subject);
-      pollQuery += ` AND p.subject_id = $${pollParams.length}`;
-    }
-    if (search) {
-      pollParams.push(`%${search}%`);
-      pollQuery += ` AND p.question ILIKE $${pollParams.length}`;
-    }
-    if (grade_id) {
-      pollParams.push(grade_id);
-      pollQuery += ` AND p.grade_level = $${pollParams.length}`;
+      
+      paramOffset++;
     }
 
-    pollQuery += `
-      GROUP BY p.id, v.view_count, uv.user_id, uv.option_id, usp.user_id, l.like_count, c.comment_count, ul.user_id
+    if (search) {
+      // Forum condition
+      forumConditions.push(`p.forum_title ILIKE $${paramOffset}`);
+      forumParams.push(`%${search}%`);
+      
+      // Poll condition
+      pollConditions.push(`p.question ILIKE $${paramOffset}`);
+      pollParams.push(`%${search}%`);
+      
+      paramOffset++;
+    }
+
+    // Add WHERE clauses
+    const forumWhereClause = forumConditions.length > 0 ? ` WHERE ${forumConditions.join(" AND ")}` : '';
+    const pollWhereClause = pollConditions.length > 0 ? ` AND ${pollConditions.join(" AND ")}` : '';
+
+    // =================================================================================
+    // 3) Get total counts
+    // =================================================================================
+    const forumCountQuery = `
+      SELECT COUNT(*) as total 
+      FROM forum_posts p 
+      ${forumWhereClause}
+    `;
+    
+    const pollCountQuery = `
+      SELECT COUNT(*) as total 
+      FROM polls p 
+      WHERE p.active_status = true 
+      AND (p.expires_at IS NULL OR p.expires_at > NOW())
+      ${pollWhereClause}
     `;
 
-    const pollRes = await pool.query(pollQuery, pollParams);
-    const polls = pollRes.rows.map(p => ({
-      ...p,
-      data_type: "poll",
-      has_voted: p.has_voted || false,
-      user_selected_option: p.user_selected_option || null,
-      created_at: p.created_at
-        ? new Date(p.created_at).toISOString()
-        : new Date().toISOString(),
-      expires_at: p.expires_at
-        ? new Date(p.expires_at).toISOString()
-        : null,
-      comments: p.comments.map(c => ({
-        ...c,
-        created_at: c.created_at
-          ? new Date(c.created_at).toISOString()
-          : null
+    const [forumCountRes, pollCountRes] = await Promise.all([
+      pool.query(forumCountQuery, forumParams.slice(1)), // Remove userId for count
+      pool.query(pollCountQuery, pollParams.slice(1)) // Remove userId for count
+    ]);
+
+    const forumTotal = parseInt(forumCountRes.rows[0].total, 10);
+    const pollTotal = parseInt(pollCountRes.rows[0].total, 10);
+    const totalRecords = forumTotal + pollTotal;
+    const totalPages = Math.ceil(totalRecords / parsedLimit);
+
+    // =================================================================================
+    // 4) Fetch data from both sources separately, then combine and paginate
+    // =================================================================================
+    
+    // Complete forum query
+    const finalForumQuery = forumBaseQuery + forumWhereClause + `
+      GROUP BY p.id, s.subject, g.grade_level, u.id, a.id, sa.id, l.like_count, 
+               c.comment_count, ul.user_id, sf.user_id, v.view_count, t.topic
+      ORDER BY p.created_at DESC
+    `;
+
+    // Complete poll query  
+    const finalPollQuery = pollBaseQuery + pollWhereClause + `
+      GROUP BY p.id, v.view_count, uv.user_id, uv.option_id, usp.user_id, 
+               l.like_count, c.comment_count, ul.user_id
+      ORDER BY p.created_at DESC
+    `;
+
+    // Execute both queries
+    const [forumRes, pollRes] = await Promise.all([
+      pool.query(finalForumQuery, forumParams),
+      pool.query(finalPollQuery, pollParams)
+    ]);
+
+    // =================================================================================
+    // 5) Combine, sort and paginate results
+    // =================================================================================
+    let combinedResults = [
+      ...forumRes.rows.map(f => ({
+        ...f,
+        data_type: "forum",
+        created_at: f.created_at ? new Date(f.created_at).toISOString() : null,
+        comments: f.comments.map(c => ({
+          ...c,
+          created_at: c.created_at ? new Date(c.created_at).toISOString() : null
+        }))
+      })),
+      ...pollRes.rows.map(p => ({
+        ...p,
+        data_type: "poll",
+        has_voted: p.has_voted || false,
+        user_selected_option: p.user_selected_option || null,
+        created_at: p.created_at ? new Date(p.created_at).toISOString() : null,
+        expires_at: p.expires_at ? new Date(p.expires_at).toISOString() : null,
+        comments: p.comments.map(c => ({
+          ...c,
+          created_at: c.created_at ? new Date(c.created_at).toISOString() : null
+        }))
       }))
-    }));
+    ];
 
-    // =======================
-    // 3) Merge + Sort
-    // =======================
-    let feed = [...forums, ...polls];
-
+    // Apply sorting
     if (sortBy === "most_recent") {
-      feed.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+      combinedResults.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
     } else if (sortBy === "most_old") {
-      feed.sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+      combinedResults.sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
     } else if (sortBy === "most_view") {
-      feed.sort((a, b) => Number(b.view_count) - Number(a.view_count));
+      combinedResults.sort((a, b) => Number(b.view_count) - Number(a.view_count));
     } else {
-      feed.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+      // Default: most recent first
+      combinedResults.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
     }
 
-    return res.json({ ok: true, data: feed });
+    // Apply pagination
+    const startIndex = offset;
+    const endIndex = startIndex + parsedLimit;
+    const paginatedResults = combinedResults.slice(startIndex, endIndex);
+
+    return res.json({
+      ok: true,
+      message: "Forum and poll feed fetched successfully",
+      total: totalRecords,
+      totalPages: totalPages,
+      currentPage: parsedPage,
+      perPage: parsedLimit,
+      forumTotal: forumTotal,
+      pollTotal: pollTotal,
+      returned_records: paginatedResults.length,
+      data: paginatedResults
+    });
+
   } catch (err) {
     console.error("getForumAndPollFeed error:", err);
     return res.status(500).json({ ok: false, message: "Server error" });
