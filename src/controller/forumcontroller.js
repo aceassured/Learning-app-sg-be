@@ -1,6 +1,7 @@
 // src/controller/forumcontroller.js
 import pool from '../../database.js';
-import { uploadBufferToVercel } from '../utils/vercel-blob.js';
+import { compressFile } from '../utils/compressFile.js';
+import { uploadBufferforumToVercel, uploadBufferToVercel } from '../utils/vercel-blob.js';
 
 // export const listPosts = async (req, res) => {
 //   try {
@@ -391,7 +392,7 @@ export const savedForumAndPolls = async (req, res) => {
     `;
 
     const countResult = await pool.query(countQuery, params);
-    
+
     // Calculate total records
     const forumCount = parseInt(countResult.rows[0]?.count || 0, 10);
     const pollCount = parseInt(countResult.rows[1]?.count || 0, 10);
@@ -859,13 +860,25 @@ export const createPost = async (req, res) => {
 
     if (req.files && req.files.length) {
       for (const f of req.files) {
-        const url = await uploadBufferToVercel(f.buffer, f.originalname);
+        const compressedBuffer = await compressFile(
+          f.buffer,
+          f.mimetype,
+          f.originalname
+        );
+
+        const url = await uploadBufferforumToVercel(
+          compressedBuffer,
+          f.originalname
+        );
+
         await pool.query(
-          `INSERT INTO forum_files (post_id, url, filename) VALUES ($1, $2, $3)`,
+          `INSERT INTO forum_files (post_id, url, filename)
+       VALUES ($1, $2, $3)`,
           [post.id, url, f.originalname]
         );
       }
     }
+
 
     res.json({ ok: true, post });
   } catch (err) {
@@ -998,17 +1011,38 @@ export const editPost = async (req, res) => {
 
     // ✅ Handle file updates (optional: delete old files if needed)
     if (req.files && req.files.length) {
-      // First, delete old files if you want to fully replace them
+      // 1. Delete old files (if replacing)
       await pool.query(`DELETE FROM forum_files WHERE post_id = $1`, [post.id]);
 
+      // 2. Process new files
       for (const f of req.files) {
-        const url = await uploadBufferToVercel(f.buffer, f.originalname);
+        // Compress
+        let compressedBuffer;
+        try {
+          compressedBuffer = await compressFile(
+            f.buffer,
+            f.mimetype,
+            f.originalname
+          );
+        } catch (err) {
+          console.error("❌ Compression failed, using original file:", err);
+          compressedBuffer = f.buffer;
+        }
+
+        // Upload to Vercel
+        const url = await uploadBufferforumToVercel(
+          compressedBuffer,
+          f.originalname
+        );
+
+        // Insert into DB
         await pool.query(
           `INSERT INTO forum_files (post_id, url, filename) VALUES ($1, $2, $3)`,
           [post.id, url, f.originalname]
         );
       }
     }
+
 
     res.json({ ok: true, message: "Post updated successfully", post });
   } catch (err) {
@@ -1043,6 +1077,31 @@ export const deleteForum = async (req, res) => {
   }
 };
 
+
+// delete froum notes files .........
+
+export const deleteForumNotefiles = async (req, res) => {
+  try {
+    const { file_id } = req.body;
+
+    if (!file_id) {
+      return res.status(400).json({ ok: false, message: "File ID is required" });
+    }
+
+    await pool.query(`DELETE FROM forum_files WHERE post_id = $1`, [file_id]);
+
+    const result = await pool.query(`DELETE FROM forum_posts WHERE id = $1 RETURNING *`, [file_id]);
+
+    if (result.rowCount === 0) {
+      return res.status(404).json({ ok: false, message: "Forum post not found" });
+    }
+
+    res.json({ ok: true, message: "Forum post deleted successfully", deleted: result.rows[0] });
+  } catch (error) {
+    console.error("Error deleting forum post:", error);
+    res.status(500).json({ ok: false, message: "Internal server error" });
+  }
+};
 
 // delete user...........
 
@@ -1772,7 +1831,7 @@ export const getForumAndPollFeed = async (req, res) => {
     // =================================================================================
     // 1) Build base queries for forums and polls separately
     // =================================================================================
-    
+
     // Forum base query
     let forumBaseQuery = `
       SELECT 
@@ -1937,7 +1996,7 @@ export const getForumAndPollFeed = async (req, res) => {
     // =================================================================================
     // 2) Build conditions and parameters for each query type
     // =================================================================================
-    
+
     // Forum conditions and parameters
     const forumConditions = [];
     const forumParams = [userId]; // $1 = userId
@@ -1952,11 +2011,11 @@ export const getForumAndPollFeed = async (req, res) => {
       // Forum condition
       forumConditions.push(`p.subject_tag = $${paramOffset}`);
       forumParams.push(subject);
-      
+
       // Poll condition
       pollConditions.push(`p.subject_id = $${paramOffset}`);
       pollParams.push(subject);
-      
+
       paramOffset++;
     }
 
@@ -1964,11 +2023,11 @@ export const getForumAndPollFeed = async (req, res) => {
       // Forum condition
       forumConditions.push(`p.forum_title ILIKE $${paramOffset}`);
       forumParams.push(`%${search}%`);
-      
+
       // Poll condition
       pollConditions.push(`p.question ILIKE $${paramOffset}`);
       pollParams.push(`%${search}%`);
-      
+
       paramOffset++;
     }
 
@@ -1984,7 +2043,7 @@ export const getForumAndPollFeed = async (req, res) => {
       FROM forum_posts p 
       ${forumWhereClause}
     `;
-    
+
     const pollCountQuery = `
       SELECT COUNT(*) as total 
       FROM polls p 
@@ -2006,7 +2065,7 @@ export const getForumAndPollFeed = async (req, res) => {
     // =================================================================================
     // 4) Fetch data from both sources separately, then combine and paginate
     // =================================================================================
-    
+
     // Complete forum query
     const finalForumQuery = forumBaseQuery + forumWhereClause + `
       GROUP BY p.id, s.subject, g.grade_level, u.id, a.id, sa.id, l.like_count, 

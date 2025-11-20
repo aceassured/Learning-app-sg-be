@@ -29,6 +29,25 @@ export const uploadBufferToVercel = async (buffer, filename) => {
   }
 };
 
+// forum create, update, pdf, docx, zip...........
+
+export const uploadBufferforumToVercel = async (buffer, filename) => {
+  try {
+    // Add unique ID before filename
+    const uniqueName = `${Date.now()}-${randomUUID()}-${filename}`;
+
+    const blob = await put(`forumfile/${uniqueName}`, buffer, {
+      access: "public",
+      token: process.env.VERCEL_BLOB_TOKEN,
+    });
+
+    return blob.url;
+  } catch (err) {
+    console.error("Vercel blob upload failed:", err);
+    throw new Error("Blob upload failed");
+  }
+};
+
 
 // export const questionFileupload = async (req, res) => {
 //   try {

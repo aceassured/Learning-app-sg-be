@@ -869,7 +869,7 @@ export const startbigQuiz = async (req, res) => {
 export const submitAnswers = async (req, res) => {
   try {
     const userId = req.userId;
-    const { session_id, answers } = req.body; // answers: [{question_id, selected_option_id OR user_answer, type}]
+    const { session_id, answers } = req.body;
 
     if (!session_id || !Array.isArray(answers)) {
       return res.status(400).json({ ok: false, message: "Invalid payload" });
@@ -888,63 +888,93 @@ export const submitAnswers = async (req, res) => {
     }
 
     let correctCount = 0;
-    let totalCount = answers.length;
+    let totalCount = 0;
 
-    console.log("answers", answers)
-    // 🔹 Loop through each answer
-    for (const ans of answers) {
-      if (ans.type === "normal") {
-        // 🎯 Normal question type
-        const qRes = await pool.query(
-          "SELECT correct_option_id FROM questions WHERE id=$1",
-          [ans.question_id]
-        );
-        if (!qRes.rowCount) continue;
+    console.log("answers", answers);
 
-        const correct = qRes.rows[0].correct_option_id;
-        const is_correct = correct === ans.selected_option_id;
-        if (is_correct) correctCount++;
+    // 🔹 Group editable answers by quiz_id
+    const editableAnswersByQuiz = {};
+    const normalAnswers = [];
 
-        await pool.query(
-          `INSERT INTO user_answers (session_id, question_id, selected_option_id, is_correct, answered_at)
-           VALUES ($1, $2, $3, $4, now())
-           ON CONFLICT (session_id, question_id)
-           DO UPDATE SET 
-              selected_option_id = EXCLUDED.selected_option_id,
-              is_correct = EXCLUDED.is_correct,
-              answered_at = now()`,
-          [session_id, ans.question_id, ans.selected_option_id, is_correct]
-        );
-
-        await pool.query(
-          `INSERT INTO user_answered_questions (user_id, question_id, answered_at)
-           VALUES ($1, $2, now())
-           ON CONFLICT (user_id, question_id) DO NOTHING`,
-          [userId, ans.question_id]
-        );
-      }
-
+    // Separate and group answers
+    answers.forEach(ans => {
       if (ans.type === "editable") {
-        // 📝 Editable quiz type (Grammar correction)
+        if (!editableAnswersByQuiz[ans.quiz_id]) {
+          editableAnswersByQuiz[ans.quiz_id] = [];
+        }
+        editableAnswersByQuiz[ans.quiz_id].push(ans);
+      } else if (ans.type === "normal") {
+        normalAnswers.push(ans);
+      }
+    });
+
+    // 🔹 Process normal questions
+    for (const ans of normalAnswers) {
+      totalCount++; // Each normal question counts as 1
+
+      const qRes = await pool.query(
+        "SELECT correct_option_id FROM questions WHERE id=$1",
+        [ans.question_id]
+      );
+      if (!qRes.rowCount) continue;
+
+      const correct = qRes.rows[0].correct_option_id;
+      const is_correct = correct === ans.selected_option_id;
+      if (is_correct) correctCount++;
+
+      await pool.query(
+        `INSERT INTO user_answers (session_id, question_id, selected_option_id, is_correct, answered_at)
+         VALUES ($1, $2, $3, $4, now())
+         ON CONFLICT (session_id, question_id)
+         DO UPDATE SET 
+            selected_option_id = EXCLUDED.selected_option_id,
+            is_correct = EXCLUDED.is_correct,
+            answered_at = now()`,
+        [session_id, ans.question_id, ans.selected_option_id, is_correct]
+      );
+
+      await pool.query(
+        `INSERT INTO user_answered_questions (user_id, question_id, answered_at)
+         VALUES ($1, $2, now())
+         ON CONFLICT (user_id, question_id) DO NOTHING`,
+        [userId, ans.question_id]
+      );
+    }
+
+    // 🔹 Process editable quizzes (each quiz counts as 1 question)
+    for (const quizId in editableAnswersByQuiz) {
+      totalCount++; // Each editable quiz counts as 1 question
+
+      const quizAnswers = editableAnswersByQuiz[quizId];
+      let allCorrect = true;
+
+      // Check all answers in this quiz
+      for (const ans of quizAnswers) {
         const qRes = await pool.query(
           "SELECT correct_word FROM editing_quiz_questions WHERE id=$1",
           [ans.question_id]
         );
-        if (!qRes.rowCount) continue;
+        if (!qRes.rowCount) {
+          allCorrect = false;
+          continue;
+        }
 
         const correctWord = qRes.rows[0].correct_word.trim().toLowerCase();
         const userAnswer = ans.provided_word.trim().toLowerCase();
-        console.log("correctWord", correctWord, "userAnswer", userAnswer)
+        console.log("correctWord", correctWord, "userAnswer", userAnswer);
+        
         const is_correct = correctWord === userAnswer;
+        console.log("correctWord", correctWord, "userAnswer", userAnswer, "is_correct", is_correct);
 
-        console.log("correctWord", correctWord, "userAnswer", userAnswer, "is_correct", is_correct)
+        if (!is_correct) {
+          allCorrect = false;
+        }
 
-        if (is_correct) correctCount++;
-
+        // Store each answer individually
         await pool.query(
           `INSERT INTO editing_quiz_answers 
-   (user_id, quiz_id, question_id, user_answer, is_correct, session_id, created_at)
-   VALUES ($1, $2, $3, $4, $5, $6, NOW())`,
+           (user_id, quiz_id, question_id, user_answer, is_correct, session_id, created_at)
+           VALUES ($1, $2, $3, $4, $5, $6, NOW())`,
           [
             userId,
             ans.quiz_id,
@@ -954,8 +984,11 @@ export const submitAnswers = async (req, res) => {
             session_id
           ]
         );
+      }
 
-
+      // If all answers in this quiz are correct, count as 1 correct question
+      if (allCorrect) {
+        correctCount++;
       }
     }
 
@@ -968,6 +1001,10 @@ export const submitAnswers = async (req, res) => {
     );
 
     const incorrectCount = totalCount - correctCount;
+
+    console.log("correctCount", correctCount);
+    console.log("incorrectCount", incorrectCount);
+    console.log("totalCount", totalCount);
 
     // 🔹 Log activity
     await pool.query(
@@ -1007,7 +1044,6 @@ export const submitAnswers = async (req, res) => {
     res.status(500).json({ ok: false, message: "Server error" });
   }
 };
-
 
 // quiz review: return questions + user answers for a session
 

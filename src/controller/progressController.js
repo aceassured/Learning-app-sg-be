@@ -465,11 +465,8 @@ export const getProgressPageDatawithMonthly = async (req, res) => {
     );
 
     // -----------------------------
-    // 2) Total Quizzes Taken
-    //    - normal sessions (user_quiz_sessions)
-    //    - editable sessions: count distinct session_id from editing_quiz_answers
+    // 2) Total Quizzes Taken - Count distinct sessions from user_quiz_sessions
     // -----------------------------
-    // normal quizzes (with optional date range)
     const quizzesParams = [userId];
     let quizzesDateClause = "";
     if (start_date && end_date) {
@@ -477,41 +474,19 @@ export const getProgressPageDatawithMonthly = async (req, res) => {
       quizzesDateClause = `AND finished_at BETWEEN $2 AND $3`;
     }
 
-    const normalQuizzesRes = await pool.query(
-      `SELECT COUNT(*)::int AS normal_count
+    const quizzesTakenRes = await pool.query(
+      `SELECT COUNT(*)::int AS total_quizzes
        FROM user_quiz_sessions
-       WHERE user_id = $1
+       WHERE user_id = $1 AND finished_at IS NOT NULL
        ${quizzesDateClause}`,
       quizzesParams
     );
 
-    // editable quiz sessions (distinct session_id) from editing_quiz_answers
-    const editableParams = [userId];
-    let editableDateClause = "";
-    if (start_date && end_date) {
-      editableParams.push(start_date, end_date);
-      editableDateClause = `AND created_at BETWEEN $2 AND $3`;
-    }
-
-    const editableSessionsRes = await pool.query(
-      `SELECT COUNT(DISTINCT session_id)::int AS editable_sessions
-       FROM editing_quiz_answers
-       WHERE user_id = $1
-       ${editableDateClause}`,
-      editableParams
-    );
-
-    const quizzesTaken =
-      (normalQuizzesRes.rows[0]?.normal_count || 0) +
-      (editableSessionsRes.rows[0]?.editable_sessions || 0);
+    const quizzesTaken = quizzesTakenRes.rows[0]?.total_quizzes || 0;
 
     // -----------------------------
-    // 3) Mini Quiz Analytics (normal only)
-    //    - avg time per question
-    //    - accuracy
-    //    - last_score for mini (avoid referencing outer alias in subquery)
+    // 3) Mini Quiz Analytics (for mini type sessions only)
     // -----------------------------
-    // build mini date filter params separately
     const miniParams = [userId];
     let miniDateClause = "";
     if (start_date && end_date) {
@@ -519,7 +494,6 @@ export const getProgressPageDatawithMonthly = async (req, res) => {
       miniDateClause = `AND s.finished_at BETWEEN $2 AND $3`;
     }
 
-    // last_score subquery gets its own date params (if provided)
     const lastScoreParams = [userId];
     let lastScoreDateClause = "";
     if (start_date && end_date) {
@@ -549,79 +523,56 @@ export const getProgressPageDatawithMonthly = async (req, res) => {
     );
 
     // -----------------------------
-    // 4) MONTHLY ANALYTICS (combine sources)
-    //    - from user_quiz_sessions: use score column, finished_at
-    //    - from editing_quiz_answers: compute per-editable-session score as count of correct answers,
-    //      use created_at (or session created_at if available) grouped by month
+    // 4) MONTHLY ANALYTICS - Get data for entire current year
     // -----------------------------
-    // We'll union the two sources by month and sum them
-    const monthlyParams = [userId];
-    let monthlyEditableDateClause = "";
-    let monthlyNormalDateClause = "";
-    if (start_date && end_date) {
-      // We'll apply same date range to both sources (normal: finished_at, editable: created_at)
-      monthlyParams.push(start_date, end_date);
-      monthlyNormalDateClause = `AND u.finished_at BETWEEN $2 AND $3`;
-      monthlyEditableDateClause = `AND e.created_at BETWEEN $2 AND $3`;
-    }
-
     const monthlyAnalyticsQuery = `
-      WITH normal_month AS (
-        SELECT DATE_TRUNC('month', u.finished_at)::date AS month,
-               COALESCE(u.score,0) AS score
-        FROM user_quiz_sessions u
-        WHERE u.user_id = $1
-          ${monthlyNormalDateClause}
-          AND u.type IN ('mini','mixed','editing')
+      WITH all_months AS (
+        -- Generate all months for the current year
+        SELECT to_char(generate_series(
+          date_trunc('year', CURRENT_DATE),
+          date_trunc('year', CURRENT_DATE) + INTERVAL '1 year - 1 day',
+          '1 month'::interval
+        ), 'YYYY-MM') AS month
       ),
-      editable_month AS (
-        SELECT DATE_TRUNC('month', e.created_at)::date AS month,
-               SUM(CASE WHEN e.is_correct THEN 1 ELSE 0 END)::int AS score
-        FROM editing_quiz_answers e
-        WHERE e.user_id = $1
-          ${monthlyEditableDateClause}
-        GROUP BY DATE_TRUNC('month', e.created_at)
-      ),
-      combined AS (
-        SELECT month, SUM(score)::int AS score
-        FROM (
-          SELECT month, score FROM normal_month
-          UNION ALL
-          SELECT month, score FROM editable_month
-        ) t
-        GROUP BY month
-        ORDER BY month
+      quiz_data AS (
+        -- Get quiz scores for the current year
+        SELECT 
+          to_char(DATE_TRUNC('month', finished_at), 'YYYY-MM') AS month,
+          SUM(score)::int AS score
+        FROM user_quiz_sessions
+        WHERE user_id = $1
+          AND finished_at IS NOT NULL
+          AND finished_at >= date_trunc('year', CURRENT_DATE)
+          AND finished_at < date_trunc('year', CURRENT_DATE) + INTERVAL '1 year'
+        GROUP BY DATE_TRUNC('month', finished_at)
       )
-      SELECT to_char(month, 'YYYY-MM') AS month, score FROM combined;
+      SELECT 
+        am.month,
+        COALESCE(qd.score, 0) AS score
+      FROM all_months am
+      LEFT JOIN quiz_data qd ON am.month = qd.month
+      ORDER BY am.month;
     `;
 
-    const monthlyAnalyticsRes = await pool.query(monthlyAnalyticsQuery, monthlyParams);
+    const monthlyAnalyticsRes = await pool.query(monthlyAnalyticsQuery, [userId]);
 
     // -----------------------------
-    // 5) TOPIC BREAKDOWN
-    //    - we need topics (topic_id) that the user answered from both normal and editable quizzes
-    //    - normalize both sources into a single CTE "all_answers" with columns:
-    //        topic_id, subject_id, is_correct, finished_at
-    //    - then aggregate per topic
+    // 5) TOPIC BREAKDOWN - Combine normal and editable answers from same sessions
     // -----------------------------
-    // Build topic query params (we'll pass userId, optional start/end, optional subject_id)
     const topicParams = [userId];
-    let topicExtraIndex = 2; // next param index if start/end present
     let topicDateClause = "";
     if (start_date && end_date) {
       topicParams.push(start_date, end_date);
       topicDateClause = `AND finished_at BETWEEN $2 AND $3`;
-      topicExtraIndex = 4; // if subject_id also provided, it will be at $4
     }
 
     if (subject_id) {
       topicParams.push(subject_id);
     }
 
-    // We'll create the combined answers CTE: normal answers + editable answers
     const topicBreakdownQuery = `
       WITH all_answers AS (
-        -- normal answers
+        -- normal answers from questions
         SELECT
           q.topic_id::int AS topic_id,
           q.subject_id::int AS subject_id,
@@ -635,16 +586,17 @@ export const getProgressPageDatawithMonthly = async (req, res) => {
 
         UNION ALL
 
-        -- editable answers
+        -- editable answers from editing quizzes
         SELECT
           eq.topic_id::int AS topic_id,
           eq.subject_id::int AS subject_id,
           (CASE WHEN e.is_correct THEN 1 ELSE 0 END)::int AS is_correct,
-          e.created_at::timestamp AS finished_at
+          s.finished_at::timestamp AS finished_at
         FROM editing_quiz_answers e
         JOIN editing_quiz eq ON e.quiz_id = eq.id
+        JOIN user_quiz_sessions s ON e.session_id = s.id
         WHERE e.user_id = $1
-          ${start_date && end_date ? `AND e.created_at BETWEEN $2 AND $3` : ""}
+          ${start_date && end_date ? `AND s.finished_at BETWEEN $2 AND $3` : ""}
       )
 
       SELECT
@@ -666,19 +618,18 @@ export const getProgressPageDatawithMonthly = async (req, res) => {
     const topicBreakdownRes = await pool.query(topicBreakdownQuery, topicParams);
 
     // -----------------------------
-    // 6) Weekly Points
-    //    - sum of: (distinct normal sessions this week)*10 + correct answers this week (normal + editable)
+    // 6) Weekly Points - Based on sessions and correct answers from both types
     // -----------------------------
-    // normal sessions count this week
     const normalThisWeekRes = await pool.query(
       `SELECT COUNT(DISTINCT id)::int AS normal_sessions
        FROM user_quiz_sessions
        WHERE user_id = $1
-         AND started_at >= date_trunc('week', CURRENT_DATE)`,
+         AND finished_at IS NOT NULL
+         AND finished_at >= date_trunc('week', CURRENT_DATE)`,
       [userId]
     );
 
-    // correct answers from normal user_answers this week
+    // Correct answers from normal questions this week
     const normalCorrectThisWeekRes = await pool.query(
       `SELECT COALESCE(SUM(CASE WHEN a.is_correct THEN 1 ELSE 0 END),0)::int AS correct_normal
        FROM user_answers a
@@ -688,12 +639,13 @@ export const getProgressPageDatawithMonthly = async (req, res) => {
       [userId]
     );
 
-    // correct answers from editable quizzes this week
+    // Correct answers from editable questions this week
     const editableCorrectThisWeekRes = await pool.query(
-      `SELECT COALESCE(SUM(CASE WHEN is_correct THEN 1 ELSE 0 END),0)::int AS correct_editable
-       FROM editing_quiz_answers
-       WHERE user_id = $1
-         AND created_at >= date_trunc('week', CURRENT_DATE)`,
+      `SELECT COALESCE(SUM(CASE WHEN e.is_correct THEN 1 ELSE 0 END),0)::int AS correct_editable
+       FROM editing_quiz_answers e
+       JOIN user_quiz_sessions s ON e.session_id = s.id
+       WHERE e.user_id = $1
+         AND e.created_at >= date_trunc('week', CURRENT_DATE)`,
       [userId]
     );
 
@@ -704,19 +656,53 @@ export const getProgressPageDatawithMonthly = async (req, res) => {
 
     // -----------------------------
     // 7) Quizzes in Week Achievement (>=5)
-    //    Count both normal sessions this week + distinct editable session_ids this week
     // -----------------------------
-    const editableSessionsThisWeekRes = await pool.query(
-      `SELECT COUNT(DISTINCT session_id)::int AS editable_sessions_week
-       FROM editing_quiz_answers
+    const quizzesInWeekRes = await pool.query(
+      `SELECT COUNT(*)::int AS quizzes_this_week
+       FROM user_quiz_sessions
        WHERE user_id = $1
-         AND created_at >= date_trunc('week', CURRENT_DATE)`,
+         AND finished_at IS NOT NULL
+         AND finished_at >= date_trunc('week', CURRENT_DATE)`,
       [userId]
     );
 
-    const quizzesInWeekCount =
-      (normalThisWeekRes.rows[0]?.normal_sessions || 0) +
-      (editableSessionsThisWeekRes.rows[0]?.editable_sessions_week || 0);
+    const quizzesInWeekCount = quizzesInWeekRes.rows[0]?.quizzes_this_week || 0;
+
+    // -----------------------------
+    // 8) 3 Days Continuous Streak Badge
+    //    Check if user has completed quizzes for 3 consecutive days including today
+    // -----------------------------
+    const streakRes = await pool.query(
+      `WITH quiz_dates AS (
+        SELECT DISTINCT DATE(finished_at) AS activity_date
+        FROM user_quiz_sessions 
+        WHERE user_id = $1 
+          AND finished_at IS NOT NULL
+          AND finished_at >= CURRENT_DATE - INTERVAL '6 days'
+      ),
+      consecutive_groups AS (
+        SELECT 
+          activity_date,
+          activity_date - INTERVAL '1 day' * 
+            ROW_NUMBER() OVER (ORDER BY activity_date) AS grp
+        FROM quiz_dates
+      ),
+      consecutive_counts AS (
+        SELECT 
+          grp,
+          COUNT(*) AS consecutive_days,
+          MIN(activity_date) AS start_date,
+          MAX(activity_date) AS end_date
+        FROM consecutive_groups
+        GROUP BY grp
+      )
+      SELECT MAX(consecutive_days) AS max_streak
+      FROM consecutive_counts
+      WHERE end_date >= CURRENT_DATE - INTERVAL '1 day'`,
+      [userId]
+    );
+
+    const hasThreeDayStreak = streakRes.rows[0]?.max_streak >= 3;
 
     // -----------------------------
     // Build response
@@ -761,6 +747,7 @@ export const getProgressPageDatawithMonthly = async (req, res) => {
         },
         badges: {
           quizzesInWeek: quizzesInWeekCount >= 5,
+          threeDayStreak: hasThreeDayStreak,
         },
       },
     });
