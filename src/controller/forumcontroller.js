@@ -995,7 +995,31 @@ export const editPost = async (req, res) => {
           authorId,
         ],
       };
-    } else {
+    }
+    else if (author_type === "superadmin") {
+      query = {
+        text: `UPDATE forum_posts
+               SET grade_level = $1,
+                   content = $2,
+                   subject_tag = $3,
+                   type_of_upload = $4,
+                   forum_title = $5,
+                   topic_id = $6
+               WHERE id = $7 AND super_admin_id = $8
+               RETURNING *`,
+        values: [
+          grade_level,
+          content,
+          subject_tag,
+          type_of_upload,
+          forum_title,
+          topic_id,
+          post_id,
+          authorId,
+        ],
+      };
+    }
+    else {
       return res.status(400).json({ ok: false, message: "Invalid author_type" });
     }
 
@@ -1041,7 +1065,19 @@ export const editPost = async (req, res) => {
           [post.id, url, f.originalname]
         );
       }
+    } else if (req.files.length === 0) {
+      const { rows: existingAdmin } = await pool.query(
+        `SELECT * FROM forum_files WHERE post_id = $1`,
+        [post.id]
+      );
+
+      if (existingAdmin.length === 0) {
+        return
+      } else {
+        await pool.query(`DELETE FROM forum_files WHERE post_id = $1`, [post.id]);
+      }
     }
+
 
 
     res.json({ ok: true, message: "Post updated successfully", post });
