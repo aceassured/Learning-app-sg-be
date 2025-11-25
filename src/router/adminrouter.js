@@ -1,5 +1,5 @@
 import express from "express"
-import { adminAnnouncementpoll, adminCreateBulkEditableQuizQuestions, adminCreateEditQuiz, admincreatePoll, adminEditPoll, adminUpdateUserStatus, createGrades, deleteEditableUpload, deleteEditQuiz, deleteGrade, deletePoll, deleteSubject, deleteTopic, getAllEditQuizzes, getAllEditQuizzesnew, getAllpoll, getAllQuestionsnew, getEditableUploadData, getEditableUploadHistory, getParticularEditableQuiz, getUserEditingQuiz, updateEditQuiz, updateGrade, updateSubject, updateTopics } from "../controller/admincontroller.js"
+import { adminAnnouncementpoll, adminCreateBulkEditableQuizQuestions, adminCreateEditQuiz, admincreatePoll, adminDashboardApi, adminEditPoll, adminUpdateUserStatus, createGrades, deleteEditableUpload, deleteEditQuiz, deleteGrade, deletePoll, deleteSubject, deleteTopic, getAllEditQuizzes, getAllEditQuizzesnew, getAllpoll, getAllQuestionsnew, getEditableUploadData, getEditableUploadHistory, getParticularEditableQuiz, getUserEditingQuiz, updateEditQuiz, updateGrade, updateSubject, updateTopics } from "../controller/admincontroller.js"
 import auth from "../middleware/auth.js"
 import { admincreateSubject, admincreateTopic, getAllTopic, getParticularquestions, updatequestion } from "../controller/usercontroller.js"
 import multer from "multer";
@@ -59,5 +59,6 @@ router.get("/getalleditquestionsnew", getAllEditQuizzesnew);
 router.put("/updateeditquestion/:id", updateEditQuiz);
 router.delete("/deleteeditquestion/:id", deleteEditQuiz);
 router.get("/geteditquestion/:id", getParticularEditableQuiz);
+router.get("/admindashboard", adminDashboardApi);
 
 export default router

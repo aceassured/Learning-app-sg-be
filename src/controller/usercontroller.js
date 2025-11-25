@@ -975,7 +975,7 @@ export const userverifyOtp = async (req, res) => {
     const user = userRes.rows[0];
 
     // ✅ Check OTP match
-    if (user.otp !== otp) {
+if (parseInt(user.otp) !== parseInt(otp)) {
       return res.status(400).json({ status: false, message: "Invalid OTP" });
     }
 
@@ -1280,8 +1280,8 @@ export const userRegister = async (req, res) => {
     const newUser = rows[0];
 
     await pool.query(
-      `INSERT INTO users_settings (user_id, created_at, updated_at)
-       VALUES ($1, now(), now())`,
+      `INSERT INTO user_settings (user_id)
+       VALUES ($1)`,
       [newUser.id]
     );
 
@@ -4594,8 +4594,8 @@ export const admincreateTopic = async (req, res) => {
     const grade_level = gradeRes.rows[0].grade_level;
 
     const result = await pool.query(
-      `INSERT INTO topics (grade_id, grade_level, subject_id, topic)
-       VALUES ($1, $2, $3, $4)
+      `INSERT INTO topics (grade_id, grade_level, subject_id, topic, created_at)
+       VALUES ($1, $2, $3, $4, NOW())
        RETURNING id, grade_id, grade_level, subject_id, topic`,
       [grade_id, grade_level, subject_id, topic]
     );

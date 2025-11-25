@@ -1697,11 +1697,150 @@ export const getEditableUploadData = async (req, res) => {
 
 // adminDashboard api........
 
-export const adminDashboardApi = async ( req, res ) => {
-
+export const adminDashboardApi = async (req, res) => {
   try {
-    
+
+    // ---------------- TOP STATS ----------------
+    const totalUsers = (await pool.query(
+      `SELECT COUNT(*) FROM users`
+    )).rows[0].count;
+
+    const totalQuestions = (await pool.query(
+      `SELECT COUNT(*) FROM questions`
+    )).rows[0].count;
+
+    const pendingApprovals = (await pool.query(
+      `SELECT COUNT(*) FROM users WHERE is_active_request = false`
+    )).rows[0].count;
+
+    const newForumPostsToday = (await pool.query(
+      `SELECT COUNT(*) FROM forum_posts WHERE DATE(created_at) = CURRENT_DATE`
+    )).rows[0].count;
+
+    // ---------------- ACTIVITY TRENDS (Last 7 Days) ----------------
+    const activityTrends = await pool.query(`
+      WITH days AS (
+        SELECT generate_series(CURRENT_DATE - 6, CURRENT_DATE, '1 day') AS day
+      )
+      SELECT 
+        to_char(days.day, 'Dy') AS label,
+        COALESCE(active.count, 0) AS active_users,
+        COALESCE(q.count, 0) AS questions_added
+      FROM days
+      LEFT JOIN (
+        SELECT DATE(activity_date) AS day, COUNT(DISTINCT user_id) AS count
+        FROM user_activity
+        GROUP BY DATE(activity_date)
+      ) active ON active.day = days.day
+      LEFT JOIN (
+        SELECT DATE(created_at) AS day, COUNT(*) AS count
+        FROM questions
+        GROUP BY DATE(created_at)
+      ) q ON q.day = days.day
+      ORDER BY days.day ASC
+    `);
+
+    const labels = activityTrends.rows.map(r => r.label);
+    const activeUsers = activityTrends.rows.map(r => r.active_users);
+    const questionsAdded = activityTrends.rows.map(r => r.questions_added);
+
+// ---------------- RECENT ACTIONS (User Added should be first) ----------------
+const recentActions = await pool.query(`
+  SELECT * FROM (
+      SELECT * FROM (
+          SELECT 'User Added' AS type,
+                name AS title,
+                created_at
+          FROM users
+          ORDER BY created_at DESC
+          LIMIT 1
+      ) AS ua
+
+      UNION ALL
+
+      SELECT * FROM (
+          SELECT 'Questions Added' AS type,
+                CONCAT('Questions Count: ', COUNT(*)) AS title,
+                MAX(created_at) AS created_at
+          FROM questions
+      ) AS qa
+
+      UNION ALL
+
+      SELECT * FROM (
+          SELECT 'Poll Created' AS type,
+                CONCAT(p.question, ' - Grade: ', g.grade_level) AS title,
+                p.created_at
+          FROM polls p
+          LEFT JOIN grades g ON p.grade_level = g.id
+          ORDER BY p.created_at DESC
+          LIMIT 1
+      ) AS pc
+
+      UNION ALL
+
+      SELECT * FROM (
+          SELECT 'New Forum Post' AS type,
+                CONCAT(f.forum_title, ' - Grade: ', g.grade_level) AS title,
+                f.created_at
+          FROM forum_posts f
+          LEFT JOIN grades g ON f.grade_level = g.id
+          ORDER BY f.created_at DESC
+          LIMIT 1
+      ) AS fp
+  ) AS actions
+  ORDER BY 
+    CASE 
+      WHEN type = 'User Added' THEN 0
+      ELSE 1
+    END,
+    created_at DESC
+`);
+
+
+
+    // ---------------- PLATFORM INSIGHTS (Updated as requested) ----------------
+    const qaBankUploads = (await pool.query(`
+      SELECT COUNT(*) FROM questions
+      WHERE created_at >= NOW() - INTERVAL '7 days'
+    `)).rows[0].count;
+
+    const forumPostsThisWeek = (await pool.query(`
+      SELECT COUNT(*) FROM forum_posts
+      WHERE created_at >= NOW() - INTERVAL '7 days'
+    `)).rows[0].count;
+
+    const pollsThisWeek = (await pool.query(`
+      SELECT COUNT(*) FROM polls
+      WHERE created_at >= NOW() - INTERVAL '7 days'
+    `)).rows[0].count;
+
+    // ---------------- SEND RESPONSE ----------------
+    res.json({
+      ok: true,
+      topStats: {
+        totalUsers,
+        totalQuestions,
+        pendingApprovals,
+        newForumPostsToday
+      },
+      activityTrends: {
+        labels,
+        activeUsers,
+        questionsAdded
+      },
+      recentActions: recentActions.rows,
+      platformInsights: {
+        qaBankUploads,
+        forumPostsThisWeek,
+        pollsThisWeek
+      }
+    });
+
   } catch (error) {
-    
+    console.error("Dashboard API Error:", error);
+    res.status(500).json({ ok: false, message: "Server error" });
   }
-}
+};
+
+
