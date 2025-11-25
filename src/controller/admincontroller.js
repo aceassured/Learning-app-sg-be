@@ -1717,6 +1717,52 @@ export const adminDashboardApi = async (req, res) => {
       `SELECT COUNT(*) FROM forum_posts WHERE DATE(created_at) = CURRENT_DATE`
     )).rows[0].count;
 
+
+    // -------- MONTHLY COMPARISON COUNTS --------
+    const lastMonthUsers = (await pool.query(`
+      SELECT COUNT(*) FROM users
+      WHERE DATE_TRUNC('month', created_at) = DATE_TRUNC('month', CURRENT_DATE - INTERVAL '1 month')
+    `)).rows[0].count;
+
+    const thisMonthUsers = (await pool.query(`
+      SELECT COUNT(*) FROM users
+      WHERE DATE_TRUNC('month', created_at) = DATE_TRUNC('month', CURRENT_DATE)
+    `)).rows[0].count;
+
+
+    const lastMonthQuestions = (await pool.query(`
+      SELECT COUNT(*) FROM questions
+      WHERE DATE_TRUNC('month', created_at) = DATE_TRUNC('month', CURRENT_DATE - INTERVAL '1 month')
+    `)).rows[0].count;
+
+    const thisMonthQuestions = (await pool.query(`
+      SELECT COUNT(*) FROM questions
+      WHERE DATE_TRUNC('month', created_at) = DATE_TRUNC('month', CURRENT_DATE)
+    `)).rows[0].count;
+
+
+    const lastMonthForumPosts = (await pool.query(`
+      SELECT COUNT(*) FROM forum_posts
+      WHERE DATE_TRUNC('month', created_at) = DATE_TRUNC('month', CURRENT_DATE - INTERVAL '1 month')
+    `)).rows[0].count;
+
+    const thisMonthForumPosts = (await pool.query(`
+      SELECT COUNT(*) FROM forum_posts
+      WHERE DATE_TRUNC('month', created_at) = DATE_TRUNC('month', CURRENT_DATE)
+    `)).rows[0].count;
+
+
+    // -------- GROWTH PERCENTAGE CALCULATION --------
+    function calcGrowth(current, previous) {
+      if (previous == 0) return current > 0 ? 100 : 0;
+      return ((current - previous) / previous * 100).toFixed(2);
+    }
+
+    const usersGrowthPercentage = calcGrowth(thisMonthUsers, lastMonthUsers);
+    const questionsGrowthPercentage = calcGrowth(thisMonthQuestions, lastMonthQuestions);
+    const forumPostsGrowthPercentage = calcGrowth(thisMonthForumPosts, lastMonthForumPosts);
+
+
     // ---------------- ACTIVITY TRENDS (Last 7 Days) ----------------
     const activityTrends = await pool.query(`
       WITH days AS (
@@ -1744,62 +1790,62 @@ export const adminDashboardApi = async (req, res) => {
     const activeUsers = activityTrends.rows.map(r => r.active_users);
     const questionsAdded = activityTrends.rows.map(r => r.questions_added);
 
-// ---------------- RECENT ACTIONS (User Added should be first) ----------------
-const recentActions = await pool.query(`
-  SELECT * FROM (
+
+    // ---------------- RECENT ACTIONS (User Added should be first, latest only) ----------------
+    const recentActions = await pool.query(`
       SELECT * FROM (
-          SELECT 'User Added' AS type,
-                name AS title,
-                created_at
-          FROM users
-          ORDER BY created_at DESC
-          LIMIT 1
-      ) AS ua
+          SELECT * FROM (
+              SELECT 'User Added' AS type,
+                    name AS title,
+                    created_at
+              FROM users
+              ORDER BY created_at DESC
+              LIMIT 1
+          ) AS ua
 
-      UNION ALL
+          UNION ALL
 
-      SELECT * FROM (
-          SELECT 'Questions Added' AS type,
-                CONCAT('Questions Count: ', COUNT(*)) AS title,
-                MAX(created_at) AS created_at
-          FROM questions
-      ) AS qa
+          SELECT * FROM (
+              SELECT 'Questions Added' AS type,
+                    CONCAT('Questions Count: ', COUNT(*)) AS title,
+                    MAX(created_at) AS created_at
+              FROM questions
+          ) AS qa
 
-      UNION ALL
+          UNION ALL
 
-      SELECT * FROM (
-          SELECT 'Poll Created' AS type,
-                CONCAT(p.question, ' - Grade: ', g.grade_level) AS title,
-                p.created_at
-          FROM polls p
-          LEFT JOIN grades g ON p.grade_level = g.id
-          ORDER BY p.created_at DESC
-          LIMIT 1
-      ) AS pc
+          SELECT * FROM (
+              SELECT 'Poll Created' AS type,
+                    CONCAT(p.question, ' - Grade: ', g.grade_level) AS title,
+                    p.created_at
+              FROM polls p
+              LEFT JOIN grades g ON p.grade_level = g.id
+              ORDER BY p.created_at DESC
+              LIMIT 1
+          ) AS pc
 
-      UNION ALL
+          UNION ALL
 
-      SELECT * FROM (
-          SELECT 'New Forum Post' AS type,
-                CONCAT(f.forum_title, ' - Grade: ', g.grade_level) AS title,
-                f.created_at
-          FROM forum_posts f
-          LEFT JOIN grades g ON f.grade_level = g.id
-          ORDER BY f.created_at DESC
-          LIMIT 1
-      ) AS fp
-  ) AS actions
-  ORDER BY 
-    CASE 
-      WHEN type = 'User Added' THEN 0
-      ELSE 1
-    END,
-    created_at DESC
-`);
+          SELECT * FROM (
+              SELECT 'New Forum Post' AS type,
+                    CONCAT(f.forum_title, ' - Grade: ', g.grade_level) AS title,
+                    f.created_at
+              FROM forum_posts f
+              LEFT JOIN grades g ON f.grade_level = g.id
+              ORDER BY f.created_at DESC
+              LIMIT 1
+          ) AS fp
+      ) AS actions
+      ORDER BY 
+        CASE 
+          WHEN type = 'User Added' THEN 0
+          ELSE 1
+        END,
+        created_at DESC
+    `);
 
 
-
-    // ---------------- PLATFORM INSIGHTS (Updated as requested) ----------------
+    // ---------------- PLATFORM INSIGHTS ----------------
     const qaBankUploads = (await pool.query(`
       SELECT COUNT(*) FROM questions
       WHERE created_at >= NOW() - INTERVAL '7 days'
@@ -1815,6 +1861,7 @@ const recentActions = await pool.query(`
       WHERE created_at >= NOW() - INTERVAL '7 days'
     `)).rows[0].count;
 
+
     // ---------------- SEND RESPONSE ----------------
     res.json({
       ok: true,
@@ -1822,7 +1869,10 @@ const recentActions = await pool.query(`
         totalUsers,
         totalQuestions,
         pendingApprovals,
-        newForumPostsToday
+        newForumPostsToday,
+        usersGrowthPercentage,
+        questionsGrowthPercentage,
+        forumPostsGrowthPercentage
       },
       activityTrends: {
         labels,
