@@ -1710,7 +1710,7 @@ export const adminDashboardApi = async (req, res) => {
     )).rows[0].count;
 
     const pendingApprovals = (await pool.query(
-      `SELECT COUNT(*) FROM users WHERE is_active_request = false`
+      `SELECT COUNT(*) FROM users WHERE is_active_request = false AND active_status != TRUE`
     )).rows[0].count;
 
     const newForumPostsToday = (await pool.query(
