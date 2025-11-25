@@ -1,5 +1,6 @@
 // src/controller/forumcontroller.js
 import pool from '../../database.js';
+import hybridModeration from '../services/hybridModeration.js';
 import { compressFile } from '../utils/compressFile.js';
 import { uploadBufferforumToVercel, uploadBufferToVercel } from '../utils/vercel-blob.js';
 
@@ -824,40 +825,140 @@ export const getonlyForumNotes = async (req, res) => {
 
 
 
+// export const createPost = async (req, res) => {
+//   try {
+//     const { grade_level, content, subject_tag, type_of_upload, author_type, forum_title, topic_id } = req.body;
+//     const authorId = req.userId;
+
+//     let postRes;
+//     // Force UTC timestamp
+//     const created_at = new Date().toISOString();
+
+//     if (author_type === "user") {
+//       postRes = await pool.query(
+//         `INSERT INTO forum_posts (user_id, grade_level, content, subject_tag, type_of_upload, forum_title, topic_id, created_at) 
+//          VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
+//         [authorId, grade_level, content, subject_tag, type_of_upload, forum_title, topic_id, created_at]
+//       );
+//     } else if (author_type === "admin") {
+//       postRes = await pool.query(
+//         `INSERT INTO forum_posts (admin_id, grade_level, content, subject_tag, type_of_upload, forum_title, topic_id, created_at) 
+//          VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
+//         [authorId, grade_level, content, subject_tag, type_of_upload, forum_title, topic_id, created_at]
+//       );
+//     }
+//     else if (author_type === "superadmin") {
+//       postRes = await pool.query(
+//         `INSERT INTO forum_posts (super_admin_id, grade_level, content, subject_tag, type_of_upload, forum_title, topic_id, created_at) 
+//          VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
+//         [authorId, grade_level, content, subject_tag, type_of_upload, forum_title, topic_id, created_at]
+//       );
+//     } else {
+//       return res.status(400).json({ ok: false, message: "Invalid author_type" });
+//     }
+
+//     const post = postRes.rows[0];
+
+//     if (req.files && req.files.length) {
+//       for (const f of req.files) {
+//         const compressedBuffer = await compressFile(
+//           f.buffer,
+//           f.mimetype,
+//           f.originalname
+//         );
+
+//         const url = await uploadBufferforumToVercel(
+//           compressedBuffer,
+//           f.originalname
+//         );
+
+//         await pool.query(
+//           `INSERT INTO forum_files (post_id, url, filename)
+//        VALUES ($1, $2, $3)`,
+//           [post.id, url, f.originalname]
+//         );
+//       }
+//     }
+
+
+//     res.json({ ok: true, post });
+//   } catch (err) {
+//     console.error(err);
+//     res.status(500).json({ ok: false, message: "Server error" });
+//   }
+// };
+
+
+
 export const createPost = async (req, res) => {
   try {
     const { grade_level, content, subject_tag, type_of_upload, author_type, forum_title, topic_id } = req.body;
     const authorId = req.userId;
 
+    if (!content || !author_type) {
+      return res.status(400).json({ 
+        ok: false, 
+        message: "Content and author_type are required" 
+      });
+    }
+
+    // Use Perspective API moderation
+    const moderationResult = await hybridModeration.moderateContent(content, {
+      usePerspective: true,
+      strictMode: true
+    });
+
+    console.log('Perspective Moderation Result:', {
+      safe: moderationResult.safe,
+      method: moderationResult.method,
+      scores: moderationResult.scores
+    });
+
+    // Block if not safe
+    if (!moderationResult.safe) {
+      return res.status(400).json({
+        ok: false,
+        message: "Content violates community guidelines",
+        moderation: {
+          method: moderationResult.method,
+          summary: moderationResult.summary,
+          scores: moderationResult.scores,
+          needsReview: moderationResult.needsHumanReview
+        }
+      });
+    }
+
+    // Step 3: Proceed with post creation (content is safe)
     let postRes;
-    // Force UTC timestamp
     const created_at = new Date().toISOString();
 
+    // Determine author type and build query
+    let query, params;
+
     if (author_type === "user") {
-      postRes = await pool.query(
-        `INSERT INTO forum_posts (user_id, grade_level, content, subject_tag, type_of_upload, forum_title, topic_id, created_at) 
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
-        [authorId, grade_level, content, subject_tag, type_of_upload, forum_title, topic_id, created_at]
-      );
-    } else if (author_type === "admin") {
-      postRes = await pool.query(
-        `INSERT INTO forum_posts (admin_id, grade_level, content, subject_tag, type_of_upload, forum_title, topic_id, created_at) 
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
-        [authorId, grade_level, content, subject_tag, type_of_upload, forum_title, topic_id, created_at]
-      );
+      query = `INSERT INTO forum_posts (user_id, grade_level, content, subject_tag, type_of_upload, forum_title, topic_id, created_at, moderation_status) 
+               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *`;
+      params = [authorId, grade_level, content, subject_tag, type_of_upload, forum_title, topic_id, created_at, 'approved'];
+    } 
+    else if (author_type === "admin") {
+      query = `INSERT INTO forum_posts (admin_id, grade_level, content, subject_tag, type_of_upload, forum_title, topic_id, created_at, moderation_status) 
+               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *`;
+      params = [authorId, grade_level, content, subject_tag, type_of_upload, forum_title, topic_id, created_at, 'approved'];
     }
     else if (author_type === "superadmin") {
-      postRes = await pool.query(
-        `INSERT INTO forum_posts (super_admin_id, grade_level, content, subject_tag, type_of_upload, forum_title, topic_id, created_at) 
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
-        [authorId, grade_level, content, subject_tag, type_of_upload, forum_title, topic_id, created_at]
-      );
-    } else {
+      query = `INSERT INTO forum_posts (super_admin_id, grade_level, content, subject_tag, type_of_upload, forum_title, topic_id, created_at, moderation_status) 
+               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *`;
+      params = [authorId, grade_level, content, subject_tag, type_of_upload, forum_title, topic_id, created_at, 'approved'];
+    } 
+    else {
       return res.status(400).json({ ok: false, message: "Invalid author_type" });
     }
 
+    // Execute query
+    postRes = await pool.query(query, params);
     const post = postRes.rows[0];
 
+    // Step 4: Handle file uploads if any
     if (req.files && req.files.length) {
       for (const f of req.files) {
         const compressedBuffer = await compressFile(
@@ -872,18 +973,31 @@ export const createPost = async (req, res) => {
         );
 
         await pool.query(
-          `INSERT INTO forum_files (post_id, url, filename)
-       VALUES ($1, $2, $3)`,
+          `INSERT INTO forum_files (post_id, url, filename) VALUES ($1, $2, $3)`,
           [post.id, url, f.originalname]
         );
       }
     }
 
+    // Step 5: Send response
+    const response = {
+      ok: true,
+      post,
+      moderation: {
+        status: 'clean',
+        method: moderationResult.method,
+        message: 'Content published successfully'
+      }
+    };
 
-    res.json({ ok: true, post });
+    res.json(response);
+
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ ok: false, message: "Server error" });
+    console.error('Error creating post:', err);
+    res.status(500).json({ 
+      ok: false, 
+      message: "Server error"
+    });
   }
 };
 
