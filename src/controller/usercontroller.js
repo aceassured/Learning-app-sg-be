@@ -215,6 +215,13 @@ export const Commonlogin = async (req, res) => {
     if (!email || !password) {
       return res.status(400).json({ status: false, message: "Email and password are required" });
     }
+    const isSocialLogin = await pool.query(
+      `SELECT is_social_login, password,provider from users WHERE email = $1`,
+      [email]
+    );
+    if (isSocialLogin.rows[0].is_social_login && isSocialLogin.rows[0].password === null) {
+      return res.status(404).json({ status: false, data: isSocialLogin.rows[0].provider, message: "User register using social login" });
+    }
 
     // Fetch user with grade join
     const { rows } = await pool.query(
@@ -975,7 +982,7 @@ export const userverifyOtp = async (req, res) => {
     const user = userRes.rows[0];
 
     // ✅ Check OTP match
-if (parseInt(user.otp) !== parseInt(otp)) {
+    if (parseInt(user.otp) !== parseInt(otp)) {
       return res.status(400).json({ status: false, message: "Invalid OTP" });
     }
 
@@ -4390,6 +4397,7 @@ export const userconfirmPassword = async (req, res) => {
 };
 
 
+
 // user player id save for onesignal.......
 
 export const playerIdSave = async (req, res) => {
@@ -4660,7 +4668,7 @@ export const adminRequestActive = async (req, res) => {
     `;
 
     const updateResult = await client.query(updateQuery, [admin_id]);
-    
+
     await client.query('COMMIT'); // ✅ Commit transaction
 
     return res.status(200).json({
