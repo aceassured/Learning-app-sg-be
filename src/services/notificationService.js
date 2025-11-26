@@ -537,77 +537,16 @@ export const sendNotificationToUser = async (userId, notificationData) => {
  */
 
 // utc time.....
-export const startReminderCron = () => {
-  // Run every minute
-  cron.schedule('* * * * *', async () => {
-    try {
-      const currentTime = new Date();
-      const hours = currentTime.getHours().toString().padStart(2, '0');
-      const minutes = currentTime.getMinutes().toString().padStart(2, '0');
-      const currentTimeStr = `${hours}:${minutes}:00`;
-
-      console.log(`⏰ Checking reminders for ${currentTimeStr}...`);
-
-      // ✅ Get users who have reminders enabled and time matches
-      const result = await pool.query(
-        `SELECT 
-           u.id, 
-           u.name, 
-           u.fcm_token, 
-           s.daily_reminder_time
-         FROM users u
-         INNER JOIN user_settings s ON s.user_id = u.id
-         WHERE s.reminder_enabled = true
-         AND s.daily_reminder_time = $1::time`,
-        [currentTimeStr]
-      );
-
-      const users = result.rows;
-
-      if (users.length === 0) return;
-
-      console.log(`📢 Sending reminders to ${users.length} users at ${currentTimeStr}`);
-
-      // Send notifications
-      for (const user of users) {
-        await sendNotificationToUser(user.id, {
-          title: '📚 Daily Quiz Reminder',
-          message: `Hi ${user.name}! Time for your daily learning session. Let's keep your streak going! 🔥`,
-          type: 'reminder',
-          subject: 'Daily Reminder',
-          url: '/quiz',
-        });
-      }
-
-      console.log(`✅ Sent ${users.length} reminder notifications`);
-    } catch (error) {
-      console.error('❌ Error in reminder cron job:', error);
-    }
-  });
-
-  console.log('✅ Reminder cron job started (runs every minute)');
-};
-
-// let reminderCronStarted = false;
-
 // export const startReminderCron = () => {
-//   if (reminderCronStarted) return; // Prevent multiple cron instances
-//   reminderCronStarted = true;
-
 //   // Run every minute
 //   cron.schedule('* * * * *', async () => {
 //     try {
 //       const currentTime = new Date();
-
-//       // Convert UTC to IST (+5:30)
-//       const istOffsetMinutes = 5 * 60 + 30; // 5 hours 30 minutes
-//       const istTime = new Date(currentTime.getTime() + istOffsetMinutes * 60 * 1000);
-
-//       const hours = istTime.getHours().toString().padStart(2, '0');
-//       const minutes = istTime.getMinutes().toString().padStart(2, '0');
+//       const hours = currentTime.getHours().toString().padStart(2, '0');
+//       const minutes = currentTime.getMinutes().toString().padStart(2, '0');
 //       const currentTimeStr = `${hours}:${minutes}:00`;
 
-//       console.log(`⏰ Checking reminders for IST ${currentTimeStr}...`);
+//       console.log(`⏰ Checking reminders for ${currentTimeStr}...`);
 
 //       // ✅ Get users who have reminders enabled and time matches
 //       const result = await pool.query(
@@ -648,6 +587,67 @@ export const startReminderCron = () => {
 
 //   console.log('✅ Reminder cron job started (runs every minute)');
 // };
+
+// let reminderCronStarted = false;
+
+export const startReminderCron = () => {
+  if (reminderCronStarted) return; // Prevent multiple cron instances
+  reminderCronStarted = true;
+
+  // Run every minute
+  cron.schedule('* * * * *', async () => {
+    try {
+      const currentTime = new Date();
+
+      // Convert UTC to IST (+5:30)
+      const istOffsetMinutes = 5 * 60 + 30; // 5 hours 30 minutes
+      const istTime = new Date(currentTime.getTime() + istOffsetMinutes * 60 * 1000);
+
+      const hours = istTime.getHours().toString().padStart(2, '0');
+      const minutes = istTime.getMinutes().toString().padStart(2, '0');
+      const currentTimeStr = `${hours}:${minutes}:00`;
+
+      console.log(`⏰ Checking reminders for IST ${currentTimeStr}...`);
+
+      // ✅ Get users who have reminders enabled and time matches
+      const result = await pool.query(
+        `SELECT 
+           u.id, 
+           u.name, 
+           u.fcm_token, 
+           s.daily_reminder_time
+         FROM users u
+         INNER JOIN user_settings s ON s.user_id = u.id
+         WHERE s.reminder_enabled = true
+         AND s.daily_reminder_time = $1::time`,
+        [currentTimeStr]
+      );
+
+      const users = result.rows;
+
+      if (users.length === 0) return;
+
+      console.log(`📢 Sending reminders to ${users.length} users at ${currentTimeStr}`);
+
+      // Send notifications
+      for (const user of users) {
+        await sendNotificationToUser(user.id, {
+          title: '📚 Daily Quiz Reminder',
+          message: `Hi ${user.name}! Time for your daily learning session. Let's keep your streak going! 🔥`,
+          type: 'reminder',
+          subject: 'Daily Reminder',
+          url: '/quiz',
+        });
+      }
+
+      console.log(`✅ Sent ${users.length} reminder notifications`);
+    } catch (error) {
+      console.error('❌ Error in reminder cron job:', error);
+    }
+  });
+
+  console.log('✅ Reminder cron job started (runs every minute)');
+};
 
 
 
