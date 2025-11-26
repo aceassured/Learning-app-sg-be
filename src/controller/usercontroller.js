@@ -2315,9 +2315,8 @@ export const getAllUsers = async (req, res) => {
 
 
 
-
 export const getAllSubjectnew = async (req, res) => {
-  const { grade_id, search } = req.body; // ✅ added search
+  const { grade_id, search } = req.body;
 
   const client = await pool.connect();
   try {
@@ -2326,7 +2325,9 @@ export const getAllSubjectnew = async (req, res) => {
       FROM subjects s
       JOIN grades g ON s.grade_id = g.id
       WHERE s.grade_id = $1
+      AND s.active_status = true
     `;
+
     const values = [grade_id];
 
     if (search) {
