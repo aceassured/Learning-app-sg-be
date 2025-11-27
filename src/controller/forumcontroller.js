@@ -823,42 +823,75 @@ export const getonlyForumNotes = async (req, res) => {
 };
 
 
-
-
 // export const createPost = async (req, res) => {
 //   try {
 //     const { grade_level, content, subject_tag, type_of_upload, author_type, forum_title, topic_id } = req.body;
 //     const authorId = req.userId;
 
+//     if (!content || !author_type) {
+//       return res.status(400).json({ 
+//         ok: false, 
+//         message: "Content and author_type are required" 
+//       });
+//     }
+
+//     // Use Perspective API moderation
+//     const moderationResult = await hybridModeration.moderateContent(content, {
+//       usePerspective: true,
+//       strictMode: true
+//     });
+
+//     console.log('Perspective Moderation Result:', {
+//       safe: moderationResult.safe,
+//       method: moderationResult.method,
+//       scores: moderationResult.scores
+//     });
+
+//     // Block if not safe
+//     if (!moderationResult.safe) {
+//       return res.status(400).json({
+//         ok: false,
+//         message: "Content violates community guidelines",
+//         moderation: {
+//           method: moderationResult.method,
+//           summary: moderationResult.summary,
+//           scores: moderationResult.scores,
+//           needsReview: moderationResult.needsHumanReview
+//         }
+//       });
+//     }
+
+//     // Step 3: Proceed with post creation (content is safe)
 //     let postRes;
-//     // Force UTC timestamp
 //     const created_at = new Date().toISOString();
 
+//     // Determine author type and build query
+//     let query, params;
+
 //     if (author_type === "user") {
-//       postRes = await pool.query(
-//         `INSERT INTO forum_posts (user_id, grade_level, content, subject_tag, type_of_upload, forum_title, topic_id, created_at) 
-//          VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
-//         [authorId, grade_level, content, subject_tag, type_of_upload, forum_title, topic_id, created_at]
-//       );
-//     } else if (author_type === "admin") {
-//       postRes = await pool.query(
-//         `INSERT INTO forum_posts (admin_id, grade_level, content, subject_tag, type_of_upload, forum_title, topic_id, created_at) 
-//          VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
-//         [authorId, grade_level, content, subject_tag, type_of_upload, forum_title, topic_id, created_at]
-//       );
+//       query = `INSERT INTO forum_posts (user_id, grade_level, content, subject_tag, type_of_upload, forum_title, topic_id, created_at, moderation_status) 
+//                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *`;
+//       params = [authorId, grade_level, content, subject_tag, type_of_upload, forum_title, topic_id, created_at, 'approved'];
+//     } 
+//     else if (author_type === "admin") {
+//       query = `INSERT INTO forum_posts (admin_id, grade_level, content, subject_tag, type_of_upload, forum_title, topic_id, created_at, moderation_status) 
+//                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *`;
+//       params = [authorId, grade_level, content, subject_tag, type_of_upload, forum_title, topic_id, created_at, 'approved'];
 //     }
 //     else if (author_type === "superadmin") {
-//       postRes = await pool.query(
-//         `INSERT INTO forum_posts (super_admin_id, grade_level, content, subject_tag, type_of_upload, forum_title, topic_id, created_at) 
-//          VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
-//         [authorId, grade_level, content, subject_tag, type_of_upload, forum_title, topic_id, created_at]
-//       );
-//     } else {
+//       query = `INSERT INTO forum_posts (super_admin_id, grade_level, content, subject_tag, type_of_upload, forum_title, topic_id, created_at, moderation_status) 
+//                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *`;
+//       params = [authorId, grade_level, content, subject_tag, type_of_upload, forum_title, topic_id, created_at, 'approved'];
+//     } 
+//     else {
 //       return res.status(400).json({ ok: false, message: "Invalid author_type" });
 //     }
 
+//     // Execute query
+//     postRes = await pool.query(query, params);
 //     const post = postRes.rows[0];
 
+//     // Step 4: Handle file uploads if any
 //     if (req.files && req.files.length) {
 //       for (const f of req.files) {
 //         const compressedBuffer = await compressFile(
@@ -873,26 +906,47 @@ export const getonlyForumNotes = async (req, res) => {
 //         );
 
 //         await pool.query(
-//           `INSERT INTO forum_files (post_id, url, filename)
-//        VALUES ($1, $2, $3)`,
+//           `INSERT INTO forum_files (post_id, url, filename) VALUES ($1, $2, $3)`,
 //           [post.id, url, f.originalname]
 //         );
 //       }
 //     }
 
+//     // Step 5: Send response
+//     const response = {
+//       ok: true,
+//       post,
+//       moderation: {
+//         status: 'clean',
+//         method: moderationResult.method,
+//         message: 'Content published successfully'
+//       }
+//     };
 
-//     res.json({ ok: true, post });
+//     res.json(response);
+
 //   } catch (err) {
-//     console.error(err);
-//     res.status(500).json({ ok: false, message: "Server error" });
+//     console.error('Error creating post:', err);
+//     res.status(500).json({ 
+//       ok: false, 
+//       message: "Server error"
+//     });
 //   }
 // };
 
 
-
 export const createPost = async (req, res) => {
   try {
-    const { grade_level, content, subject_tag, type_of_upload, author_type, forum_title, topic_id } = req.body;
+    const { 
+      grade_level, 
+      content, 
+      subject_tag, 
+      type_of_upload, 
+      author_type, 
+      forum_title, 
+      topic_id 
+    } = req.body;
+
     const authorId = req.userId;
 
     if (!content || !author_type) {
@@ -902,19 +956,14 @@ export const createPost = async (req, res) => {
       });
     }
 
-    // Use Perspective API moderation
+    // ------------------ MODERATION ------------------
     const moderationResult = await hybridModeration.moderateContent(content, {
       usePerspective: true,
       strictMode: true
     });
 
-    console.log('Perspective Moderation Result:', {
-      safe: moderationResult.safe,
-      method: moderationResult.method,
-      scores: moderationResult.scores
-    });
+    console.log("Moderation Result:", moderationResult);
 
-    // Block if not safe
     if (!moderationResult.safe) {
       return res.status(400).json({
         ok: false,
@@ -928,37 +977,36 @@ export const createPost = async (req, res) => {
       });
     }
 
-    // Step 3: Proceed with post creation (content is safe)
-    let postRes;
+    // ------------------ CREATE FORUM POST ------------------
+    let query, params;
     const created_at = new Date().toISOString();
 
-    // Determine author type and build query
-    let query, params;
-
     if (author_type === "user") {
-      query = `INSERT INTO forum_posts (user_id, grade_level, content, subject_tag, type_of_upload, forum_title, topic_id, created_at, moderation_status) 
-               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *`;
-      params = [authorId, grade_level, content, subject_tag, type_of_upload, forum_title, topic_id, created_at, 'approved'];
+      query = `INSERT INTO forum_posts 
+        (user_id, grade_level, content, subject_tag, type_of_upload, forum_title, topic_id, created_at, moderation_status)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`;
+      params = [authorId, grade_level, content, subject_tag, type_of_upload, forum_title, topic_id, created_at, "approved"];
     } 
     else if (author_type === "admin") {
-      query = `INSERT INTO forum_posts (admin_id, grade_level, content, subject_tag, type_of_upload, forum_title, topic_id, created_at, moderation_status) 
-               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *`;
-      params = [authorId, grade_level, content, subject_tag, type_of_upload, forum_title, topic_id, created_at, 'approved'];
+      query = `INSERT INTO forum_posts 
+        (admin_id, grade_level, content, subject_tag, type_of_upload, forum_title, topic_id, created_at, moderation_status)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`;
+      params = [authorId, grade_level, content, subject_tag, type_of_upload, forum_title, topic_id, created_at, "approved"];
     }
     else if (author_type === "superadmin") {
-      query = `INSERT INTO forum_posts (super_admin_id, grade_level, content, subject_tag, type_of_upload, forum_title, topic_id, created_at, moderation_status) 
-               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *`;
-      params = [authorId, grade_level, content, subject_tag, type_of_upload, forum_title, topic_id, created_at, 'approved'];
-    } 
+      query = `INSERT INTO forum_posts 
+        (super_admin_id, grade_level, content, subject_tag, type_of_upload, forum_title, topic_id, created_at, moderation_status)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`;
+      params = [authorId, grade_level, content, subject_tag, type_of_upload, forum_title, topic_id, created_at, "approved"];
+    }
     else {
       return res.status(400).json({ ok: false, message: "Invalid author_type" });
     }
 
-    // Execute query
-    postRes = await pool.query(query, params);
+    const postRes = await pool.query(query, params);
     const post = postRes.rows[0];
 
-    // Step 4: Handle file uploads if any
+    // ------------------ FILE UPLOADS ------------------
     if (req.files && req.files.length) {
       for (const f of req.files) {
         const compressedBuffer = await compressFile(
@@ -973,33 +1021,68 @@ export const createPost = async (req, res) => {
         );
 
         await pool.query(
-          `INSERT INTO forum_files (post_id, url, filename) VALUES ($1, $2, $3)`,
+          `INSERT INTO forum_files (post_id, url, filename)
+           VALUES ($1,$2,$3)`,
           [post.id, url, f.originalname]
         );
       }
     }
 
-    // Step 5: Send response
-    const response = {
+    // ------------------ SEND NOTIFICATIONS ------------------
+    try {
+      // 1. Get subject name from subjects table
+      const subjectRes = await pool.query(
+        `SELECT subject FROM subjects WHERE id = $1 LIMIT 1`,
+        [subject_tag]
+      );
+
+      const subjectName = subjectRes.rows.length
+        ? subjectRes.rows[0].subject
+        : "Selected Subject";
+
+      const message = `Hey! There’s a new forum post in your subject. Have a look!`;
+      const now = new Date();
+
+      // 2. Find all users whose selected_subjects contains this subject
+      const usersRes = await pool.query(
+        `SELECT id FROM users WHERE $1 = ANY(selected_subjects) AND id != $2`,
+        [subject_tag, authorId]
+      );
+
+      // 3. Insert notification for each user
+      for (const user of usersRes.rows) {
+        await pool.query(
+          `INSERT INTO notifications (user_id, message, created_at, type, is_read)
+           VALUES ($1, $2, $3, $4, false)`,
+          [user.id, message, now, "information"]
+        );
+      }
+
+      console.log(`Notifications sent to ${usersRes.rows.length} users`);
+    } catch (notifyErr) {
+      console.error("Notification Error:", notifyErr);
+    }
+
+    // ------------------ RESPONSE ------------------
+    res.json({
       ok: true,
       post,
       moderation: {
-        status: 'clean',
+        status: "clean",
         method: moderationResult.method,
-        message: 'Content published successfully'
+        message: "Content published successfully"
       }
-    };
-
-    res.json(response);
+    });
 
   } catch (err) {
-    console.error('Error creating post:', err);
-    res.status(500).json({ 
-      ok: false, 
+    console.error("Error creating post:", err);
+    res.status(500).json({
+      ok: false,
       message: "Server error"
     });
   }
 };
+
 
 export const createNotes = async (req, res) => {
   try {
