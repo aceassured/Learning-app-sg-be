@@ -1,23 +1,23 @@
 // src/config/firebaseAdmin.js
 import admin from 'firebase-admin';
+import dotenv from "dotenv"
 import { readFileSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
+dotenv.config({quiet:true})
+// console.log(process.env.FIREBASE_SERVICE_ACCOUNT)
+// // const __filename = fileURLToPath(import.meta.url);
+// // const __dirname = dirname(__filename);
 
-// Load service account from file
-const serviceAccount = JSON.parse(
-  readFileSync(join(__dirname, '../../firebase-service-account.json'), 'utf8')
-);
+const serviceAccountJson = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
 
-// Initialize Firebase Admin
 if (!admin.apps.length) {
   admin.initializeApp({
-    credential: admin.credential.cert(serviceAccount),
+    credential: admin.credential.cert(serviceAccountJson),
   });
 }
+
 
 export const messaging = admin.messaging();
 

@@ -231,7 +231,6 @@ app.use("/api/admin", adminRouter);
 app.use("/api/notifications", notificationRouter);
 
 
-
 // FCM Token registration endpoint
 app.post("/api/user/register-fcm-token", async (req, res) => {
   const { userId, fcmToken, deviceType } = req.body;
