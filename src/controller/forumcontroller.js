@@ -1054,7 +1054,7 @@ export const createPost = async (req, res) => {
         await pool.query(
           `INSERT INTO notifications (user_id, message, created_at, type, is_read)
            VALUES ($1, $2, $3, $4, false)`,
-          [user.id, message, now, "information"]
+          [user.id, message, now, "forum"]
         );
       }
 
