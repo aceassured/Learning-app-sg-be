@@ -106,7 +106,7 @@ export const sendMulticastPushNotification = async (tokens, notification) => {
           link: notification.url || '/',
         },
         notification: {
-          icon: '/android-icon-192x192.png', // ✅ Keep icon here
+          icon: '/android-icon-192x192.png',
           badge: '/android-icon-96x96.png',
         },
       },
