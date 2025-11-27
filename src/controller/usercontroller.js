@@ -215,6 +215,16 @@ export const Commonlogin = async (req, res) => {
     if (!email || !password) {
       return res.status(400).json({ status: false, message: "Email and password are required" });
     }
+    // const isBlocked = await pool.query(
+    //   `SELECT active_status, is_active_request from users WHERE email = $1`,
+    //   [email]
+    // );
+
+    // if (!isBlocked.rows[0].active_status && !isBlocked.rows[0].is_active_request) {
+    //   return res.status(404).json({ status: false, data: isBlocked.rows[0].is_active_request, message: "Your account is inactive. Please contact support." })
+    // }
+
+
     const isSocialLogin = await pool.query(
       `SELECT is_social_login, password,provider from users WHERE email = $1`,
       [email]
@@ -4690,3 +4700,75 @@ export const adminRequestActive = async (req, res) => {
   }
 };
 
+
+
+// user active request.........
+
+
+export const userRequestActive = async (req, res) => {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN'); // ✅ Start transaction
+
+    const { email } = req.body;
+
+    if (!email) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({
+        status: false,
+        message: "Email is required",
+      });
+    }
+
+    // 1️⃣ Check if admin exists
+    const checkQuery = `SELECT id, is_active_request FROM users WHERE email = $1 FOR UPDATE`;
+    const checkResult = await client.query(checkQuery, [email]);
+
+    if (checkResult.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({
+        status: false,
+        message: "User not found",
+      });
+    }
+
+    const user = checkResult.rows[0];
+
+    // 2️⃣ If already requested → throw error
+    if (user.is_active_request === true) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({
+        status: false,
+        message: "You have already requested activation",
+      });
+    }
+
+    // 3️⃣ Update request flag
+    const updateQuery = `
+      UPDATE users 
+      SET is_active_request = true, updated_at = NOW()
+      WHERE email = $1
+      RETURNING id, is_active_request
+    `;
+
+    const updateResult = await client.query(updateQuery, [email]);
+
+    await client.query('COMMIT'); // ✅ Commit transaction
+
+    return res.status(200).json({
+      status: true,
+      message: "Activation request sent successfully",
+      data: updateResult.rows[0],
+    });
+
+  } catch (error) {
+    await client.query('ROLLBACK'); // ✅ Rollback on error
+    console.error("userRequestActive error:", error);
+    return res.status(500).json({
+      status: false,
+      message: "Internal server error",
+    });
+  } finally {
+    client.release(); // ✅ Always release client
+  }
+};

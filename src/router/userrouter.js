@@ -31,7 +31,8 @@ import {
   getAllquestionsSearch,
   removeBiometricCrendentials,
   superadminRegister,
-  adminRequestActive
+  adminRequestActive,
+  userRequestActive
 } from '../controller/usercontroller.js';
 import { deleteForum, deleteUser } from '../controller/forumcontroller.js';
 import { admingetTopics, getTopics } from '../controller/quizcontroller.js';
@@ -116,6 +117,7 @@ router.post('/socialregister', socialRegister);
 router.post('/linksocialaccount', linkSocialAccount);
 router.post('/sociallogin', socialLogin)
 router.put('/activerequest', adminRequestActive)
+router.put('/useractiverequest', userRequestActive)
 
 router.get("/data-deletion", async (req, res) => {
   return res.status(200).json({
