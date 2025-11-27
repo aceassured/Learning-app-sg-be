@@ -1081,17 +1081,21 @@ export const adminUpdateUserStatus = async (req, res) => {
 
     const currentStatus = result.rows[0].active_status;
     const newStatus = !currentStatus; // toggle true/false
+    let is_active_status = false
     console.log("currentStatus", currentStatus)
     console.log("newStatus")
 
+    if (!result.rows[0].active_status) {
+      is_active_status = false
+    }
     // Update query
     const updateQuery = `
       UPDATE ${tableName}
-      SET active_status = $1
-      WHERE id = $2
+      SET active_status = $1, is_active_request = $2
+      WHERE id = $3
       RETURNING id, active_status, is_active_request;
     `;
-    const updated = await pool.query(updateQuery, [newStatus, id]);
+    const updated = await pool.query(updateQuery, [newStatus, is_active_status, id]);
 
     return res.status(200).json({
       message: "Status updated successfully",
