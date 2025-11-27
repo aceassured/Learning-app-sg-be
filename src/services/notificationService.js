@@ -703,6 +703,6 @@ export const sendQuizAvailableNotification = async (subject) => {
  */
 export const initializeNotificationServices = () => {
   console.log('🚀 Initializing notification services...');
-  // startReminderCron();
+  startReminderCron();
   console.log('✅ All notification services initialized');
 };
