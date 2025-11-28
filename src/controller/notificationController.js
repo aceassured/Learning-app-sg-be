@@ -5,7 +5,7 @@ import { io } from '../../index.js'; // Import io from your main server file
 // Get all notifications for a user with time-based grouping
 export const getUserNotifications = async (req, res) => {
   const userId = req.query.userId || req.user?.id;
-  
+
   if (!userId) {
     return res.status(400).json({ error: "Missing userId" });
   }
@@ -40,10 +40,10 @@ export const getUserNotifications = async (req, res) => {
 
     const unreadCount = notifications.filter(n => !n.is_read).length;
 
-    res.json({ 
+    res.json({
       notifications,
       unreadCount,
-      success: true 
+      success: true
     });
   } catch (error) {
     console.error("❌ Error fetching notifications:", error);
@@ -51,10 +51,71 @@ export const getUserNotifications = async (req, res) => {
   }
 };
 
+// get all notification not showed notifications.......
+
+
+export const getUserNotificationsNotshown = async (req, res) => {
+  const userId = req.query.userId || req.user?.id;
+
+  if (!userId) {
+    return res.status(400).json({ error: "Missing userId" });
+  }
+
+  try {
+
+    // 1️⃣ Fetch only NOT SHOWN notifications (used for popup)
+    const popupResult = await pool.query(
+      `SELECT 
+        id, user_id, message, type, subject, is_read, is_viewed, is_shown, created_at,
+        CASE 
+          WHEN created_at >= CURRENT_DATE THEN 'today'
+          WHEN created_at >= CURRENT_DATE - INTERVAL '7 days' THEN 'thisWeek'
+          ELSE 'earlier'
+        END as time_section
+       FROM notifications 
+       WHERE user_id = $1 
+         AND type != 'reminder' 
+         AND is_shown = false
+       ORDER BY created_at DESC`,
+      [userId]
+    );
+
+    const notifications = popupResult.rows.map(n => ({
+      ...n,
+      read: n.is_read,
+      viewed: n.is_viewed
+    }));
+
+    // 2️⃣ Unread count should include ALL unread notifications, even if is_shown = true
+    const unreadResult = await pool.query(
+      `SELECT COUNT(*) 
+       FROM notifications 
+       WHERE user_id = $1 
+         AND type != 'reminder'
+         AND is_read = false`,
+      [userId]
+    );
+
+    const unreadCount = parseInt(unreadResult.rows[0].count, 10);
+
+    res.json({
+      notifications, // popup notifications only
+      unreadCount,   // full unread count
+      success: true
+    });
+
+  } catch (error) {
+    console.error("❌ Error fetching notifications:", error);
+    res.status(500).json({ error: "Failed to fetch notifications" });
+  }
+};
+
+
+
 // Mark notifications as read
 export const markNotificationsAsRead = async (req, res) => {
   const { userId, ids } = req.body;
-  
+
   if (!userId || !ids || !Array.isArray(ids)) {
     return res.status(400).json({ error: "Missing userId or notification ids" });
   }
@@ -75,16 +136,16 @@ export const markNotificationsAsRead = async (req, res) => {
 // Mark notifications as viewed (when user sees them in notification page)
 export const markNotificationsAsViewed = async (req, res) => {
   const { userId, ids } = req.body;
-  
+
   if (!userId || !ids || !Array.isArray(ids)) {
     return res.status(400).json({ error: "Missing userId or notification ids" });
   }
 
   try {
-await pool.query(
-  "UPDATE notifications SET is_viewed = true, is_read = true WHERE user_id = $1 AND id = ANY($2::int[])",
-  [userId, ids]
-);
+    await pool.query(
+      "UPDATE notifications SET is_viewed = true, is_read = true WHERE user_id = $1 AND id = ANY($2::int[])",
+      [userId, ids]
+    );
 
     // Get updated unread count
     const countResult = await pool.query(
@@ -93,10 +154,10 @@ await pool.query(
     );
 
     const unreadCount = parseInt(countResult.rows[0].unread_count);
-    res.json({ 
-      success: true, 
+    res.json({
+      success: true,
       message: "Notifications marked as viewed",
-      unreadCount 
+      unreadCount
     });
   } catch (error) {
     console.error("❌ Error marking notifications as viewed:", error);
@@ -120,7 +181,7 @@ export const sendNotification = async (req, res) => {
     `;
     const values = [userId, message, type || "general", subject || null];
     const result = await pool.query(query, values);
-    
+
     const notification = {
       ...result.rows[0],
       read: false,
@@ -144,7 +205,7 @@ export const sendNotification = async (req, res) => {
 // Get unread notification count
 export const getUnreadCount = async (req, res) => {
   const userId = req.query.userId || req.user?.id;
-  
+
   if (!userId) {
     return res.status(400).json({ error: "Missing userId" });
   }
@@ -156,7 +217,7 @@ export const getUnreadCount = async (req, res) => {
     );
 
     const unreadCount = parseInt(result.rows[0].unread_count);
-    
+
     res.json({ unreadCount, success: true });
   } catch (error) {
     console.error("❌ Error getting unread count:", error);
@@ -173,7 +234,7 @@ export const createQuizNotification = async (userId, subject, message) => {
       RETURNING *
     `;
     const result = await pool.query(query, [userId, message, subject]);
-    
+
     const notification = {
       ...result.rows[0],
       read: false,
@@ -185,7 +246,7 @@ export const createQuizNotification = async (userId, subject, message) => {
     if (global.onlineUsers && global.onlineUsers[userId]) {
       io.to(global.onlineUsers[userId]).emit("notification", notification);
     }
-    
+
     return notification;
   } catch (error) {
     console.error("❌ Error creating quiz notification:", error);
@@ -201,7 +262,7 @@ export const createForumNotification = async (userId, message) => {
       RETURNING *
     `;
     const result = await pool.query(query, [userId, message]);
-    
+
     const notification = {
       ...result.rows[0],
       read: false,
@@ -213,7 +274,7 @@ export const createForumNotification = async (userId, message) => {
     if (global.onlineUsers && global.onlineUsers[userId]) {
       io.to(global.onlineUsers[userId]).emit("notification", notification);
     }
-    
+
     return notification;
   } catch (error) {
     console.error("❌ Error creating forum notification:", error);
@@ -230,7 +291,7 @@ export const createStreakNotification = async (userId, subject, streakDays) => {
       RETURNING *
     `;
     const result = await pool.query(query, [userId, message, subject]);
-    
+
     const notification = {
       ...result.rows[0],
       read: false,
@@ -242,7 +303,7 @@ export const createStreakNotification = async (userId, subject, streakDays) => {
     if (global.onlineUsers && global.onlineUsers[userId]) {
       io.to(global.onlineUsers[userId]).emit("notification", notification);
     }
-    
+
     return notification;
   } catch (error) {
     console.error("❌ Error creating streak notification:", error);
@@ -258,7 +319,7 @@ export const createProgressNotification = async (userId, subject, progressMessag
       RETURNING *
     `;
     const result = await pool.query(query, [userId, progressMessage, subject]);
-    
+
     const notification = {
       ...result.rows[0],
       read: false,
@@ -270,10 +331,38 @@ export const createProgressNotification = async (userId, subject, progressMessag
     if (global.onlineUsers && global.onlineUsers[userId]) {
       io.to(global.onlineUsers[userId]).emit("notification", notification);
     }
-    
+
     return notification;
   } catch (error) {
     console.error("❌ Error creating progress notification:", error);
     return null;
+  }
+};
+
+// mark as shown notification............
+
+
+
+export const markAsShownnotification = async (req, res) => {
+  try {
+    // const userId = req.query.userId || req.user?.id;
+    const { notificationIds, userId} = req.body;
+console.log(userId)
+console.log(notificationIds)
+    // Fix: Use notificationIds consistently
+    if (!userId || !notificationIds || !Array.isArray(notificationIds)) {
+      return res.status(400).json({ error: "Missing userId or notification ids" });
+    }
+
+    await pool.query(
+      "UPDATE notifications SET is_shown = true WHERE user_id = $1 AND id = ANY($2::int[])",
+      [userId, notificationIds]
+    );
+
+    res.json({ success: true, message: "Notifications marked as shown" });
+
+  } catch (error) {
+    console.error("❌ Error marking notifications as shown:", error);
+    res.status(500).json({ error: "Failed to mark notifications as shown" });
   }
 };

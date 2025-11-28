@@ -32,7 +32,8 @@ import {
   removeBiometricCrendentials,
   superadminRegister,
   adminRequestActive,
-  userRequestActive
+  userRequestActive,
+  downloadAllGradeSubjectTopics
 } from '../controller/usercontroller.js';
 import { deleteForum, deleteUser } from '../controller/forumcontroller.js';
 import { admingetTopics, getTopics } from '../controller/quizcontroller.js';
@@ -95,6 +96,7 @@ router.put("/changeUserRole", changeUserRole)
 router.delete("/deleteAdminUser", deleteAdminUser)
 router.get("/getAllUsers", getAllUsers);
 router.get("/getallsubject", getAllSubject);
+router.get("/all-grade-subject-topics", downloadAllGradeSubjectTopics);
 router.post("/subject", getAllSubjectnew);
 router.get("/getallgrades", getAllGrade);
 router.post('/gettopics', getTopics);

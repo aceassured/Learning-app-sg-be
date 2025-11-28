@@ -2416,6 +2416,89 @@ export const getAllSubject = async (req, res) => {
   }
 };
 
+export const downloadAllGradeSubjectTopics = async (req, res) => {
+  const client = await pool.connect();
+
+  try {
+    const query = `
+      SELECT
+        g.id AS grade_id,
+        g.grade_level,
+        g.active_status AS grade_active,
+
+        s.id AS subject_id,
+        s.subject,
+        s.active_status AS subject_active,
+
+        t.id AS topic_id,
+        t.topic,
+        t.active_status AS topic_active
+
+      FROM grades g
+      LEFT JOIN subjects s ON s.grade_id = g.id AND s.active_status = TRUE
+      LEFT JOIN topics t ON t.subject_id = s.id AND t.active_status = TRUE
+
+      WHERE g.active_status = TRUE
+      ORDER BY g.grade_level ASC, s.subject ASC, t.topic ASC;
+    `;
+
+    const { rows } = await client.query(query);
+
+    // ------------------ NEST DATA ------------------
+    const gradesMap = {};
+
+    rows.forEach(row => {
+      // Add grade (always active)
+      if (!gradesMap[row.grade_id]) {
+        gradesMap[row.grade_id] = {
+          grade_id: row.grade_id,
+          grade_level: row.grade_level,
+          subjects: {}
+        };
+      }
+
+      // Add subject (only active subjects are joined)
+      if (row.subject_id) {
+        if (!gradesMap[row.grade_id].subjects[row.subject_id]) {
+          gradesMap[row.grade_id].subjects[row.subject_id] = {
+            subject_id: row.subject_id,
+            subject: row.subject,
+            topics: []
+          };
+        }
+
+        // Add topic (only active topics are joined)
+        if (row.topic_id) {
+          gradesMap[row.grade_id].subjects[row.subject_id].topics.push({
+            topic_id: row.topic_id,
+            topic: row.topic
+          });
+        }
+      }
+    });
+
+    // Convert nested objects → array format
+    const finalOutput = Object.values(gradesMap).map(grade => ({
+      ...grade,
+      subjects: Object.values(grade.subjects)
+    }));
+
+    res.status(200).json({
+      success: true,
+      data: finalOutput
+    });
+
+  } catch (error) {
+    console.error("Get Grade-Subject-Topics Error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Internal server error"
+    });
+  } finally {
+    client.release();
+  }
+};
+
 
 
 export const getAllTopic = async (req, res) => {
