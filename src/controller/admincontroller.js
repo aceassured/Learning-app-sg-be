@@ -1175,6 +1175,7 @@ export const getAllQuestionsnew = async (req, res) => {
       SELECT 
         q.id,
         q.question_text,
+        q.question_url,
         q.subject_id,
         q.options,
         q.correct_option_id,
@@ -1718,10 +1719,10 @@ export const adminDashboardApi = async (req, res) => {
     )).rows[0].count;
 
     const newForumPostsToday = (await pool.query(
-      `SELECT COUNT(*) FROM forum_posts WHERE DATE(created_at) = CURRENT_DATE`
+      `SELECT COUNT(*) FROM forum_posts`
     )).rows[0].count;
 
-
+console.log("newForumPostsToday", newForumPostsToday)
     // -------- MONTHLY COMPARISON COUNTS --------
     const lastMonthUsers = (await pool.query(`
       SELECT COUNT(*) FROM users

@@ -2501,6 +2501,58 @@ export const downloadAllGradeSubjectTopics = async (req, res) => {
 
 
 
+// export const getAllTopic = async (req, res) => {
+//   const client = await pool.connect();
+//   try {
+//     const search = req.query.search || "";
+//     const page = parseInt(req.query.page) || 1;
+//     const limit = parseInt(req.query.limit) || 10;
+//     const offset = (page - 1) * limit;
+
+//     let whereClause = "WHERE active_status != false";
+//     let values = [];
+//     let countValues = [];
+
+//     if (search) {
+//       whereClause += " AND LOWER(topic) LIKE LOWER($1)";
+//       values = [`%${search}%`, limit, offset];
+//       countValues = [`%${search}%`];
+//     } else {
+//       values = [limit, offset];
+//     }
+
+//     const countQuery = `SELECT COUNT(*) AS total FROM topics ${whereClause}`;
+//     const dataQuery = `
+//       SELECT * FROM topics
+//       ${whereClause}
+//       ORDER BY topic ASC
+//       LIMIT $${search ? 2 : 1} OFFSET $${search ? 3 : 2}
+//     `;
+
+//     const { rows: countResult } = await client.query(countQuery, countValues);
+//     const total = parseInt(countResult[0].total);
+
+//     const { rows: allTopics } = await client.query(dataQuery, values);
+
+//     return res.status(200).json({
+//       success: true,
+//       data: allTopics,
+//       pagination: {
+//         total,
+//         page,
+//         limit,
+//         totalPages: Math.ceil(total / limit),
+//       },
+//     });
+//   } catch (error) {
+//     console.error("Get topics error:", error);
+//     res.status(500).json({ success: false, message: "Internal server error" });
+//   } finally {
+//     client.release();
+//   }
+// };
+
+
 export const getAllTopic = async (req, res) => {
   const client = await pool.connect();
   try {
@@ -2509,23 +2561,36 @@ export const getAllTopic = async (req, res) => {
     const limit = parseInt(req.query.limit) || 10;
     const offset = (page - 1) * limit;
 
-    let whereClause = "WHERE active_status != false";
+    let whereClause = "WHERE t.active_status != false";
     let values = [];
     let countValues = [];
 
     if (search) {
-      whereClause += " AND LOWER(topic) LIKE LOWER($1)";
+      whereClause += " AND LOWER(t.topic) LIKE LOWER($1)";
       values = [`%${search}%`, limit, offset];
       countValues = [`%${search}%`];
     } else {
       values = [limit, offset];
     }
 
-    const countQuery = `SELECT COUNT(*) AS total FROM topics ${whereClause}`;
-    const dataQuery = `
-      SELECT * FROM topics
+    // Count query
+    const countQuery = `
+      SELECT COUNT(*) AS total
+      FROM topics t
+      LEFT JOIN subjects s ON s.id = t.subject_id
       ${whereClause}
-      ORDER BY topic ASC
+    `;
+
+    // Data query with JOIN
+    const dataQuery = `
+      SELECT 
+        t.*,
+        s.subject AS subject,
+        s.grade_id AS subject_grade
+      FROM topics t
+      LEFT JOIN subjects s ON s.id = t.subject_id
+      ${whereClause}
+      ORDER BY t.topic ASC
       LIMIT $${search ? 2 : 1} OFFSET $${search ? 3 : 2}
     `;
 
@@ -2544,9 +2609,12 @@ export const getAllTopic = async (req, res) => {
         totalPages: Math.ceil(total / limit),
       },
     });
+
   } catch (error) {
     console.error("Get topics error:", error);
-    res.status(500).json({ success: false, message: "Internal server error" });
+    res
+      .status(500)
+      .json({ success: false, message: "Internal server error" });
   } finally {
     client.release();
   }

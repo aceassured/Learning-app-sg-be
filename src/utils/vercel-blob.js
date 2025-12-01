@@ -287,7 +287,7 @@ const generateFileHash = (buffer) => {
 // Helper function to generate hash of questions data
 const generateQuestionsHash = (rows) => {
   // Create a consistent string representation of all questions
-  const questionsString = rows.map(row => 
+  const questionsString = rows.map(row =>
     JSON.stringify({
       question_text: row.question_text,
       subject: row.subject,
@@ -296,7 +296,7 @@ const generateQuestionsHash = (rows) => {
       topics: row.topics
     })
   ).sort().join('|');
-  
+
   return crypto.createHash('sha256').update(questionsString).digest('hex');
 };
 
@@ -470,46 +470,68 @@ export const questionFileupload = async (req, res) => {
       }
 
       // 1) Lookup subject id
-      const subjectRes = await pool.query(
-        `SELECT id FROM subjects WHERE LOWER(subject) = LOWER($1) LIMIT 1`,
-        [subjectName]
-      );
-      if (subjectRes.rowCount === 0) {
-        await pool.query("ROLLBACK");
-        return cleanupAndError(extractDir, 400, {
-          success: false,
-          message: `Row ${rowNumber}: Subject "${subjectName}" not found. Please add it to subjects table or correct the subject name.`
-        });
-      }
-      const subjectId = subjectRes.rows[0].id;
+// 2) Lookup grade id
+const gradeRes = await pool.query(
+  `SELECT id FROM grades 
+   WHERE LOWER(grade_level) = LOWER($1)
+   AND active_status = true
+   LIMIT 1`,
+  [gradeName]
+);
 
-      // 2) Lookup grade id
-      const gradeRes = await pool.query(
-        `SELECT id FROM grades WHERE LOWER(grade_level) = LOWER($1) LIMIT 1`,
-        [gradeName]
-      );
-      if (gradeRes.rowCount === 0) {
-        await pool.query("ROLLBACK");
-        return cleanupAndError(extractDir, 400, {
-          success: false,
-          message: `Row ${rowNumber}: Grade "${gradeName}" not found. Please add it to grades table or correct the grade name.`
-        });
-      }
-      const gradeId = gradeRes.rows[0].id;
+if (gradeRes.rowCount === 0) {
+  await pool.query("ROLLBACK");
+  return cleanupAndError(extractDir, 400, {
+    success: false,
+    message: `Row ${rowNumber}: Grade "${gradeName}" not found or inactive.`
+  });
+}
 
-      // 3) Lookup topic id (topic + subject + grade combined)
-      const topicRes = await pool.query(
-        `SELECT id FROM topics WHERE LOWER(topic) = LOWER($1) AND subject_id = $2 AND grade_id = $3 LIMIT 1`,
-        [topicName, subjectId, gradeId]
-      );
-      if (topicRes.rowCount === 0) {
-        await pool.query("ROLLBACK");
-        return cleanupAndError(extractDir, 400, {
-          success: false,
-          message: `Row ${rowNumber}: Topic "${topicName}" for subject "${subjectName}" and grade "${gradeName}" not found. Please add it to topics table or correct the topic/subject/grade.`
-        });
-      }
-      const topicId = topicRes.rows[0].id;
+const gradeId = gradeRes.rows[0].id;
+
+
+// 1) Lookup subject by name + grade (IMPORTANT FIX)
+const subjectRes = await pool.query(
+  `SELECT id FROM subjects 
+   WHERE LOWER(subject) = LOWER($1) 
+   AND grade_id = $2
+   AND active_status = true
+   LIMIT 1`,
+  [subjectName, gradeId]
+);
+
+if (subjectRes.rowCount === 0) {
+  await pool.query("ROLLBACK");
+  return cleanupAndError(extractDir, 400, {
+    success: false,
+    message: `Row ${rowNumber}: Subject "${subjectName}" is not found for grade "${gradeName}".`
+  });
+}
+
+const subjectId = subjectRes.rows[0].id;
+
+
+// 3) Lookup topic with subject + grade (correct)
+const topicRes = await pool.query(
+  `SELECT id FROM topics 
+   WHERE LOWER(topic) = LOWER($1) 
+   AND subject_id = $2 
+   AND grade_id = $3
+   AND active_status = true
+   LIMIT 1`,
+  [topicName, subjectId, gradeId]
+);
+
+if (topicRes.rowCount === 0) {
+  await pool.query("ROLLBACK");
+  return cleanupAndError(extractDir, 400, {
+    success: false,
+    message: `Row ${rowNumber}: Topic "${topicName}" not found for subject "${subjectName}" and grade "${gradeName}".`
+  });
+}
+
+const topicId = topicRes.rows[0].id;
+
 
       // Process images
       const questionUrl = await processImage(row.question_url);
@@ -545,35 +567,38 @@ export const questionFileupload = async (req, res) => {
       // Insert or update question (using looked-up ids)
       const result = await pool.query(
         `
-        INSERT INTO questions (
-          subject, question_text, options, correct_option_id,
-          question_type, topics, correct_option_value, question_url, answer_explanation,
-          answer_file_url, topic_id, subject_id, grade_id, upload_batch_id
-        )
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
-        ON CONFLICT (question_text, subject_id, topic_id)
-        DO UPDATE SET
-          subject = EXCLUDED.subject,
-          options = EXCLUDED.options,
-          correct_option_id = EXCLUDED.correct_option_id,
-          grade_id = EXCLUDED.grade_id,
-          question_type = EXCLUDED.question_type,
-          topics = EXCLUDED.topics,
-          correct_option_value = EXCLUDED.correct_option_value,
-          question_url = EXCLUDED.question_url,
-          answer_explanation = EXCLUDED.answer_explanation,
-          answer_file_url = EXCLUDED.answer_file_url,
-          upload_batch_id = EXCLUDED.upload_batch_id
-        RETURNING id;
-        `,
+  INSERT INTO questions (
+    question_text,
+    options,
+    correct_option_id,
+    question_type,
+    question_url,
+    answer_explanation,
+    answer_file_url,
+    topic_id,
+    subject_id,
+    grade_id,
+    upload_batch_id
+  )
+  VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+  ON CONFLICT (question_text, topic_id)
+  DO UPDATE SET
+    options = EXCLUDED.options,
+    correct_option_id = EXCLUDED.correct_option_id,
+    question_type = EXCLUDED.question_type,
+    question_url = EXCLUDED.question_url,
+    answer_explanation = EXCLUDED.answer_explanation,
+    answer_file_url = EXCLUDED.answer_file_url,
+    grade_id = EXCLUDED.grade_id,
+    subject_id = EXCLUDED.subject_id,
+    upload_batch_id = EXCLUDED.upload_batch_id
+  RETURNING id;
+  `,
         [
-          row.subject,
-          row.question_text,
+          questionText,
           JSON.stringify(options),
           row.correct_option_id,
           row.question_type,
-          row.topics,
-          row.correct_option_value,
           questionUrl,
           row.answer_explanation,
           answerFileUrl,
@@ -583,6 +608,7 @@ export const questionFileupload = async (req, res) => {
           uploadBatchId
         ]
       );
+
 
       if (result.rowCount > 0) {
         questionsInserted++;
@@ -671,7 +697,7 @@ export const getUploadHistory = async (req, res) => {
 // Delete upload and associated questions
 export const deleteUpload = async (req, res) => {
   const { uploadId } = req.params;
-  
+
   try {
     // Get upload batch ID
     const uploadResult = await pool.query(
@@ -683,7 +709,7 @@ export const deleteUpload = async (req, res) => {
       return res.status(404).json({
         success: false,
         message: "Upload not found"
-              });
+      });
     }
 
     const { upload_batch_id, filename } = uploadResult.rows[0];
@@ -718,7 +744,7 @@ export const deleteUpload = async (req, res) => {
 // Get questions for a specific upload batch
 export const getQuestionsForUpload = async (req, res) => {
   const { uploadBatchId } = req.params;
-  
+
   try {
     const result = await pool.query(
       `SELECT 
