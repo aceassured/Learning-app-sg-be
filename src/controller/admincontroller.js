@@ -680,9 +680,9 @@ export const adminCreateEditQuiz = async (req, res) => {
     if (questions && Array.isArray(questions)) {
       for (const q of questions) {
         await pool.query(
-          `INSERT INTO editing_quiz_questions (quiz_id, incorrect_word, correct_word, position)
-           VALUES ($1, $2, $3, $4)`,
-          [quiz.id, q.incorrect_word, q.correct_word, q.position]
+          `INSERT INTO editing_quiz_questions (quiz_id, incorrect_word, correct_word)
+           VALUES ($1, $2, $3)`,
+          [quiz.id, q.incorrect_word, q.correct_word]
         );
       }
     }
@@ -946,9 +946,9 @@ export const updateEditQuiz = async (req, res) => {
     if (questions && Array.isArray(questions)) {
       for (const q of questions) {
         await pool.query(
-          `INSERT INTO editing_quiz_questions (quiz_id, incorrect_word, correct_word, position)
-           VALUES ($1, $2, $3, $4)`,
-          [id, q.incorrect_word, q.correct_word, q.position]
+          `INSERT INTO editing_quiz_questions (quiz_id, incorrect_word, correct_word)
+           VALUES ($1, $2, $3)`,
+          [id, q.incorrect_word, q.correct_word]
         );
       }
     }
@@ -1349,20 +1349,12 @@ export const adminCreateBulkEditableQuizQuestions = async (req, res) => {
 
         const incorrect_word = (row.incorrect_word ?? row.incorrect ?? "").toString().trim();
         const correct_word = (row.correct_word ?? row.correct ?? "").toString().trim();
-        const posRaw = (row.position ?? "").toString().trim();
 
         if (!incorrect_word) errors.push({ row: rowIndex, field: "incorrect_word", message: "Missing incorrect_word in question row" });
         if (!correct_word) errors.push({ row: rowIndex, field: "correct_word", message: "Missing correct_word in question row" });
 
-        let position = null;
-        if (posRaw !== "") {
-          const parsed = parseInt(posRaw, 10);
-          if (Number.isNaN(parsed)) {
-            errors.push({ row: rowIndex, field: "position", message: `Invalid position '${posRaw}'` });
-          } else {
-            position = parsed;
-          }
-        }
+        const position = null; // always null — we auto-generate later
+
 
         currentQuizMeta.questions.push({
           rowNumber: rowIndex,
@@ -1380,44 +1372,65 @@ export const adminCreateBulkEditableQuizQuestions = async (req, res) => {
     }
 
     // Validate per-quiz positions: fill missing positions; ensure uniqueness within quiz
+    // const perQuizIssues = [];
+    // for (const q of quizzesInFile) {
+    //   // NEW VALIDATION: quiz must have at least 1 question
+    //   if (q.questions.length === 0) {
+    //     perQuizIssues.push({
+    //       row: q.rowNumber,
+    //       message: "Each quiz must contain at least one question"
+    //     });
+    //     continue;
+    //   }
+
+    //   // assign positions sequentially if not provided - start from 1 in-file
+    //   let nextPos = 1;
+    //   // if some positions provided, keep them and fill gaps with next available numbers
+    //   for (const question of q.questions) {
+    //     if (question.position == null) {
+    //       while (q.questions.some(x => x.position === nextPos)) nextPos++;
+    //       question.position = nextPos;
+    //       nextPos++;
+    //     }
+    //   }
+    //   // check duplicates
+    //   const seen = new Set();
+    //   for (const question of q.questions) {
+    //     if (seen.has(question.position)) {
+    //       perQuizIssues.push({ quizRow: q.rowNumber, row: question.rowNumber, message: `Duplicate position ${question.position} in same quiz` });
+    //     } else {
+    //       seen.add(question.position);
+    //     }
+    //   }
+    // }
+    // if (perQuizIssues.length > 0) {
+    //   return res.status(400).json({ error: "Position validation failed", details: perQuizIssues });
+    // }
+
+    // ===================================================================
+    // Compute a deterministic questions hash for content-duplicate detection
+    // ===================================================================
+
     const perQuizIssues = [];
     for (const q of quizzesInFile) {
-      // NEW VALIDATION: quiz must have at least 1 question
+
       if (q.questions.length === 0) {
         perQuizIssues.push({
           row: q.rowNumber,
           message: "Each quiz must contain at least one question"
         });
-        continue;
       }
 
-      // assign positions sequentially if not provided - start from 1 in-file
-      let nextPos = 1;
-      // if some positions provided, keep them and fill gaps with next available numbers
-      for (const question of q.questions) {
-        if (question.position == null) {
-          while (q.questions.some(x => x.position === nextPos)) nextPos++;
-          question.position = nextPos;
-          nextPos++;
-        }
-      }
-      // check duplicates
-      const seen = new Set();
-      for (const question of q.questions) {
-        if (seen.has(question.position)) {
-          perQuizIssues.push({ quizRow: q.rowNumber, row: question.rowNumber, message: `Duplicate position ${question.position} in same quiz` });
-        } else {
-          seen.add(question.position);
-        }
-      }
     }
+
     if (perQuizIssues.length > 0) {
-      return res.status(400).json({ error: "Position validation failed", details: perQuizIssues });
+      return res.status(400).json({
+        error: "Validation failed",
+        details: perQuizIssues
+      });
     }
 
-    // ===================================================================
-    // Compute a deterministic questions hash for content-duplicate detection
-    // ===================================================================
+
     const generateQuestionsHash = (quizzes) => {
       // produce a stable representation: sort quizzes and questions
       const normalized = quizzes.map(qz => ({
@@ -1505,6 +1518,7 @@ export const adminCreateBulkEditableQuizQuestions = async (req, res) => {
         let quizId;
         let action; // 'created' or 'appended'
 
+
         if (findQuizRes.rowCount > 0) {
           // append to existing quiz
           quizId = findQuizRes.rows[0].id;
@@ -1525,15 +1539,25 @@ export const adminCreateBulkEditableQuizQuestions = async (req, res) => {
           const values = [];
           const params = [];
           let p = 1;
+          let idx = 0;
           for (const question of q.questions) {
-            const finalPos = question.position + shift;
+            const finalPos = existingMax + idx + 1;
             params.push(quizId, question.incorrect_word, question.correct_word, finalPos, uploadBatchId);
             values.push(`($${p++}, $${p++}, $${p++}, $${p++}, $${p++})`);
+            idx++;
           }
+
+          const insertQSql = `
+  INSERT INTO editing_quiz_questions 
+  (quiz_id, incorrect_word, correct_word, position, upload_batch_id)
+  VALUES ${values.join(", ")}
+`;
+
           if (values.length > 0) {
-            const insertQSql = `INSERT INTO editing_quiz_questions (quiz_id, incorrect_word, correct_word, position, upload_batch_id) VALUES ${values.join(", ")}`;
             await client.query(insertQSql, params);
           }
+
+
         } else {
           // create new quiz row
           const insertQuizSql = `
@@ -1550,12 +1574,25 @@ export const adminCreateBulkEditableQuizQuestions = async (req, res) => {
             const values = [];
             const params = [];
             let p = 1;
+            let idx = 0;
             for (const question of q.questions) {
-              params.push(quizId, question.incorrect_word, question.correct_word, question.position, uploadBatchId);
+              const autoPos = idx + 1;
+              params.push(quizId, question.incorrect_word, question.correct_word, autoPos, uploadBatchId);
               values.push(`($${p++}, $${p++}, $${p++}, $${p++}, $${p++})`);
+              idx++;
             }
-            const insertQSql = `INSERT INTO editing_quiz_questions (quiz_id, incorrect_word, correct_word, position, upload_batch_id) VALUES ${values.join(", ")}`;
-            await client.query(insertQSql, params);
+
+            const insertQSql = `
+  INSERT INTO editing_quiz_questions 
+  (quiz_id, incorrect_word, correct_word, position, upload_batch_id)
+  VALUES ${values.join(", ")}
+`;
+
+            if (values.length > 0) {
+              await client.query(insertQSql, params);
+            }
+
+
           }
         }
 
@@ -1633,6 +1670,8 @@ export const getEditableUploadHistory = async (req, res) => {
 // delete editable upload history.......
 export const deleteEditableUpload = async (req, res) => {
   const { uploadId } = req.params;
+
+  console.log("Deleting upload with ID:", uploadId);
 
   try {
     const result = await pool.query(
@@ -1722,7 +1761,7 @@ export const adminDashboardApi = async (req, res) => {
       `SELECT COUNT(*) FROM forum_posts`
     )).rows[0].count;
 
-console.log("newForumPostsToday", newForumPostsToday)
+    console.log("newForumPostsToday", newForumPostsToday)
     // -------- MONTHLY COMPARISON COUNTS --------
     const lastMonthUsers = (await pool.query(`
       SELECT COUNT(*) FROM users
