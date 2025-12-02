@@ -680,9 +680,9 @@ export const adminCreateEditQuiz = async (req, res) => {
     if (questions && Array.isArray(questions)) {
       for (const q of questions) {
         await pool.query(
-          `INSERT INTO editing_quiz_questions (quiz_id, incorrect_word, correct_word)
-           VALUES ($1, $2, $3)`,
-          [quiz.id, q.incorrect_word, q.correct_word]
+          `INSERT INTO editing_quiz_questions (quiz_id, incorrect_word, correct_word, position)
+           VALUES ($1, $2, $3, $4)`,
+          [quiz.id, q.incorrect_word, q.correct_word, q.position]
         );
       }
     }
