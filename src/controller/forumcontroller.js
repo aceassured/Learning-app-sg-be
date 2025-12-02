@@ -480,7 +480,7 @@ export const savedForumAndPolls = async (req, res) => {
 
       LEFT JOIN users u ON u.id = f.user_id
       LEFT JOIN admins a ON a.id = f.admin_id
-      LEFT JOIN superadmin sa ON sa.id = f.superadmin_id
+      LEFT JOIN superadmin sa ON sa.id = f.super_admin_id
 
       LEFT JOIN forum_likes ful ON ful.post_id = f.id AND ful.user_id = $1
 
@@ -2279,7 +2279,7 @@ export const getForumAndPollFeed = async (req, res) => {
       FROM forum_posts p
       LEFT JOIN users u ON u.id = p.user_id
       LEFT JOIN admins a ON a.id = p.admin_id
-      LEFT JOIN superadmin sa ON sa.id = p.superadmin_id
+      LEFT JOIN superadmin sa ON sa.id = p.super_admin_id
       LEFT JOIN forum_files ff ON ff.post_id = p.id
       LEFT JOIN forum_comments fc ON fc.post_id = p.id
       LEFT JOIN users cu ON cu.id = fc.user_id
