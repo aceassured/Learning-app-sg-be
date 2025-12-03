@@ -1,24 +1,28 @@
 // src/utils/mail-report.js
 import PDFDocument from 'pdfkit';
-import nodemailer from 'nodemailer';
+// import nodemailer from 'nodemailer';
 import streamBuffers from 'stream-buffers';
 import dotenv from 'dotenv';
+import { Resend } from "resend";
+
 
 dotenv.config({ quiet: true });
 
-const transporter = nodemailer.createTransport({
-  host: process.env.SMTP_HOST,
-  port: +process.env.SMTP_PORT,
-  secure: false,
-  auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS }
-});
+// const transporter = nodemailer.createTransport({
+//   host: process.env.SMTP_HOST,
+//   port: +process.env.SMTP_PORT,
+//   secure: false,
+//   auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS }
+// });
 
-export const sendQuizPdfToEmail = async ({to, userName, sessionDetails, answers}) => {
+const resend = new Resend(process.env.RESEND_API_KEY);
+
+export const sendQuizPdfToEmail = async ({ to, userName, sessionDetails, answers }) => {
   const doc = new PDFDocument();
   const writableBuffer = new streamBuffers.WritableStreamBuffer();
 
   doc.pipe(writableBuffer);
-  doc.fontSize(18).text(`Quiz Report for ${userName}`, {align:'center'});
+  doc.fontSize(18).text(`Quiz Report for ${userName}`, { align: 'center' });
   doc.moveDown();
   doc.text(`Score: ${sessionDetails.score}/${sessionDetails.total}`);
   doc.text(`Time Taken: ${sessionDetails.timeTaken || 'N/A'}`);
@@ -26,7 +30,7 @@ export const sendQuizPdfToEmail = async ({to, userName, sessionDetails, answers}
   doc.fontSize(14).text('Questions:');
   answers.forEach((a, idx) => {
     doc.moveDown(0.2);
-    doc.fontSize(12).text(`${idx+1}. ${a.question_text}`);
+    doc.fontSize(12).text(`${idx + 1}. ${a.question_text}`);
     doc.text(`Your answer: ${a.selected_option_text} - ${a.is_correct ? 'Correct' : 'Wrong'}`);
     doc.text(`Correct answer: ${a.correct_option_text}`);
   });
@@ -35,14 +39,34 @@ export const sendQuizPdfToEmail = async ({to, userName, sessionDetails, answers}
 
   const pdfBuffer = writableBuffer.getContents();
 
-  await transporter.sendMail({
-    from: process.env.FROM_EMAIL,
+  // await transporter.sendMail({
+  //   from: process.env.FROM_EMAIL,
+  //   to,
+  //   subject: 'Your Quiz Report',
+  //   text: 'Attached is your quiz report.',
+  //   attachments: [{
+  //     filename: 'quiz-report.pdf',
+  //     content: pdfBuffer
+  //   }]
+  // });
+
+  const { error } = await resend.emails.send({
+    from: `Ace Hive <no-reply@kumbuckalpepper.com>`,   // must be a verified domain!
     to,
-    subject: 'Your Quiz Report',
-    text: 'Attached is your quiz report.',
-    attachments: [{
-      filename: 'quiz-report.pdf',
-      content: pdfBuffer
-    }]
+    subject: "Your Quiz Report",
+    text: "Attached is your quiz report.",
+    attachments: [
+      {
+        filename: "quiz-report.pdf",
+        content: pdfBuffer.toString("base64"),
+        encoding: "base64",
+      },
+    ],
   });
+
+  if (error) {
+    console.error("Resend Email Error:", error);
+    throw new Error(error.message);
+  }
+
 };

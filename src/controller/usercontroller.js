@@ -19,6 +19,7 @@ import { generateAuthenticationOptions } from '@simplewebauthn/server';
 import { verifyAuthenticationResponse } from '@simplewebauthn/server';
 
 import { isoBase64URL } from '@simplewebauthn/server/helpers';
+import { Resend } from "resend";
 
 
 
@@ -1919,16 +1920,18 @@ export const addNewUser = async (req, res) => {
     await client.query("COMMIT");
 
     // ✅ Send email with credentials
-    const transporter = nodemailer.createTransport({
-      service: "gmail",
-      auth: {
-        user: process.env.EMAIL_USER,
-        pass: process.env.EMAIL_PASS,
-      },
-    });
+    // const transporter = nodemailer.createTransport({
+    //   service: "gmail",
+    //   auth: {
+    //     user: process.env.EMAIL_USER,
+    //     pass: process.env.EMAIL_PASS,
+    //   },
+    // });
 
-    await transporter.sendMail({
-      from: `"Admin Panel" <${process.env.EMAIL_USER}>`,
+    const resend = new Resend(process.env.RESEND_API_KEY);
+
+    await resend.emails.send({
+      from: `Ace Hive Admin Panel <no-reply@kumbuckalpepper.com>`,
       to: email,
       subject: "Your Account Credentials",
       text: `Hello ${name},
@@ -2124,16 +2127,18 @@ export const changeUserRole = async (req, res) => {
 
       result = adminRows[0];
 
-      const transporter = nodemailer.createTransport({
-        service: 'gmail',
-        auth: {
-          user: 'csksarathi07@gmail.com',
-          pass: 'gmeh ckmx uxfp mloo',
-        },
-      });
+      // const transporter = nodemailer.createTransport({
+      //   service: 'gmail',
+      //   auth: {
+      //     user: 'csksarathi07@gmail.com',
+      //     pass: 'gmeh ckmx uxfp mloo',
+      //   },
+      // });
 
-      await transporter.sendMail({
-        from: `${process.env.SMTP_USER}`,
+      const resend = new Resend(process.env.RESEND_API_KEY);
+
+      await resend.emails.send({
+        from: `Ace Hive Admin Panel <no-reply@kumbuckalpepper.com>`,
         to: user.email,
         subject: "Admin Account Created",
         text: `Hello ${user.name || ""},\n\nYou have been promoted to Admin.\n\nYour login password: ${rawPassword}\n\nPlease change it after logging in.`,
@@ -2790,16 +2795,18 @@ export const adminResetPassword = async (req, res) => {
       [otp, expiryTime, admin.id]
     );
 
-    const transporter = nodemailer.createTransport({
-      service: "gmail",
-      auth: {
-        user: process.env.EMAIL_USER,
-        pass: process.env.EMAIL_PASS,
-      },
-    });
+    // const transporter = nodemailer.createTransport({
+    //   service: "gmail",
+    //   auth: {
+    //     user: process.env.EMAIL_USER,
+    //     pass: process.env.EMAIL_PASS,
+    //   },
+    // });
+
+    const resend = new Resend(process.env.RESEND_API_KEY);
 
     const mailOptions = {
-      from: `"Support" <${process.env.EMAIL_USER}>`,
+      from: `Ace Hive Admin Panel <no-reply@kumbuckalpepper.com>`,
       to: email,
       subject: "Admin Password Reset OTP",
       html: `
@@ -2809,7 +2816,7 @@ export const adminResetPassword = async (req, res) => {
       `,
     };
 
-    await transporter.sendMail(mailOptions);
+    await resend.emails.send(mailOptions);
 
     return res.status(200).json({
       success: true,
@@ -4475,16 +4482,18 @@ export const userResetPassword = async (req, res) => {
       [otp, expiryTime, admin.id]
     );
 
-    const transporter = nodemailer.createTransport({
-      service: "gmail",
-      auth: {
-        user: process.env.EMAIL_USER,
-        pass: process.env.EMAIL_PASS,
-      },
-    });
+    // const transporter = nodemailer.createTransport({
+    //   service: "gmail",
+    //   auth: {
+    //     user: process.env.EMAIL_USER,
+    //     pass: process.env.EMAIL_PASS,
+    //   },
+    // });
+
+    const resend = new Resend(process.env.RESEND_API_KEY);
 
     const mailOptions = {
-      from: `"Support" <${process.env.EMAIL_USER}>`,
+      from: `Ace Hive <no-reply@kumbuckalpepper.com>`,
       to: email,
       subject: "User Password Reset OTP",
       html: `
@@ -4494,7 +4503,9 @@ export const userResetPassword = async (req, res) => {
       `,
     };
 
-    await transporter.sendMail(mailOptions);
+    console.log("Sending OTP email to:", email, "resend:", process.env.RESEND_API_KEY);
+
+    await resend.emails.send(mailOptions);
 
     return res.status(200).json({
       success: true,
