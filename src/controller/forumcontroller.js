@@ -1321,12 +1321,12 @@ export const deleteForumNotefiles = async (req, res) => {
       return res.status(400).json({ ok: false, message: "File ID is required" });
     }
 
-    await pool.query(`DELETE FROM forum_files WHERE id = $1`, [id]);
+    const result = await pool.query(`DELETE FROM forum_files WHERE id = $1 RETURNING *`, [id]);
 
-    const result = await pool.query(`DELETE FROM forum_posts WHERE id = $1 RETURNING *`, [file_id]);
+    // const result = await pool.query(`DELETE FROM forum_posts WHERE id = $1 `, [file_id]);
 
     if (result.rowCount === 0) {
-      return res.status(404).json({ ok: false, message: "Forum post not found" });
+      return res.status(404).json({ ok: false, message: "Forum file not found" });
     }
 
     res.json({ ok: true, message: "Forum post deleted successfully", deleted: result.rows[0] });
