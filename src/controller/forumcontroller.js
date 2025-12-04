@@ -1317,7 +1317,7 @@ export const deleteForumNotefiles = async (req, res) => {
   try {
     const { file_id, id  } = req.body;
 
-    if (!file_id || id ) {
+    if (!file_id || !id ) {
       return res.status(400).json({ ok: false, message: "File ID is required" });
     }
 
