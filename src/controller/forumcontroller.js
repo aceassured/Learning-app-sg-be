@@ -1315,13 +1315,13 @@ export const deleteForum = async (req, res) => {
 
 export const deleteForumNotefiles = async (req, res) => {
   try {
-    const { file_id, id  } = req.body;
+    const { file_id  } = req.body;
 
-    if (!file_id || !id ) {
+    if (!file_id) {
       return res.status(400).json({ ok: false, message: "File ID is required" });
     }
 
-    const result = await pool.query(`DELETE FROM forum_files WHERE id = $1 RETURNING *`, [id]);
+    const result = await pool.query(`DELETE FROM forum_files WHERE id = $1 RETURNING *`, [file_id]);
 
     // const result = await pool.query(`DELETE FROM forum_posts WHERE id = $1 `, [file_id]);
 
