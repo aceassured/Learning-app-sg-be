@@ -1315,13 +1315,13 @@ export const deleteForum = async (req, res) => {
 
 export const deleteForumNotefiles = async (req, res) => {
   try {
-    const { file_id } = req.body;
+    const { file_id, id  } = req.body;
 
-    if (!file_id) {
+    if (!file_id || id ) {
       return res.status(400).json({ ok: false, message: "File ID is required" });
     }
 
-    await pool.query(`DELETE FROM forum_files WHERE post_id = $1`, [file_id]);
+    await pool.query(`DELETE FROM forum_files WHERE id = $1`, [id]);
 
     const result = await pool.query(`DELETE FROM forum_posts WHERE id = $1 RETURNING *`, [file_id]);
 
@@ -2568,7 +2568,7 @@ export const getNotesfromTopics = async (req, res) => {
     // Fetch notes for topic
     // -----------------------------------
     let notesQuery = `
-      SELECT ff.*
+      SELECT ff.*,fp.user_id
       FROM forum_posts fp
       JOIN forum_files ff ON ff.post_id = fp.id
       WHERE fp.topic_id = $1
