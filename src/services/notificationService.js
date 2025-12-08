@@ -421,14 +421,14 @@ LIMIT 1;
             console.log(`🔔 Generating notifications for user ${userId}`);
 
             // Daily notifications
-            await this.createDailyQuizNotification(userId);
-            await this.createStreakNotification(userId);
+            // await this.createDailyQuizNotification(userId);
+            // await this.createStreakNotification(userId);
             await this.createForumCommentsNotification(userId);
             await this.createForumLikesNotification(userId);
 
             // Weekly notifications (only once per week)
-            await this.createWeeklyHighScoreNotification(userId);
-            await this.createTopicImprovementNotification(userId);
+            // await this.createWeeklyHighScoreNotification(userId);
+            // await this.createTopicImprovementNotification(userId);
 
             console.log(`✅ Notifications generated for user ${userId}`);
         } catch (error) {
