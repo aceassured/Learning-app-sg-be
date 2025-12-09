@@ -13,7 +13,7 @@ export const attachUserAndAbility = (req, res, next) => {
     if (!token) {
       return res.status(401).json({ status: false, message: 'Unauthorized' });
     }
-    const decoded = jwt.verify(token, JWT_SECRET); // { userId, role }
+    const decoded = jwt.verify(token, JWT_SECRET); 
     req.user = decoded;
     req.ability = defineAbilitiesFor(decoded);
     next();

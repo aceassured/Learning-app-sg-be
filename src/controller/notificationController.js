@@ -53,7 +53,6 @@ export const getUserNotifications = async (req, res) => {
 
 // get all notification not showed notifications.......
 
-
 export const getUserNotificationsNotshown = async (req, res) => {
   const userId = req.query.userId || req.user?.id;
 
@@ -110,9 +109,8 @@ export const getUserNotificationsNotshown = async (req, res) => {
   }
 };
 
+// Mark notifications as read....
 
-
-// Mark notifications as read
 export const markNotificationsAsRead = async (req, res) => {
   const { userId, ids } = req.body;
 
@@ -134,6 +132,7 @@ export const markNotificationsAsRead = async (req, res) => {
 };
 
 // Mark notifications as viewed (when user sees them in notification page)
+
 export const markNotificationsAsViewed = async (req, res) => {
   const { userId, ids } = req.body;
 
@@ -166,6 +165,7 @@ export const markNotificationsAsViewed = async (req, res) => {
 };
 
 // Send notification (for system use)
+
 export const sendNotification = async (req, res) => {
   const { userId, message, type, subject } = req.body;
 
@@ -202,7 +202,8 @@ export const sendNotification = async (req, res) => {
   }
 };
 
-// Get unread notification count
+// Get unread notification count...
+
 export const getUnreadCount = async (req, res) => {
   const userId = req.query.userId || req.user?.id;
 
@@ -225,7 +226,8 @@ export const getUnreadCount = async (req, res) => {
   }
 };
 
-// Helper function to create notifications for different events
+// Helper function to create notifications for different events...
+
 export const createQuizNotification = async (userId, subject, message) => {
   try {
     const query = `
@@ -254,6 +256,8 @@ export const createQuizNotification = async (userId, subject, message) => {
   }
 };
 
+// create forum notification...
+
 export const createForumNotification = async (userId, message) => {
   try {
     const query = `
@@ -281,6 +285,8 @@ export const createForumNotification = async (userId, message) => {
     return null;
   }
 };
+
+// create streak notification....
 
 export const createStreakNotification = async (userId, subject, streakDays) => {
   try {
@@ -311,6 +317,8 @@ export const createStreakNotification = async (userId, subject, streakDays) => {
   }
 };
 
+// create progress notification...
+
 export const createProgressNotification = async (userId, subject, progressMessage) => {
   try {
     const query = `
@@ -340,8 +348,6 @@ export const createProgressNotification = async (userId, subject, progressMessag
 };
 
 // mark as shown notification............
-
-
 
 export const markAsShownnotification = async (req, res) => {
   try {

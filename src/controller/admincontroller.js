@@ -11,38 +11,6 @@ import crypto from "crypto";
 
 const norm = (s) => (typeof s === "string" ? s.trim().toLowerCase() : "");
 
-// export const admincreatePoll = async (req, res) => {
-//   try {
-//     const { question, allow_multiple = false, expires_at = null, options, subject_id, grade_level } = req.body;
-//     const adminId = req.userId;; // assuming req.user is set after auth & role check
-
-//     if (!question || !options || options.length < 2 || !subject_id || !grade_level) {
-//       return res.status(400).json({ message: "Question and at least 2 options required" });
-//     }
-
-//     // Insert poll
-//     const pollResult = await pool.query(
-//       `INSERT INTO polls (question, allow_multiple, expires_at, subject_id, grade_level ) VALUES ($1,$2,$3,$4,$5) RETURNING *`,
-//       [question, allow_multiple, expires_at, subject_id, grade_level]
-//     );
-
-//     const poll = pollResult.rows[0];
-
-//     // Insert poll options
-//     const optionValues = options.map((opt) => `('${poll.id}', '${opt}')`).join(",");
-//     await pool.query(`INSERT INTO poll_options (poll_id, option_text) VALUES ${optionValues}`);
-
-//     // const mergeResult = [poll,]
-
-//     return res.status(201).json({ message: "Poll created successfully", poll });
-//   } catch (error) {
-//     console.error("admincreatePoll error:", error);
-//     return res.status(500).json({ message: "Internal server error" });
-//   }
-// };
-
-
-// Admin create poll
 export const admincreatePoll = async (req, res) => {
   try {
     const {
@@ -129,55 +97,7 @@ export const admincreatePoll = async (req, res) => {
   }
 };
 
-
-
 // edit poll...
-
-// export const adminEditPoll = async (req, res) => {
-//   try {
-//     const { poll_id, question, allow_multiple, expires_at, options, subject_id, grade_level } = req.body;
-
-//     if (!poll_id) {
-//       return res.status(400).json({ message: "Poll ID is required" });
-//     }
-
-//     // Check if poll exists
-//     const pollCheck = await pool.query(`SELECT * FROM polls WHERE id = $1`, [poll_id]);
-//     if (pollCheck.rows.length === 0) {
-//       return res.status(404).json({ message: "Poll not found" });
-//     }
-
-//     // Update poll table
-//     const updatedPoll = await pool.query(
-//       `UPDATE polls
-//        SET question = $1,
-//            allow_multiple = $2,
-//            expires_at = $3,
-//            subject_id = $4,
-//            grade_level = $5,
-//            updated_at = NOW()
-//        WHERE id = $6
-//        RETURNING *`,
-//       [question, allow_multiple, expires_at, subject_id, grade_level, poll_id]
-//     );
-
-//     // Update poll options
-//     if (options && Array.isArray(options) && options.length >= 2) {
-//       // Delete existing options
-//       await pool.query(`DELETE FROM poll_options WHERE poll_id = $1`, [poll_id]);
-
-//       // Insert new options
-//       const optionValues = options.map((opt) => `('${poll_id}', '${opt}')`).join(",");
-//       await pool.query(`INSERT INTO poll_options (poll_id, option_text) VALUES ${optionValues}`);
-//     }
-
-//     return res.status(200).json({ message: "Poll updated successfully", poll: updatedPoll.rows[0] });
-
-//   } catch (error) {
-//     console.error("adminEditPoll error:", error);
-//     return res.status(500).json({ message: "Internal server error" });
-//   }
-// };
 
 export const adminEditPoll = async (req, res) => {
   try {
@@ -416,8 +336,6 @@ export const getAllpoll = async (req, res) => {
   }
 };
 
-
-
 // admin announcement poll......
 
 export const adminAnnouncementpoll = async (req, res) => {
@@ -439,9 +357,8 @@ export const adminAnnouncementpoll = async (req, res) => {
   }
 };
 
+// CREATE GRADE...
 
-
-// ✅ CREATE GRADE
 export const createGrades = async (req, res) => {
   try {
     const { grade_level } = req.body;
@@ -469,7 +386,8 @@ export const createGrades = async (req, res) => {
   }
 };
 
-// ✅ UPDATE GRADE
+// UPDATE GRADE...
+
 export const updateGrade = async (req, res) => {
   try {
     const { id } = req.body;
@@ -494,7 +412,8 @@ export const updateGrade = async (req, res) => {
   }
 };
 
-// ✅ DELETE (soft delete) GRADE
+// DELETE (soft delete) GRADE......
+
 export const deleteGrade = async (req, res) => {
   try {
     const { id } = req.body;
@@ -519,7 +438,8 @@ export const deleteGrade = async (req, res) => {
 // ================ SUBJECTS API ========================
 // ======================================================
 
-// ✅ UPDATE SUBJECT
+// UPDATE SUBJECT..
+
 export const updateSubject = async (req, res) => {
   try {
     const { id } = req.body;
@@ -551,7 +471,8 @@ export const updateSubject = async (req, res) => {
   }
 };
 
-// ✅ DELETE SUBJECT (soft delete)
+// DELETE SUBJECT (soft delete)...
+
 export const deleteSubject = async (req, res) => {
   try {
     const { id } = req.body;
@@ -576,7 +497,8 @@ export const deleteSubject = async (req, res) => {
 // ================ TOPICS API ==========================
 // ======================================================
 
-// ✅ UPDATE TOPIC
+// UPDATE TOPIC...
+
 export const updateTopics = async (req, res) => {
   try {
     const { id } = req.body;
@@ -607,7 +529,8 @@ export const updateTopics = async (req, res) => {
   }
 };
 
-// ✅ DELETE TOPIC (soft delete)
+//  DELETE TOPIC (soft delete)...
+
 export const deleteTopic = async (req, res) => {
   try {
     const { id } = req.body;
@@ -627,7 +550,6 @@ export const deleteTopic = async (req, res) => {
     res.status(500).json({ message: "Internal Server Error" });
   }
 };
-
 
 // delete poll......
 
@@ -694,7 +616,6 @@ export const adminCreateEditQuiz = async (req, res) => {
   }
 
 };
-
 
 // user get editing quiz..........
 
@@ -917,8 +838,6 @@ export const getAllEditQuizzesnew = async (req, res) => {
   }
 };
 
-
-
 // update editable question.....
 
 export const updateEditQuiz = async (req, res) => {
@@ -960,9 +879,7 @@ export const updateEditQuiz = async (req, res) => {
   }
 };
 
-
 // delete editabe qustion.......
-
 
 export const deleteEditQuiz = async (req, res) => {
   try {
@@ -984,7 +901,6 @@ export const deleteEditQuiz = async (req, res) => {
     res.status(500).json({ error: "Server error" });
   }
 };
-
 
 // get particularquestions..........
 
@@ -1106,10 +1022,7 @@ export const adminUpdateUserStatus = async (req, res) => {
     return res.status(500).json({ message: "Internal server error" });
   }
 };
-
-
 // get all questions..........
-
 
 export const getAllQuestionsnew = async (req, res) => {
   try {
@@ -1224,15 +1137,8 @@ export const getAllQuestionsnew = async (req, res) => {
   }
 };
 
-
-
-
-
 // Create bulk editing quiz questions
 
-// adminBulkQuizOptionA.js
-
-// Adding new controller function for bulk upload of editable quiz questions
 export const adminCreateBulkEditableQuizQuestions = async (req, res) => {
   if (!req.file) return res.status(400).json({ error: "No file uploaded; field name must be 'file'." });
 
@@ -1652,6 +1558,7 @@ export const adminCreateBulkEditableQuizQuestions = async (req, res) => {
 };
 
 // get editable upload history.......
+
 export const getEditableUploadHistory = async (req, res) => {
   try {
     const result = await pool.query(`
@@ -1668,6 +1575,7 @@ export const getEditableUploadHistory = async (req, res) => {
 };
 
 // delete editable upload history.......
+
 export const deleteEditableUpload = async (req, res) => {
   const { uploadId } = req.params;
 
@@ -1708,7 +1616,8 @@ export const deleteEditableUpload = async (req, res) => {
   }
 };
 
-// Get all the questions for a specific editing file upload
+// Get all the questions for a specific editing file upload...
+
 export const getEditableUploadData = async (req, res) => {
   const { uploadBatchId } = req.params;
 
@@ -1737,7 +1646,6 @@ export const getEditableUploadData = async (req, res) => {
     });
   }
 };
-
 
 // adminDashboard api........
 

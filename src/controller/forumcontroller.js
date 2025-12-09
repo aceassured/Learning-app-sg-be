@@ -4,23 +4,6 @@ import hybridModeration from '../services/hybridModeration.js';
 import { compressFile } from '../utils/compressFile.js';
 import { uploadBufferforumToVercel, uploadBufferToVercel } from '../utils/vercel-blob.js';
 
-// export const listPosts = async (req, res) => {
-//   try {
-//     const { subject } = req.query;
-//     let q = 'SELECT p.*, u.name as author_name FROM forum_posts p LEFT JOIN users u ON u.id = p.user_id';
-//     const params = [];
-//     if (subject) {
-//       q += ' WHERE subject_tag = $1';
-//       params.push(subject);
-//     }
-//     q += ' ORDER BY created_at DESC';
-//     const r = await pool.query(q, params);
-//     res.json({ ok:true, posts: r.rows });
-//   } catch (err) {
-//     console.error(err);
-//     res.status(500).json({ ok:false });
-//   }
-// };
 
 export const listPosts = async (req, res) => {
   try {
@@ -208,142 +191,7 @@ export const listPosts = async (req, res) => {
   }
 };
 
-
-// export const savedForumAndPolls = async (req, res) => {
-//   try {
-//     const userId = req.userId; // from auth middleware
-//     const search = req.body?.search || null;
-
-//     if (!userId) {
-//       return res.status(400).json({ ok: false, error: "User ID is required" });
-//     }
-
-//     const params = [userId];
-//     let forumSearchCondition = "";
-//     let pollSearchCondition = "";
-
-//     if (search) {
-//       params.push(`%${search}%`);
-//       forumSearchCondition = `AND f.forum_title ILIKE $${params.length}`;
-//       pollSearchCondition = `AND p.question ILIKE $${params.length}`;
-//     }
-
-//     const q = `
-//       -- ✅ Fetch saved forums
-//       SELECT 
-//         'forum' AS data_type,
-//         f.id,
-//         f.content,
-//         f.forum_title,
-//         f.subject_tag,
-//         f.grade_level,
-//         f.created_at,
-//         COALESCE(fvc.view_count, 0) AS view_count,
-//         COALESCE(fl.like_count, 0) AS like_count,
-//         COALESCE(ff.files, '[]') AS files,
-//         COALESCE(u.name, a.name) AS author_name,
-//         CASE 
-//           WHEN u.id IS NOT NULL THEN 'user'
-//           WHEN a.id IS NOT NULL THEN 'admin'
-//         END AS author_type,
-//         false AS has_voted,
-//         NULL AS user_selected_option
-//       FROM user_saved_forums usf
-//       JOIN forum_posts f ON f.id = usf.forum_post_id
-//       LEFT JOIN (
-//         SELECT forum_post_id, COUNT(*) AS view_count
-//         FROM forum_views
-//         GROUP BY forum_post_id
-//       ) fvc ON fvc.forum_post_id = f.id
-//       LEFT JOIN (
-//         SELECT post_id, COUNT(*) AS like_count
-//         FROM forum_likes
-//         GROUP BY post_id
-//       ) fl ON fl.post_id = f.id
-//       LEFT JOIN (
-//         SELECT post_id,
-//           JSON_AGG(
-//             JSON_BUILD_OBJECT(
-//               'id', id,
-//               'url', url,
-//               'filename', filename
-//             )
-//           ) AS files
-//         FROM forum_files
-//         GROUP BY post_id
-//       ) ff ON ff.post_id = f.id
-//       LEFT JOIN users u ON u.id = f.user_id
-//       LEFT JOIN admins a ON a.id = f.admin_id
-//       WHERE usf.user_id = $1
-//       ${forumSearchCondition}
-
-//       UNION ALL
-
-//       -- ✅ Fetch saved polls
-//       SELECT
-//         'poll' AS data_type,
-//         p.id,
-//         p.question AS content,
-//         NULL AS forum_title,
-//         p.subject_id AS subject_tag,
-//         p.grade_level,
-//         p.created_at,
-//         COALESCE(pv.view_count, 0) AS view_count,
-//         COALESCE(pvc.vote_count, 0) AS like_count, -- treat votes as "likes"
-//         COALESCE(po.options, '[]') AS files,
-//         NULL AS author_name,
-//         NULL AS author_type,
-//         CASE WHEN uv.user_id IS NOT NULL THEN true ELSE false END AS has_voted,
-//         uv.option_id AS user_selected_option
-//       FROM user_saved_polls usp
-//       JOIN polls p ON p.id = usp.poll_id
-//       LEFT JOIN (
-//         SELECT poll_id, COUNT(*) AS view_count
-//         FROM poll_views
-//         GROUP BY poll_id
-//       ) pv ON pv.poll_id = p.id
-//       LEFT JOIN (
-//         SELECT poll_id, COUNT(*) AS vote_count
-//         FROM poll_votes
-//         GROUP BY poll_id
-//       ) pvc ON pvc.poll_id = p.id
-//       LEFT JOIN (
-//         SELECT poll_id,
-//           JSON_AGG(
-//             JSON_BUILD_OBJECT(
-//               'id', id,
-//               'option_text', option_text,
-//               'vote_count', (SELECT COUNT(*) FROM poll_votes WHERE poll_votes.option_id = poll_options.id)
-//             )
-//           ) AS options
-//         FROM poll_options
-//         GROUP BY poll_id
-//       ) po ON po.poll_id = p.id
-//       LEFT JOIN (
-//         SELECT poll_id, option_id, user_id
-//         FROM poll_votes
-//         WHERE user_id = $1
-//       ) uv ON uv.poll_id = p.id
-//       WHERE usp.user_id = $1
-//       ${pollSearchCondition}
-
-//       ORDER BY created_at DESC
-//     `;
-
-//     const r = await pool.query(q, params);
-
-//     res.json({ ok: true, saved_items: r.rows });
-//   } catch (error) {
-//     console.error("Error fetching saved forums and polls:", error);
-//     res.status(500).json({ ok: false, error: "Server error" });
-//   }
-// };
-
-
-
-
-
-// get only particular forum notes.......
+//  saved forum polls..........
 
 export const savedForumAndPolls = async (req, res) => {
   try {
@@ -624,9 +472,7 @@ export const savedForumAndPolls = async (req, res) => {
   }
 };
 
-
-
-
+// get only forum notes....
 
 export const getonlyForumNotes = async (req, res) => {
   try {
@@ -822,118 +668,7 @@ export const getonlyForumNotes = async (req, res) => {
   }
 };
 
-
-// export const createPost = async (req, res) => {
-//   try {
-//     const { grade_level, content, subject_tag, type_of_upload, author_type, forum_title, topic_id } = req.body;
-//     const authorId = req.userId;
-
-//     if (!content || !author_type) {
-//       return res.status(400).json({ 
-//         ok: false, 
-//         message: "Content and author_type are required" 
-//       });
-//     }
-
-//     // Use Perspective API moderation
-//     const moderationResult = await hybridModeration.moderateContent(content, {
-//       usePerspective: true,
-//       strictMode: true
-//     });
-
-//     console.log('Perspective Moderation Result:', {
-//       safe: moderationResult.safe,
-//       method: moderationResult.method,
-//       scores: moderationResult.scores
-//     });
-
-//     // Block if not safe
-//     if (!moderationResult.safe) {
-//       return res.status(400).json({
-//         ok: false,
-//         message: "Content violates community guidelines",
-//         moderation: {
-//           method: moderationResult.method,
-//           summary: moderationResult.summary,
-//           scores: moderationResult.scores,
-//           needsReview: moderationResult.needsHumanReview
-//         }
-//       });
-//     }
-
-//     // Step 3: Proceed with post creation (content is safe)
-//     let postRes;
-//     const created_at = new Date().toISOString();
-
-//     // Determine author type and build query
-//     let query, params;
-
-//     if (author_type === "user") {
-//       query = `INSERT INTO forum_posts (user_id, grade_level, content, subject_tag, type_of_upload, forum_title, topic_id, created_at, moderation_status) 
-//                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *`;
-//       params = [authorId, grade_level, content, subject_tag, type_of_upload, forum_title, topic_id, created_at, 'approved'];
-//     } 
-//     else if (author_type === "admin") {
-//       query = `INSERT INTO forum_posts (admin_id, grade_level, content, subject_tag, type_of_upload, forum_title, topic_id, created_at, moderation_status) 
-//                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *`;
-//       params = [authorId, grade_level, content, subject_tag, type_of_upload, forum_title, topic_id, created_at, 'approved'];
-//     }
-//     else if (author_type === "superadmin") {
-//       query = `INSERT INTO forum_posts (super_admin_id, grade_level, content, subject_tag, type_of_upload, forum_title, topic_id, created_at, moderation_status) 
-//                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *`;
-//       params = [authorId, grade_level, content, subject_tag, type_of_upload, forum_title, topic_id, created_at, 'approved'];
-//     } 
-//     else {
-//       return res.status(400).json({ ok: false, message: "Invalid author_type" });
-//     }
-
-//     // Execute query
-//     postRes = await pool.query(query, params);
-//     const post = postRes.rows[0];
-
-//     // Step 4: Handle file uploads if any
-//     if (req.files && req.files.length) {
-//       for (const f of req.files) {
-//         const compressedBuffer = await compressFile(
-//           f.buffer,
-//           f.mimetype,
-//           f.originalname
-//         );
-
-//         const url = await uploadBufferforumToVercel(
-//           compressedBuffer,
-//           f.originalname
-//         );
-
-//         await pool.query(
-//           `INSERT INTO forum_files (post_id, url, filename) VALUES ($1, $2, $3)`,
-//           [post.id, url, f.originalname]
-//         );
-//       }
-//     }
-
-//     // Step 5: Send response
-//     const response = {
-//       ok: true,
-//       post,
-//       moderation: {
-//         status: 'clean',
-//         method: moderationResult.method,
-//         message: 'Content published successfully'
-//       }
-//     };
-
-//     res.json(response);
-
-//   } catch (err) {
-//     console.error('Error creating post:', err);
-//     res.status(500).json({ 
-//       ok: false, 
-//       message: "Server error"
-//     });
-//   }
-// };
-
+// create forum post...
 
 export const createPost = async (req, res) => {
   try {
@@ -1083,6 +818,7 @@ export const createPost = async (req, res) => {
   }
 };
 
+// create study notes......
 
 export const createNotes = async (req, res) => {
   try {
@@ -1128,6 +864,7 @@ export const createNotes = async (req, res) => {
   }
 };
 
+// edit forum post......
 
 export const editPost = async (req, res) => {
   try {
@@ -1284,7 +1021,6 @@ export const editPost = async (req, res) => {
   }
 };
 
-
 // delete froum .........
 
 export const deleteForum = async (req, res) => {
@@ -1309,7 +1045,6 @@ export const deleteForum = async (req, res) => {
     res.status(500).json({ ok: false, message: "Internal server error" });
   }
 };
-
 
 // delete froum notes files .........
 
@@ -1359,7 +1094,7 @@ export const deleteUser = async (req, res) => {
   }
 };
 
-// ✅ Add Like
+// Add Like.......
 
 export const addLike = async (req, res) => {
   try {
@@ -1420,8 +1155,8 @@ export const addLike = async (req, res) => {
   }
 };
 
+//  Remove Like...
 
-// ✅ Remove Like
 export const removeLike = async (req, res) => {
   try {
     const { id, data_type } = req.body;
@@ -1473,8 +1208,8 @@ export const removeLike = async (req, res) => {
   }
 };
 
+//  Add Comment...
 
-// ✅ Add Comment
 export const addComment = async (req, res) => {
   try {
     const userId = req.userId;
@@ -1522,6 +1257,7 @@ export const addComment = async (req, res) => {
   }
 };
 
+// edit comment.....
 
 export const editComment = async (req, res) => {
   try {
@@ -1579,8 +1315,8 @@ export const editComment = async (req, res) => {
   }
 };
 
+//  Delete Comment...
 
-// ✅ Delete Comment
 export const deleteComment = async (req, res) => {
   try {
     const { commentId, data_type } = req.body; // Add data_type here
@@ -1638,6 +1374,9 @@ export const deleteComment = async (req, res) => {
     });
   }
 };
+
+// get all likes and comments...
+
 export const getAlllikesandComments = async (req, res) => {
   try {
     const { postId } = req.body;
@@ -1690,9 +1429,7 @@ export const getAlllikesandComments = async (req, res) => {
   }
 };
 
-
 // save forum......
-
 
 export const saveForumOrPoll = async (req, res) => {
   try {
@@ -1777,348 +1514,7 @@ export const saveForumOrPoll = async (req, res) => {
   }
 };
 
-
-
-// get forum and polls data.......
-
-
-// export const getForumAndPollFeed = async (req, res) => {
-//   try {
-//     const userId = req.userId;
-//     console.log("userId", userId)
-//     const { subject, search, sortBy, page = 1, limit = 10 } = req.query;
-
-    
-//     const parsedPage = parseInt(page) || 1;
-//     const parsedLimit = parseInt(limit) || 10;
-//     const offset = (parsedPage - 1) * parsedLimit;
-
-//     // =================================================================================
-//     // 1) Build base queries for forums and polls separately
-//     // =================================================================================
-
-//     // Forum base query
-//     let forumBaseQuery = `
-//       SELECT 
-//         p.id,
-//         p.content,
-//         s.subject AS subject_tag,     
-//         g.grade_level AS grade_level,       
-//         p.type_of_upload,
-//         p.created_at AT TIME ZONE 'UTC' AS created_at,
-//         p.forum_title AS forum_title,
-//         t.topic AS topic,
-//         'forum' as data_type,
-
-//         COALESCE(
-//           JSON_AGG(
-//             DISTINCT JSONB_BUILD_OBJECT(
-//               'id', ff.id,
-//               'url', ff.url,
-//               'filename', ff.filename
-//             )
-//           ) FILTER (WHERE ff.id IS NOT NULL),
-//           '[]'
-//         ) AS files,
-
-//         COALESCE(
-//           JSON_AGG(
-//             DISTINCT JSONB_BUILD_OBJECT(
-//               'id', fc.id,
-//               'content', fc.content,
-//               'created_at', fc.created_at AT TIME ZONE 'UTC',
-//               'user_id', cu.id,
-//               'user_name', cu.name,
-//               'profile_photo_url', cu.profile_photo_url
-//             )
-//           ) FILTER (WHERE fc.id IS NOT NULL),
-//           '[]'
-//         ) AS comments,
-
-//         COALESCE(u.id, a.id, sa.id) AS author_id,
-//         COALESCE(u.name, a.name, sa.name) AS author_name,
-//         COALESCE(u.profile_photo_url, a.profile_photo_url, sa.profile_photo_url) AS profile_photo_url,
-//         u.school_name,
-//         u.grade_level AS user_grade_level,
-//         COALESCE(u.created_at, a.created_at, sa.created_at) AT TIME ZONE 'UTC' AS author_created_at,
-        
-//         CASE 
-//           WHEN u.id IS NOT NULL THEN 'user'
-//           WHEN a.id IS NOT NULL THEN 'admin'
-//           WHEN sa.id IS NOT NULL THEN 'superadmin'
-//         END AS author_type,
-
-//         COALESCE(l.like_count, 0) AS like_count,
-//         COALESCE(c.comment_count, 0) AS comment_count,
-//         CASE WHEN ul.user_id IS NOT NULL THEN true ELSE false END AS is_liked_by_user,
-//         CASE WHEN sf.user_id IS NOT NULL THEN true ELSE false END AS is_forum_saved,
-//         COALESCE(v.view_count, 0) AS view_count
-
-//       FROM forum_posts p
-//       LEFT JOIN users u ON u.id = p.user_id
-//       LEFT JOIN admins a ON a.id = p.admin_id
-//       LEFT JOIN superadmin sa ON sa.id = p.superadmin_id
-//       LEFT JOIN forum_files ff ON ff.post_id = p.id
-//       LEFT JOIN forum_comments fc ON fc.post_id = p.id
-//       LEFT JOIN users cu ON cu.id = fc.user_id
-//       LEFT JOIN (SELECT post_id, COUNT(*) AS like_count FROM forum_likes GROUP BY post_id) l ON l.post_id = p.id
-//       LEFT JOIN (SELECT post_id, COUNT(*) AS comment_count FROM forum_comments GROUP BY post_id) c ON c.post_id = p.id
-//       LEFT JOIN forum_likes ul ON ul.post_id = p.id AND ul.user_id = $1
-//       LEFT JOIN subjects s ON s.id = p.subject_tag
-//       LEFT JOIN grades g ON g.id = p.grade_level
-//       LEFT JOIN topics t ON t.id = p.topic_id
-//       LEFT JOIN user_saved_forums sf ON sf.forum_post_id = p.id AND sf.user_id = $1
-//       LEFT JOIN (SELECT forum_post_id, COUNT(*) AS view_count FROM forum_views GROUP BY forum_post_id) v 
-//         ON v.forum_post_id = p.id
-//     `;
-
-//     // Poll base query
-//     let pollBaseQuery = `
-//       SELECT 
-//         p.id,
-//         p.question AS poll_title,
-//         NULL as content,
-//         p.created_at AT TIME ZONE 'UTC' AS created_at,
-//         p.expires_at AT TIME ZONE 'UTC' AS expires_at,
-//         p.subject_id as subject_tag,
-//         p.poll_image_url,
-//         p.grade_level,
-//         p.is_poll_ended,
-//         'poll' as data_type,
-
-//         COALESCE(v.view_count, 0) AS view_count,
-
-//         CASE WHEN uv.user_id IS NOT NULL THEN true ELSE false END AS has_voted,
-//         uv.option_id AS user_selected_option,
-
-//         CASE WHEN usp.user_id IS NOT NULL THEN true ELSE false END AS is_poll_saved,
-
-//         COALESCE(l.like_count, 0) AS like_count,
-//         COALESCE(c.comment_count, 0) AS comment_count,
-//         CASE WHEN ul.user_id IS NOT NULL THEN true ELSE false END AS is_liked_by_user,
-
-//         COALESCE(
-//           JSON_AGG(
-//             DISTINCT JSONB_BUILD_OBJECT(
-//               'id', pc.id,
-//               'comment', pc.comment,
-//               'created_at', pc.created_at AT TIME ZONE 'UTC',
-//               'user_id', cu.id,
-//               'user_name', cu.name,
-//               'profile_photo_url', cu.profile_photo_url
-//             )
-//           ) FILTER (WHERE pc.id IS NOT NULL),
-//           '[]'
-//         ) AS comments,
-
-//         COALESCE(
-//           JSON_AGG(
-//             DISTINCT JSONB_BUILD_OBJECT(
-//               'id', po.id,
-//               'option_text', po.option_text,
-//               'vote_count', COALESCE(pvc.vote_count, 0),
-//               'voters', COALESCE(pvc.voters, '[]')
-//             )
-//           ) FILTER (WHERE po.id IS NOT NULL),
-//           '[]'
-//         ) AS options,
-
-//         '[]'::jsonb as files,
-//         NULL as author_id,
-//         NULL as author_name,
-//         NULL as profile_photo_url,
-//         NULL as school_name,
-//         NULL as user_grade_level,
-//         NULL as author_created_at,
-//         NULL as author_type
-
-//       FROM polls p
-//       LEFT JOIN (SELECT poll_id, COUNT(*) AS view_count FROM poll_views GROUP BY poll_id) v ON v.poll_id = p.id
-//       LEFT JOIN poll_options po ON po.poll_id = p.id
-//       LEFT JOIN (
-//         SELECT 
-//           pv.option_id,
-//           COUNT(pv.id) AS vote_count,
-//           json_agg(json_build_object('id', u.id, 'name', u.name)) AS voters
-//         FROM poll_votes pv
-//         LEFT JOIN users u ON u.id = pv.user_id
-//         GROUP BY pv.option_id
-//       ) pvc ON pvc.option_id = po.id
-//       LEFT JOIN (
-//         SELECT pv.poll_id, pv.option_id, pv.user_id FROM poll_votes pv WHERE pv.user_id = $1
-//       ) uv ON uv.poll_id = p.id
-//       LEFT JOIN user_saved_polls usp ON usp.poll_id = p.id AND usp.user_id = $1
-//       LEFT JOIN (SELECT poll_id, COUNT(*) AS like_count FROM poll_likes GROUP BY poll_id) l ON l.poll_id = p.id
-//       LEFT JOIN poll_likes ul ON ul.poll_id = p.id AND ul.user_id = $1
-//       LEFT JOIN (SELECT poll_id, COUNT(*) AS comment_count FROM poll_comments GROUP BY poll_id) c ON c.poll_id = p.id
-//       LEFT JOIN poll_comments pc ON pc.poll_id = p.id
-//       LEFT JOIN users cu ON cu.id = pc.user_id
-//       WHERE 
-//         p.active_status = true
-//         AND (p.expires_at IS NULL OR p.expires_at > NOW())
-//     `;
-
-//     // =================================================================================
-//     // 2) Build conditions and parameters for each query type
-//     // =================================================================================
-
-//     // Forum conditions and parameters
-//     const forumConditions = [];
-//     const forumParams = [userId]; // $1 = userId
-// console.log("forumParams",forumParams)
-//     // Poll conditions and parameters  
-//     const pollConditions = [];
-//     const pollParams = [userId]; // $1 = userId
-// console.log("userId",userId)
-
-//     let paramOffset = 2; // Start from $2 for additional params
-
-//     if (subject) {
-//       // Forum condition
-//       forumConditions.push(`p.subject_tag = $${paramOffset}`);
-//       forumParams.push(subject);
-
-// console.log("paramOffset",paramOffset)
-
-
-//       // Poll condition
-//       pollConditions.push(`p.subject_id = $${paramOffset}`);
-//       pollParams.push(subject);
-
-// console.log("paramOffset",paramOffset)
-      
-//       paramOffset++;
-//     }
-
-//     if (search) {
-//       // Forum condition
-//       forumConditions.push(`p.forum_title ILIKE $${paramOffset}`);
-//       forumParams.push(`%${search}%`);
-
-//       // Poll condition
-//       pollConditions.push(`p.question ILIKE $${paramOffset}`);
-//       pollParams.push(`%${search}%`);
-
-//       paramOffset++;
-//     }
-
-//     // Add WHERE clauses
-//     const forumWhereClause = forumConditions.length > 0 ? ` WHERE ${forumConditions.join(" AND ")}` : '';
-//     const pollWhereClause = pollConditions.length > 0 ? ` AND ${pollConditions.join(" AND ")}` : '';
-
-//     // =================================================================================
-//     // 3) Get total counts
-//     // =================================================================================
-//     const forumCountQuery = `
-//       SELECT COUNT(*) as total 
-//       FROM forum_posts p 
-//       ${forumWhereClause}
-//     `;
-
-//     const pollCountQuery = `
-//       SELECT COUNT(*) as total 
-//       FROM polls p 
-//       WHERE p.active_status = true 
-//       AND (p.expires_at IS NULL OR p.expires_at > NOW())
-//       ${pollWhereClause}
-//     `;
-
-//     const [forumCountRes, pollCountRes] = await Promise.all([
-//       pool.query(forumCountQuery, forumParams.slice(1)), // Remove userId for count
-//       pool.query(pollCountQuery, pollParams.slice(1)) // Remove userId for count
-//     ]);
-
-//     const forumTotal = parseInt(forumCountRes.rows[0].total, 10);
-//     const pollTotal = parseInt(pollCountRes.rows[0].total, 10);
-//     const totalRecords = forumTotal + pollTotal;
-//     const totalPages = Math.ceil(totalRecords / parsedLimit);
-
-//     // =================================================================================
-//     // 4) Fetch data from both sources separately, then combine and paginate
-//     // =================================================================================
-
-//     // Complete forum query
-//     const finalForumQuery = forumBaseQuery + forumWhereClause + `
-//       GROUP BY p.id, s.subject, g.grade_level, u.id, a.id, sa.id, l.like_count, 
-//                c.comment_count, ul.user_id, sf.user_id, v.view_count, t.topic
-//       ORDER BY p.created_at DESC
-//     `;
-
-//     // Complete poll query  
-//     const finalPollQuery = pollBaseQuery + pollWhereClause + `
-//       GROUP BY p.id, v.view_count, uv.user_id, uv.option_id, usp.user_id, 
-//                l.like_count, c.comment_count, ul.user_id
-//       ORDER BY p.created_at DESC
-//     `;
-
-//     // Execute both queries
-//     const [forumRes, pollRes] = await Promise.all([
-//       pool.query(finalForumQuery, forumParams),
-//       pool.query(finalPollQuery, pollParams)
-//     ]);
-
-//     // =================================================================================
-//     // 5) Combine, sort and paginate results
-//     // =================================================================================
-//     let combinedResults = [
-//       ...forumRes.rows.map(f => ({
-//         ...f,
-//         data_type: "forum",
-//         created_at: f.created_at ? new Date(f.created_at).toISOString() : null,
-//         comments: f.comments.map(c => ({
-//           ...c,
-//           created_at: c.created_at ? new Date(c.created_at).toISOString() : null
-//         }))
-//       })),
-//       ...pollRes.rows.map(p => ({
-//         ...p,
-//         data_type: "poll",
-//         has_voted: p.has_voted || false,
-//         user_selected_option: p.user_selected_option || null,
-//         created_at: p.created_at ? new Date(p.created_at).toISOString() : null,
-//         expires_at: p.expires_at ? new Date(p.expires_at).toISOString() : null,
-//         comments: p.comments.map(c => ({
-//           ...c,
-//           created_at: c.created_at ? new Date(c.created_at).toISOString() : null
-//         }))
-//       }))
-//     ];
-
-//     // Apply sorting
-//     if (sortBy === "most_recent") {
-//       combinedResults.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
-//     } else if (sortBy === "most_old") {
-//       combinedResults.sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
-//     } else if (sortBy === "most_view") {
-//       combinedResults.sort((a, b) => Number(b.view_count) - Number(a.view_count));
-//     } else {
-//       // Default: most recent first
-//       combinedResults.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
-//     }
-
-//     // Apply pagination
-//     const startIndex = offset;
-//     const endIndex = startIndex + parsedLimit;
-//     const paginatedResults = combinedResults.slice(startIndex, endIndex);
-
-//     return res.json({
-//       ok: true,
-//       message: "Forum and poll feed fetched successfully",
-//       total: totalRecords,
-//       totalPages: totalPages,
-//       currentPage: parsedPage,
-//       perPage: parsedLimit,
-//       forumTotal: forumTotal,
-//       pollTotal: pollTotal,
-//       returned_records: paginatedResults.length,
-//       data: paginatedResults
-//     });
-
-//   } catch (err) {
-//     console.error("getForumAndPollFeed error:", err);
-//     return res.status(500).json({ ok: false, message: "Server error" });
-//   }
-// };
+// get forum polls and post...
 
 export const getForumAndPollFeed = async (req, res) => {
   try {
@@ -2479,7 +1875,6 @@ export const getForumAndPollFeed = async (req, res) => {
   }
 };
 
-
 // add views count.......
 
 export const addView = async (req, res) => {
@@ -2619,9 +2014,6 @@ export const getNotesfromTopics = async (req, res) => {
   }
 };
 
-
-
-
 // notes access stored.......
 
 export const trackNoteAccess = async (req, res) => {
@@ -2646,9 +2038,7 @@ export const trackNoteAccess = async (req, res) => {
   }
 };
 
-
 // end the poll........
-
 
 export const endThePoll = async (req, res) => {
   try {

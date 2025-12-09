@@ -25,53 +25,53 @@ import { Resend } from "resend";
 
 const JWT_SECRET = process.env.JWT_SECRET || 'dev_secret';
 
-const ORIGIN = process.env.NODE_ENV === 'development'
-  ? 'http://localhost:5173'
-  : 'https://ace-hive-production-fe.vercel.app';
-const RP_ID = process.env.NODE_ENV === 'development'
-  ? 'localhost'
-  : 'ace-hive-production-fe.vercel.app';
-const RP_NAME = 'AceHive';
+// const ORIGIN = process.env.NODE_ENV === 'development'
+//   ? 'http://localhost:5173'
+//   : 'https://ace-hive-production-fe.vercel.app';
+// const RP_ID = process.env.NODE_ENV === 'development'
+//   ? 'localhost'
+//   : 'ace-hive-production-fe.vercel.app';
+// const RP_NAME = 'AceHive';
 
 // Helper functions with EXTRA validation
-const bufferToBase64url = (buffer) => {
-  if (!buffer) {
-    throw new Error('Buffer is required for base64url conversion');
-  }
-  return Buffer.from(buffer)
-    .toString('base64')
-    .replace(/\+/g, '-')
-    .replace(/\//g, '_')
-    .replace(/=/g, '');
-};
+// const bufferToBase64url = (buffer) => {
+//   if (!buffer) {
+//     throw new Error('Buffer is required for base64url conversion');
+//   }
+//   return Buffer.from(buffer)
+//     .toString('base64')
+//     .replace(/\+/g, '-')
+//     .replace(/\//g, '_')
+//     .replace(/=/g, '');
+// };
 
-const base64urlToBuffer = (base64url) => {
-  // CRITICAL: Convert to string if it's not already
-  const input = typeof base64url === 'string' ? base64url : String(base64url);
+// const base64urlToBuffer = (base64url) => {
+//   // CRITICAL: Convert to string if it's not already
+//   const input = typeof base64url === 'string' ? base64url : String(base64url);
 
-  if (!input || input === 'null' || input === 'undefined') {
-    throw new Error(`Invalid base64url input: empty or null`);
-  }
+//   if (!input || input === 'null' || input === 'undefined') {
+//     throw new Error(`Invalid base64url input: empty or null`);
+//   }
 
-  const base64 = input.replace(/-/g, '+').replace(/_/g, '/');
-  const paddedBase64 = base64.padEnd(
-    base64.length + ((4 - (base64.length % 4)) % 4),
-    '='
-  );
-  return Buffer.from(paddedBase64, 'base64');
-};
+//   const base64 = input.replace(/-/g, '+').replace(/_/g, '/');
+//   const paddedBase64 = base64.padEnd(
+//     base64.length + ((4 - (base64.length % 4)) % 4),
+//     '='
+//   );
+//   return Buffer.from(paddedBase64, 'base64');
+// };
 
 
 //Getting all allowed origins
-const getAllowedOrigins = () => {
-  const origins = process.env.ALLOWED_ORIGINS
-  if (!origins) {
-    // Fallback for safety, but you should have the variable set
-    return [this.config.get < string > ('ORIGIN') ?? 'http://localhost:5173'];
-  }
-  // This splits the comma-separated string from your .env into an array
-  return origins.split(',');
-}
+// const getAllowedOrigins = () => {
+//   const origins = process.env.ALLOWED_ORIGINS
+//   if (!origins) {
+//     // Fallback for safety, but you should have the variable set
+//     return [this.config.get < string > ('ORIGIN') ?? 'http://localhost:5173'];
+//   }
+//   // This splits the comma-separated string from your .env into an array
+//   return origins.split(',');
+// }
 
 
 // // FIXED: Proper user ID buffer generation
@@ -80,6 +80,8 @@ const getAllowedOrigins = () => {
 //   return isoBase64URL.toBuffer(isoBase64URL.fromUTF8String(userIdString));
 // };
 
+
+// login...
 
 export const login = async (req, res) => {
   try {
@@ -120,94 +122,7 @@ export const login = async (req, res) => {
   }
 };
 
-
-// export const Commonlogin = async (req, res) => {
-//   try {
-//     const { email, password } = req.body;
-
-//     if (!email || !password) {
-//       return res.status(400).json({ status: false, message: "Email and password are required" });
-//     }
-
-//     // ✅ Fetch user with grade join
-//     const { rows } = await pool.query(
-//       `SELECT 
-//          u.*,
-//          g.grade_level AS grade_value,
-//          us.quiz_time_seconds
-//        FROM users u
-//        LEFT JOIN grades g ON g.id = u.grade_id
-//        LEFT JOIN user_settings us ON us.user_id = u.id
-//        WHERE u.email = $1`,
-//       [email]
-//     );
-
-//     const user = rows[0];
-//     if (!user) {
-//       return res.status(401).json({
-//         status: false,
-//         message: "User not found. Please sign up to continue.",
-//       });
-//     }
-
-//     // ✅ Compare password with hashed password
-//     const isMatch = await bcrypt.compare(password, user.password);
-//     if (!isMatch) {
-//       return res.status(401).json({ status: false, message: "Invalid credentials" });
-//     }
-
-//     // ✅ Fetch subject details only if selected_subjects exist
-//     let selectedSubjectsNames = [];
-//     if (user.selected_subjects && user.selected_subjects.length > 0) {
-//       const { rows: subjectRows } = await pool.query(
-//         `SELECT id, icon, subject 
-//          FROM subjects 
-//          WHERE id = ANY($1::int[])`,
-//         [user.selected_subjects.map(Number)]
-//       );
-//       selectedSubjectsNames = subjectRows.map((r) => ({
-//         id: r.id,
-//         subject: r.subject,
-//         icon: r.icon,
-//       }));
-//     }
-
-//     // ✅ Generate JWT token
-//     const token = jwt.sign({ userId: user.id }, JWT_SECRET, { expiresIn: "7d" });
-
-//     // 🎯 Generate smart notifications after successful login
-//     // Run in background to avoid delaying login response
-//     setTimeout(async () => {
-//       try {
-//         await NotificationService.generateLoginNotifications(user.id);
-//       } catch (error) {
-//         console.error("Error generating login notifications:", error);
-//       }
-//     }, 3000); // 1 second delay
-
-//     // ✅ Return response without password
-//     const { password: _, ...userData } = user;
-
-//     return res.json({
-//       status: true,
-//       data: {
-//         ...userData,
-//         selected_subjects: selectedSubjectsNames,
-//         grade_value: user.grade_value || null, // return grade_level name
-//       },
-//       token,
-//     });
-//   } catch (err) {
-//     console.error("Login error:", err);
-//     res.status(500).json({ status: false, message: "Server error" });
-//   }
-// };
-
-
-// Helper to convert browser credential format to server format
-
-
-// In your backend userController.js or userrouter.js
+//  common login.......
 
 export const Commonlogin = async (req, res) => {
   try {
@@ -340,22 +255,23 @@ export const Commonlogin = async (req, res) => {
   }
 };
 
-const convertCredentialForVerification = (credential) => {
-  return {
-    id: credential.id,
-    rawId: credential.rawId,
-    type: credential.type,
-    response: {
-      clientDataJSON: credential.response.clientDataJSON,
-      attestationObject: credential.response.attestationObject,
-      // Include transports if available
-      transports: credential.response.transports || [],
-    },
-    clientExtensionResults: credential.clientExtensionResults || {},
-    authenticatorAttachment: credential.authenticatorAttachment,
-  };
-};
+// const convertCredentialForVerification = (credential) => {
+//   return {
+//     id: credential.id,
+//     rawId: credential.rawId,
+//     type: credential.type,
+//     response: {
+//       clientDataJSON: credential.response.clientDataJSON,
+//       attestationObject: credential.response.attestationObject,
+//       // Include transports if available
+//       transports: credential.response.transports || [],
+//     },
+//     clientExtensionResults: credential.clientExtensionResults || {},
+//     authenticatorAttachment: credential.authenticatorAttachment,
+//   };
+// };
 
+// generate biometric registration...
 
 export const generateBiometricRegistration = async (req, res) => {
   try {
@@ -417,6 +333,8 @@ export const generateBiometricRegistration = async (req, res) => {
     res.status(500).json({ success: false, message: 'Internal server error' });
   }
 };
+
+// verify biometri registration...
 
 export const verifyBiometricRegistration = async (req, res) => {
   try {
@@ -499,6 +417,8 @@ export const verifyBiometricRegistration = async (req, res) => {
   }
 };
 
+// genearate biometric auth...
+
 export const generateBiometricAuth = async (req, res) => {
   try {
     // 1️⃣ Get all registered credentials
@@ -539,6 +459,8 @@ export const generateBiometricAuth = async (req, res) => {
     return res.status(500).json({ success: false, message: 'Internal server error' });
   }
 };
+
+// biometric login....
 
 export const bioMetricLogin = async (req, res) => {
   try {
@@ -696,6 +618,8 @@ export const bioMetricLogin = async (req, res) => {
   }
 };
 
+// remove biometric credentials...
+
 export const removeBiometricCrendentials = async (req, res) => {
   try {
     const { id } = req.params;
@@ -742,6 +666,8 @@ export const removeBiometricCrendentials = async (req, res) => {
   }
 };
 
+// cleanup biometric records....
+
 export const cleanupBiometricRecords = async (req, res) => {
   try {
     const result = await pool.query(`
@@ -763,7 +689,9 @@ export const cleanupBiometricRecords = async (req, res) => {
     res.status(500).json({ success: false, message: error.message });
   }
 };
+
 // Database schema validation function (run this to ensure your DB is set up correctly)
+
 export const validateBiometricSchema = async () => {
   try {
     const schemaQueries = [
@@ -785,6 +713,8 @@ export const validateBiometricSchema = async () => {
     console.error('Error validating biometric schema:', error);
   }
 };
+
+//  user register......
 
 export const register = async (req, res) => {
   try {
@@ -907,6 +837,8 @@ const client = new SendMailClient({
 
 });
 
+// user just register....
+
 export const userJustregisterApi = async (req, res) => {
   try {
     const { email, name, password, confirmPassword } = req.body;
@@ -1016,68 +948,7 @@ export const userverifyOtp = async (req, res) => {
   }
 };
 
-
-// update grade and subject........
-
-// export const updateGradesubject = async (req, res) => {
-//   try {
-//     const {
-//       email,
-//       grade_level,
-//       selected_subjects,
-//       grade_id,
-//     } = req.body;
-
-//     if (!email) {
-//       return res.status(400).json({ status: false, message: "Email is required" });
-//     }
-
-//     // ✅ Validate required fields
-//     if (!grade_level || !selected_subjects || selected_subjects.length < 3 || !grade_id) {
-//       return res.status(400).json({
-//         status: false,
-//         message: "Missing or invalid fields. Select minimum 3 subjects."
-//       });
-//     }
-
-
-//     // ✅ Update user in DB
-//     const userRes = await pool.query(
-//       `UPDATE users 
-//        SET grade_level = $1, 
-//            selected_subjects = $2, 
-//            grade_id = $3
-//        WHERE email = $4
-//        RETURNING id, email, name, grade_level, selected_subjects, grade_id, daily_reminder_time, questions_per_day, school_name, phone`,
-//       [
-//         grade_level,
-//         selected_subjects,
-//         grade_id,
-//         email
-//       ]
-//     );
-
-//     if (userRes.rows.length === 0) {
-//       return res.status(404).json({ status: false, message: "User not found" });
-//     }
-
-//     const user = userRes.rows[0];
-
-//     const token = jwt.sign({ userId: user.id }, JWT_SECRET, { expiresIn: "7d" });
-
-//     return res.json({
-//       status: true,
-//       message: "User updated successfully",
-//       user,
-//       token,
-//       redirect: "home"
-//     });
-//   } catch (err) {
-//     console.error(err);
-//     res.status(500).json({ status: false, message: "Server error" });
-//   }
-// };
-
+// get profile data........
 
 export const getProfile = async (req, res) => {
   try {
@@ -1088,6 +959,7 @@ export const getProfile = async (req, res) => {
   }
 };
 
+// get subject by id........
 
 export const getSubjectsByIds = async (subjectIds) => {
   if (!subjectIds || subjectIds.length === 0) return [];
@@ -1101,6 +973,7 @@ export const getSubjectsByIds = async (subjectIds) => {
   return rows;
 };
 
+// edit profile....
 
 export const editProfile = async (req, res) => {
   try {
@@ -1161,9 +1034,7 @@ export const editProfile = async (req, res) => {
   }
 };
 
-
-
-// admin apis..........
+// common login..........
 
 export const commonLogin = async (req, res) => {
   try {
@@ -1229,7 +1100,6 @@ export const commonLogin = async (req, res) => {
     res.status(500).json({ success: false, message: "Internal server error" });
   }
 };
-
 
 // user register............
 
@@ -1327,8 +1197,6 @@ export const userRegister = async (req, res) => {
   }
 };
 
-
-
 // get user details.............
 
 export const getUserdetails = async (req, res) => {
@@ -1376,9 +1244,7 @@ export const getUserdetails = async (req, res) => {
   }
 };
 
-
 // get admin details.........
-
 
 export const getAdmindetails = async (req, res) => {
   try {
@@ -1429,118 +1295,7 @@ export const getAdmindetails = async (req, res) => {
   }
 };
 
-
 // user edit.......
-
-// export const userEdit = async (req, res) => {
-//   try {
-//     const userId = req.userId;
-//     if (!userId) {
-//       return res.status(401).json({ ok: false, message: "Unauthorized" });
-//     }
-
-//     const {
-//       name,
-//       email,
-//       phone,
-//       grade_level,
-//       questions_per_day,
-//       daily_reminder_time,
-//       selected_subjects,
-//       role,
-//       quiz_time_seconds,
-//       reminder_enabled,
-//       dark_mode,
-//       sound_enabled
-//     } = req.body;
-
-//     let profilePhotoUrl;
-
-//     if (req.file && req.file.buffer) {
-//       const filename = `user_${userId}_${Date.now()}_${req.file.originalname}`;
-//       profilePhotoUrl = await uploadBufferToVercel(req.file.buffer, filename);
-//     }
-
-//     await pool.query("BEGIN");
-
-//     const userUpdateQuery = `
-//       UPDATE users 
-//       SET 
-//         name = COALESCE($1, name),
-//         email = COALESCE($2, email),
-//         phone = COALESCE($3, phone),
-//         grade_level = COALESCE($4, grade_level),
-//         questions_per_day = COALESCE($5, questions_per_day),
-//         daily_reminder_time = COALESCE($6, daily_reminder_time),
-//         selected_subjects = COALESCE($7, selected_subjects),
-//         role = COALESCE($8, role),
-//         profile_photo_url = COALESCE($9, profile_photo_url),
-//         updated_at = NOW()
-//       WHERE id = $10
-//       RETURNING *;
-//     `;
-
-//     const userResult = await pool.query(userUpdateQuery, [
-//       name || null,
-//       email || null,
-//       phone || null,
-//       grade_level || null,
-//       questions_per_day || null,
-//       daily_reminder_time || null,
-//       selected_subjects ? selected_subjects : null,
-//       role || null,
-//       profilePhotoUrl || null,
-//       userId
-//     ]);
-
-//     if (userResult.rows.length === 0) {
-//       throw new Error("User not found");
-//     }
-
-//     const settingsUpdateQuery = `
-//       INSERT INTO users_settings 
-//         (user_id, questions_per_day, quiz_time_seconds, daily_reminder_time, reminder_enabled, dark_mode, sound_enabled, updated_at)
-//       VALUES ($1,$2,$3,$4,$5,$6,$7,NOW())
-//       ON CONFLICT (user_id) 
-//       DO UPDATE SET 
-//         questions_per_day = COALESCE(EXCLUDED.questions_per_day, users_settings.questions_per_day),
-//         quiz_time_seconds = COALESCE(EXCLUDED.quiz_time_seconds, users_settings.quiz_time_seconds),
-//         daily_reminder_time = COALESCE(EXCLUDED.daily_reminder_time, users_settings.daily_reminder_time),
-//         reminder_enabled = COALESCE(EXCLUDED.reminder_enabled, users_settings.reminder_enabled),
-//         dark_mode = COALESCE(EXCLUDED.dark_mode, users_settings.dark_mode),
-//         sound_enabled = COALESCE(EXCLUDED.sound_enabled, users_settings.sound_enabled),
-//         updated_at = NOW()
-//       RETURNING *;
-//     `;
-
-//     const settingsResult = await pool.query(settingsUpdateQuery, [
-//       userId,
-//       questions_per_day || null,
-//       quiz_time_seconds || null,
-//       daily_reminder_time || null,
-//       reminder_enabled !== undefined ? reminder_enabled : null,
-//       dark_mode !== undefined ? dark_mode : null,
-//       sound_enabled !== undefined ? sound_enabled : null
-//     ]);
-
-//     await pool.query("COMMIT");
-
-//     return res.status(200).json({
-//       ok: true,
-//       message: "User details updated successfully",
-//       user: userResult.rows[0],
-//       settings: settingsResult.rows[0]
-//     });
-
-//   } catch (error) {
-//     await pool.query("ROLLBACK");
-//     console.error("userEdit error:", error);
-//     return res.status(500).json({ ok: false, message: "Internal server error", error: error.message });
-//   } finally {
-//     pool.release();
-//   }
-// };
-
 
 export const userEdit = async (req, res) => {
   try {
@@ -1746,6 +1501,8 @@ export const adminRegister = async (req, res) => {
   }
 };
 
+// superadmin register...
+
 export const superadminRegister = async (req, res) => {
 
   try {
@@ -1812,9 +1569,7 @@ export const superadminRegister = async (req, res) => {
   }
 };
 
-
 // Add new user in admin
-
 
 const generatePassword = (name) => {
   const base = name.substring(0, 4); // take first 4 chars of name
@@ -1826,7 +1581,6 @@ const generatePassword = (name) => {
   // Example: John1234!
   return `${upper}${base.slice(1)}${randomNum}${special}`.slice(0, 8);
 };
-
 
 export const addNewUser = async (req, res) => {
   const client = await pool.connect();
@@ -1965,64 +1719,7 @@ Team`,
   }
 };
 
-
-
 // ----admin user role edit
-
-// export const changeUserRole = async (req, res) => {
-//   const client = await pool.connect();
-//   try {
-//     const { id, role } = req.body;
-
-//     if (!id || !role) {
-//       return res.status(400).json({
-//         success: false,
-//         message: "User ID and role are required",
-//       });
-//     }
-
-//     await client.query("BEGIN");
-
-//     // Check if user exists
-//     const { rows: existing } = await client.query(
-//       `SELECT id FROM admins WHERE id = $1`,
-//       [id]
-//     );
-
-//     if (existing.length === 0) {
-//       await client.query("ROLLBACK");
-//       return res.status(404).json({
-//         success: false,
-//         message: "User not found",
-//       });
-//     }
-
-//     // Update role
-//     const { rows } = await client.query(
-//       `UPDATE admins SET role = $1 WHERE id = $2 RETURNING id, name, email, role`,
-//       [role, id]
-//     );
-
-//     await client.query("COMMIT");
-
-//     return res.status(200).json({
-//       success: true,
-//       message: "User role updated successfully",
-//       data: rows[0],
-//     });
-//   } catch (error) {
-//     await client.query("ROLLBACK");
-//     console.error("Change user role error:", error);
-//     return res.status(500).json({
-//       success: false,
-//       message: "Internal server error",
-//     });
-//   } finally {
-//     client.release();
-//   }
-// };
-
-
 
 export const changeUserRole = async (req, res) => {
   const client = await pool.connect();
@@ -2165,8 +1862,6 @@ export const changeUserRole = async (req, res) => {
   }
 };
 
-
-
 // -----Delete user admin
 
 export const deleteAdminUser = async (req, res) => {
@@ -2240,9 +1935,6 @@ export const deleteAdminUser = async (req, res) => {
     client.release();
   }
 };
-
-
-
 
 // ---Get all admin users
 
@@ -2328,7 +2020,7 @@ export const getAllUsers = async (req, res) => {
   }
 };
 
-
+// get all subject new...........
 
 export const getAllSubjectnew = async (req, res) => {
   const { grade_id, search } = req.body;
@@ -2369,6 +2061,7 @@ export const getAllSubjectnew = async (req, res) => {
   }
 };
 
+// get all subject........
 
 export const getAllSubject = async (req, res) => {
   const client = await pool.connect();
@@ -2420,6 +2113,8 @@ export const getAllSubject = async (req, res) => {
     client.release();
   }
 };
+
+// download all grades subjects and topics...
 
 export const downloadAllGradeSubjectTopics = async (req, res) => {
   const client = await pool.connect();
@@ -2504,59 +2199,7 @@ export const downloadAllGradeSubjectTopics = async (req, res) => {
   }
 };
 
-
-
-// export const getAllTopic = async (req, res) => {
-//   const client = await pool.connect();
-//   try {
-//     const search = req.query.search || "";
-//     const page = parseInt(req.query.page) || 1;
-//     const limit = parseInt(req.query.limit) || 10;
-//     const offset = (page - 1) * limit;
-
-//     let whereClause = "WHERE active_status != false";
-//     let values = [];
-//     let countValues = [];
-
-//     if (search) {
-//       whereClause += " AND LOWER(topic) LIKE LOWER($1)";
-//       values = [`%${search}%`, limit, offset];
-//       countValues = [`%${search}%`];
-//     } else {
-//       values = [limit, offset];
-//     }
-
-//     const countQuery = `SELECT COUNT(*) AS total FROM topics ${whereClause}`;
-//     const dataQuery = `
-//       SELECT * FROM topics
-//       ${whereClause}
-//       ORDER BY topic ASC
-//       LIMIT $${search ? 2 : 1} OFFSET $${search ? 3 : 2}
-//     `;
-
-//     const { rows: countResult } = await client.query(countQuery, countValues);
-//     const total = parseInt(countResult[0].total);
-
-//     const { rows: allTopics } = await client.query(dataQuery, values);
-
-//     return res.status(200).json({
-//       success: true,
-//       data: allTopics,
-//       pagination: {
-//         total,
-//         page,
-//         limit,
-//         totalPages: Math.ceil(total / limit),
-//       },
-//     });
-//   } catch (error) {
-//     console.error("Get topics error:", error);
-//     res.status(500).json({ success: false, message: "Internal server error" });
-//   } finally {
-//     client.release();
-//   }
-// };
-
+// get all topics.....
 
 export const getAllTopic = async (req, res) => {
   const client = await pool.connect();
@@ -2625,7 +2268,7 @@ export const getAllTopic = async (req, res) => {
   }
 };
 
-
+// get all grades......
 
 export const getAllGrade = async (req, res) => {
   const client = await pool.connect();
@@ -2678,10 +2321,6 @@ export const getAllGrade = async (req, res) => {
     client.release();
   }
 };
-
-
-
-
 
 // admin edit...
 
@@ -2757,9 +2396,6 @@ export const adminEdit = async (req, res) => {
   }
 };
 
-
-
-
 // send otp for admin reset password.......
 
 export const adminResetPassword = async (req, res) => {
@@ -2831,9 +2467,7 @@ export const adminResetPassword = async (req, res) => {
   }
 };
 
-
 // match otp............
-
 
 export const verifyOtp = async (req, res) => {
   try {
@@ -2946,81 +2580,6 @@ export const confirmPassword = async (req, res) => {
 };
 
 // new questions add..........
-
-
-// export const newQuestionsadd = async (req, res) => {
-//   try {
-//     const {
-//       question_text,
-//       question_type,
-//       topics,
-//       options,
-//       correct_option_id,
-//       difficulty_level,
-//       grade_level,
-//       category,
-//       answer_explanation,   // ✅ new field
-//     } = req.body;
-
-//     // validate options (string → parse JSON if needed)
-//     let parsedOptions;
-//     try {
-//       parsedOptions = typeof options === "string" ? JSON.parse(options) : options;
-//     } catch (err) {
-//       return res.status(400).json({ message: "Invalid options format" });
-//     }
-
-//     if (!parsedOptions || parsedOptions.length !== 4 || !correct_option_id || !category || !topics) {
-//       return res.status(400).json({ message: "Invalid request body" });
-//     }
-
-//     // handle files upload (form-data)
-//     let questionFileUrl = null;
-//     let answerFileUrl = null;
-
-//     if (req.files?.file?.length > 0) {
-//       const file = req.files.file[0];
-//       questionFileUrl = await uploadBufferToVercel(file.buffer, file.originalname);
-//     }
-
-//     if (req.files?.fileanswer?.length > 0) {
-//       const fileAns = req.files.fileanswer[0];
-//       answerFileUrl = await uploadBufferToVercel(fileAns.buffer, fileAns.originalname);
-//     }
-
-//     const query = `
-//       INSERT INTO questions 
-//       (subject, question_text, options, correct_option_id, created_at, difficulty_level, grade_level, question_type, question_url, topics, answer_explanation, answer_file_url) 
-//       VALUES ($1, $2, $3, $4, NOW(), $5, $6, $7, $8, $9, $10, $11)
-//       RETURNING *;
-//     `;
-
-//     const values = [
-//       category,
-//       question_text,
-//       JSON.stringify(parsedOptions),
-//       correct_option_id,
-//       difficulty_level || "Easy",
-//       grade_level,
-//       question_type,
-//       questionFileUrl,   // ✅ question file
-//       topics,
-//       answer_explanation, // ✅ answer field
-//       answerFileUrl      // ✅ answer file
-//     ];
-
-//     const result = await pool.query(query, values);
-
-//     return res.status(201).json({
-//       message: "Question added successfully",
-//       question: result.rows[0],
-//     });
-//   } catch (error) {
-//     console.error("Error adding new question:", error);
-//     return res.status(500).json({ message: "Internal Server Error" });
-//   }
-// };
-
 
 export const newQuestionsadd = async (req, res) => {
   try {
@@ -3142,7 +2701,6 @@ export const newQuestionsadd = async (req, res) => {
   }
 };
 
-
 // get all questions......
 
 export const getAllquestions = async (req, res) => {
@@ -3161,6 +2719,7 @@ export const getAllquestions = async (req, res) => {
   }
 };
 
+// all question with search........
 
 export const getAllquestionsSearch = async (req, res) => {
   try {
@@ -3219,7 +2778,7 @@ export const getAllquestionsSearch = async (req, res) => {
   }
 };
 
-
+// get particular questions...
 
 export const getParticularquestions = async (req, res) => {
   try {
@@ -3238,6 +2797,8 @@ export const getParticularquestions = async (req, res) => {
     return res.status(500).json({ message: "Internal Server Error" });
   }
 };
+
+// delete questions.....
 
 export const deleteQuestions = async (req, res) => {
   try {
@@ -3310,50 +2871,7 @@ export const homeApi = async (req, res) => {
   }
 };
 
-
 // user vote for the poll.......
-
-// export const userVoteforpoll = async (req, res) => {
-//   try {
-//     const { poll_id, option_ids } = req.body; // option_ids should be array
-//     const userId = req.userId;
-
-//     if (!poll_id || !option_ids || option_ids.length === 0) {
-//       return res.status(400).json({ message: "poll_id and option_ids required" });
-//     }
-
-//     // Check if poll allows multiple votes
-//     const pollRes = await pool.query(`SELECT * FROM polls WHERE id = $1`, [poll_id]);
-//     if (pollRes.rows.length === 0) return res.status(404).json({ message: "Poll not found" });
-
-//     const poll = pollRes.rows[0];
-//     if (!poll.allow_multiple && option_ids.length > 1) {
-//       return res.status(400).json({ message: "This poll does not allow multiple votes" });
-//     }
-
-//     // Delete any previous votes if single choice
-//     if (!poll.allow_multiple) {
-//       await pool.query(`DELETE FROM poll_votes WHERE poll_id = $1 AND user_id = $2`, [
-//         poll_id,
-//         userId,
-//       ]);
-//     }
-
-//     // Insert votes
-//     for (let optId of option_ids) {
-//       await pool.query(
-//         `INSERT INTO poll_votes (poll_id, option_id, user_id) 
-//          VALUES ($1,$2,$3) ON CONFLICT DO NOTHING`,
-//         [poll_id, optId, userId]
-//       );
-//     }
-
-//     return res.json({ message: "Vote recorded successfully" });
-//   } catch (error) {
-//     console.error("userVoteforpoll error:", error);
-//     return res.status(500).json({ message: "Internal server error" });
-//   }
-// };
 
 export const userVoteforpoll = async (req, res) => {
   try {
@@ -3395,124 +2913,8 @@ export const userVoteforpoll = async (req, res) => {
   }
 };
 
-// // social login check...........
+// social login check...........
 
-
-// export const socialLogincheck = async (req, res) => {
-//   try {
-//     const { email, social_id, provider } = req.body;
-
-//     const userResult = await pool.query(
-//       `SELECT * FROM users WHERE email = $1 AND social_id = $2 AND provider = $3 LIMIT 1`,
-//       [email, social_id, provider]
-//     );
-
-//     // ✅ Check if user exists with regular email (non-social login)
-//     const emailUserResult = await pool.query(
-//       `SELECT * FROM users WHERE email = $1 AND (provider IS NULL OR provider = 'local') LIMIT 1`,
-//       [email]
-//     );
-
-//     const user = userResult.rows[0];
-//     const emailUser = emailUserResult.rows[0];
-
-//     res.json({
-//       exists: !!user,
-//       emailExists: !!emailUser,
-//       message: user ? "User exists" : "User not found",
-//     });
-//   } catch (error) {
-//     console.error("Check social user error:", error);
-//     res.status(500).json({
-//       exists: false,
-//       message: "Server error",
-//     });
-//   }
-// }
-
-
-// // social login...........
-
-// export const socialLogin = async (req, res) => {
-//   try {
-//     const { email, social_id, provider } = req.body;
-
-//     // ✅ Find user by social credentials
-//     const userResult = await pool.query(
-//       `SELECT u.id, u.name, u.email, u.grade_level, u.provider
-//        FROM users u
-//        WHERE u.email = $1 AND u.social_id = $2 AND u.provider = $3
-//        LIMIT 1`,
-//       [email, social_id, provider]
-//     );
-
-//     const user = userResult.rows[0];
-
-//     if (!user) {
-//       return res.status(404).json({
-//         status: false,
-//         message: "User not found",
-//       });
-//     }
-
-//     // ✅ Fetch grade
-//     const gradeResult = await pool.query(
-//       `SELECT id, grade_level FROM grades WHERE id = $1 LIMIT 1`,
-//       [user.grade_level]
-//     );
-
-//     const grade = gradeResult.rows[0] || null;
-
-//     // ✅ Fetch subjects (many-to-many)
-//     const subjectsResult = await pool.query(
-//       `SELECT s.id, s.subject
-//        FROM subjects s
-//        INNER JOIN user_subjects us ON us.subject_id = s.id
-//        WHERE us.user_id = $1`,
-//       [user.id]
-//     );
-
-//     const subjects = subjectsResult.rows;
-
-//     // ✅ Generate JWT token
-//     const token = jwt.sign(
-//       {
-//         id: user.id,
-//         email: user.email,
-//         provider: user.provider,
-//       },
-//       process.env.JWT_SECRET,
-//       { expiresIn: "24h" }
-//     );
-
-//     res.json({
-//       status: true,
-//       message: "Login successful",
-//       token,
-//       data: {
-//         id: user.id,
-//         name: user.name,
-//         email: user.email,
-//         grade_level: user.grade_level,
-//         grade,
-//         subjects,
-//         provider: user.provider,
-//         profile_completed: true,
-//       },
-//     });
-//   } catch (error) {
-//     console.error("Social login error:", error);
-//     res.status(500).json({
-//       status: false,
-//       message: "Server error",
-//     });
-//   }
-// };
-
-
-
-
-// 1. Check if social user exists
 export const checkSocialUser = async (req, res) => {
   try {
     const { email, social_id, provider } = req.body;
@@ -3643,94 +3045,7 @@ export const linkSocialAccount = async (req, res) => {
   }
 };
 
-
-// 2. Social login API
-// export const socialLogin = async (req, res) => {
-//   try {
-//     const { email, social_id, provider } = req.body;
-
-//     if (!email || !social_id || !provider) {
-//       return res.status(400).json({
-//         status: false,
-//         message: "Email, social_id, and provider are required",
-//       });
-//     }
-
-//     // Find user and join with grades to get grade_value
-//     const userRes = await pool.query(
-//       `SELECT u.id, u.email, u.name, u.grade_level, u.selected_subjects, 
-//               u.grade_id, g.grade_level as grade_value,
-//               u.daily_reminder_time, u.questions_per_day, u.school_name, 
-//               u.phone, u.provider, u.social_id, u.is_social_login, 
-//               u.profile_photo_url
-//        FROM users u
-//        LEFT JOIN grades g ON g.id = u.grade_id
-//        WHERE (u.email = $1 AND u.social_id = $2 AND u.provider = $3) 
-//           OR (u.email = $1 AND u.provider = $3)`,
-//       [email, social_id, provider]
-//     );
-
-//     if (userRes.rows.length === 0) {
-//       return res.status(404).json({
-//         status: false,
-//         message: "User not found",
-//       });
-//     }
-
-//     const user = userRes.rows[0];
-
-//     // Fetch subject details if selected
-//     let selectedSubjectsNames = [];
-//     if (user.selected_subjects && user.selected_subjects.length > 0) {
-//       const { rows: subjectRows } = await pool.query(
-//         `SELECT id, icon, subject 
-//          FROM subjects 
-//          WHERE id = ANY($1::int[])`,
-//         [user.selected_subjects.map(Number)]
-//       );
-//       selectedSubjectsNames = subjectRows.map((r) => ({
-//         id: r.id,
-//         subject: r.subject,
-//         icon: r.icon,
-//       }));
-//     }
-
-//     // If social_id doesn’t match, update it
-//     if (user.social_id !== social_id) {
-//       await pool.query(
-//         `UPDATE users SET social_id = $1 WHERE id = $2`,
-//         [social_id, user.id]
-//       );
-//       user.social_id = social_id;
-//     }
-
-//     // Generate JWT token
-//     const token = jwt.sign({ userId: user.id }, JWT_SECRET, {
-//       expiresIn: "7d",
-//     });
-
-//     // Remove raw selected_subjects from response
-//     const { selected_subjects: _, ...userData } = user;
-
-//     return res.json({
-//       status: true,
-//       message: "Social login successful",
-//       data: {
-//         ...userData,
-//         grade_value: user.grade_value, // ✅ joined from grades
-//         selected_subjects: selectedSubjectsNames,
-//       },
-//       token,
-//       redirect: "home",
-//     });
-//   } catch (error) {
-//     console.error("Social login error:", error);
-//     res.status(500).json({
-//       status: false,
-//       message: "Server error",
-//     });
-//   }
-// };
+// Social login API......
 
 export const socialLogin = async (req, res) => {
   try {
@@ -3829,7 +3144,8 @@ export const socialLogin = async (req, res) => {
   }
 };
 
-// 3. Social registration API (creates user without OTP)
+// Social registration API (creates user without OTP).........
+
 export const socialRegister = async (req, res) => {
   try {
     const { email, name, provider, social_id, profile_picture_url } = req.body;
@@ -3896,74 +3212,7 @@ export const socialRegister = async (req, res) => {
   }
 };
 
-// 4. Updated updateGradesubject API to handle social users
-// export const updateGradesubject = async (req, res) => {
-//   try {
-//     const {
-//       email,
-//       grade_level,
-//       selected_subjects,
-//       grade_id,
-//       is_social_completion // Flag for social users completing profile
-//     } = req.body;
-
-//     if (!email) {
-//       return res.status(400).json({ status: false, message: "Email is required" });
-//     }
-
-//     // ✅ Validate required fields
-//     if (!grade_level || !selected_subjects || selected_subjects.length < 3 || !grade_id) {
-//       return res.status(400).json({
-//         status: false,
-//         message: "Missing or invalid fields. Select minimum 3 subjects."
-//       });
-//     }
-
-//     // ✅ Update user and return with grade_value
-//     const userRes = await pool.query(
-//       `UPDATE users 
-//        SET grade_level = $1, 
-//            selected_subjects = $2, 
-//            grade_id = $3
-//        WHERE email = $4
-//        RETURNING id, email, name, grade_level, selected_subjects, grade_id, 
-//                  daily_reminder_time, questions_per_day, school_name, phone,
-//                  provider, social_id, is_social_login`,
-//       [grade_level, selected_subjects, grade_id, email]
-//     );
-
-//     if (userRes.rows.length === 0) {
-//       return res.status(404).json({ status: false, message: "User not found" });
-//     }
-
-//     let user = userRes.rows[0];
-
-//     // ✅ Fetch grade_value
-//     const gradeRes = await pool.query(
-//       `SELECT grade_level FROM grades WHERE id = $1 LIMIT 1`,
-//       [user.grade_id]
-//     );
-
-//     const grade_value = gradeRes.rows.length > 0 ? gradeRes.rows[0].grade_level : null;
-
-//     // ✅ Generate JWT token
-//     const token = jwt.sign({ userId: user.id }, JWT_SECRET, { expiresIn: "7d" });
-
-//     return res.json({
-//       status: true,
-//       message: `${is_social_completion ? "Social registration" : "User profile"} updated successfully`,
-//       user: {
-//         ...user,
-//         grade_value, // ✅ add grade_value
-//       },
-//       token,
-//       redirect: "home",
-//     });
-//   } catch (err) {
-//     console.error("updateGradesubject error:", err);
-//     res.status(500).json({ status: false, message: "Server error" });
-//   }
-// };
+// Updated updateGradesubject API to handle social users.......
 
 export const updateGradesubject = async (req, res) => {
   try {
@@ -4049,7 +3298,6 @@ export const updateGradesubject = async (req, res) => {
     res.status(500).json({ status: false, message: "Server error" });
   }
 };
-
 
 // admin login.......
 
@@ -4154,300 +3402,7 @@ export const adminCommonlogin = async (req, res) => {
   }
 };
 
-
-
-export const seedTopics = async (req, res) => {
-  const client = await pool.connect();
-  try {
-    // fetch all subjects with grade info
-    const { rows: subjects } = await client.query(`
-      SELECT s.id AS subject_id, s.subject, g.id AS grade_id, g.grade_level
-      FROM subjects s
-      JOIN grades g ON g.id = s.grade_id
-      ORDER BY g.id, s.id
-    `);
-
-    // predefined topics per subject (grade-aware)
-    const topicsMap = {
-      Mathematics: [
-        "Numbers and Counting",
-        "Basic Addition",
-        "Subtraction Practice",
-        "Shapes Recognition",
-        "Simple Word Problems",
-      ],
-      "Mathematics Basics": [
-        "Counting Objects",
-        "Addition with Pictures",
-        "Subtraction with Fingers",
-        "Recognizing Shapes",
-        "Comparing Numbers",
-      ],
-      "Simple Mathematics": [
-        "Multiplication Tables",
-        "Division Basics",
-        "Fractions Introduction",
-        "Word Problems",
-        "Geometry Shapes",
-      ],
-      "Advanced Mathematics": [
-        "Differentiation",
-        "Integration Basics",
-        "Probability",
-        "Statistics Graphs",
-        "Complex Numbers",
-      ],
-      English: [
-        "Alphabet Practice",
-        "Phonics Sounds",
-        "Basic Vocabulary",
-        "Simple Sentences",
-        "Reading Short Stories",
-      ],
-      "English Phonics": [
-        "Vowel Sounds",
-        "Consonant Blends",
-        "Rhyming Words",
-        "Sight Words",
-        "Short Sentences Reading",
-      ],
-      "Reading Skills": [
-        "Comprehension",
-        "Story Summarizing",
-        "Character Analysis",
-        "Reading Aloud",
-        "Creative Writing",
-      ],
-      Science: [
-        "Living and Nonliving",
-        "Our Senses",
-        "Plants Around Us",
-        "Animals Around Us",
-        "Weather Changes",
-      ],
-      "Fun Science": [
-        "Magnet Experiments",
-        "Floating and Sinking",
-        "Mixing Colors",
-        "Simple Machines",
-        "Day and Night",
-      ],
-      "Nature Studies": [
-        "Types of Plants",
-        "Forest Animals",
-        "Water Cycle",
-        "Rocks and Soil",
-        "Bird Migration",
-      ],
-      "General Science": [
-        "Matter and States",
-        "Forces and Motion",
-        "Human Body Systems",
-        "Electricity Basics",
-        "Solar System",
-      ],
-      "Physics Fundamentals": [
-        "Newton’s Laws",
-        "Energy Types",
-        "Gravity",
-        "Work and Power",
-        "Sound and Light",
-      ],
-      "Intro to Physics": [
-        "Speed and Velocity",
-        "Heat and Temperature",
-        "Pressure",
-        "Magnetism",
-        "Light Reflection",
-      ],
-      "Chemistry Basics": [
-        "Atoms and Molecules",
-        "Periodic Table",
-        "Chemical Reactions",
-        "Acids and Bases",
-        "Mixtures and Compounds",
-      ],
-      "Intro to Chemistry": [
-        "States of Matter",
-        "Simple Elements",
-        "Periodic Trends",
-        "Solutions",
-        "Lab Safety",
-      ],
-      History: [
-        "Early Civilizations",
-        "Ancient Egypt",
-        "Greek Myths",
-        "Roman Empire",
-        "Medieval Kings",
-      ],
-      "World History": [
-        "Industrial Revolution",
-        "World War I",
-        "World War II",
-        "Cold War",
-        "Globalization",
-      ],
-      "Modern History": [
-        "French Revolution",
-        "American Independence",
-        "World War Events",
-        "Indian Freedom",
-        "Modern Leaders",
-      ],
-      Geography: [
-        "Continents and Oceans",
-        "Maps and Directions",
-        "Mountains",
-        "Rivers",
-        "Deserts",
-      ],
-      "Physical Geography": [
-        "Plate Tectonics",
-        "Volcanoes",
-        "Earthquakes",
-        "Climate Zones",
-        "Natural Disasters",
-      ],
-      "Geography Maps": [
-        "Map Reading",
-        "Latitude and Longitude",
-        "Climate Maps",
-        "Population Maps",
-        "Economic Maps",
-      ],
-      "Environmental Science": [
-        "Pollution",
-        "Renewable Energy",
-        "Ecosystem",
-        "Conservation",
-        "Climate Change",
-      ],
-      // add more subjects if needed
-    };
-
-    const insertValues = [];
-    const now = new Date();
-
-    subjects.forEach((sub) => {
-      const topics = topicsMap[sub.subject] || [
-        "Introduction",
-        "Core Concepts",
-        "Applications",
-        "Case Studies",
-        "Practice Questions",
-      ];
-
-      topics.slice(0, 5).forEach((topic) => {
-        insertValues.push(
-          client.query(
-            `INSERT INTO topics (subject_id, topic, created_at, updated_at, grade_level, grade_id)
-             VALUES ($1, $2, $3, $4, $5, $6)`,
-            [sub.subject_id, topic, now, now, sub.grade_level, sub.grade_id]
-          )
-        );
-      });
-    });
-
-    await Promise.all(insertValues);
-
-    return res.status(201).json({
-      success: true,
-      message: "Topics seeded successfully",
-      count: insertValues.length,
-    });
-  } catch (err) {
-    console.error("Seeding topics error:", err);
-    return res.status(500).json({
-      success: false,
-      message: "Error seeding topics",
-    });
-  } finally {
-    client.release();
-  }
-};
-
-// seedTopics()
-
-
-const generateOptions = () => {
-  return [
-    { id: 1, text: "Option A" },
-    { id: 2, text: "Option B" },
-    { id: 3, text: "Option C" },
-    { id: 4, text: "Option D" },
-  ];
-};
-
-export const seedQuestions = async (req, res) => {
-  const client = await pool.connect();
-
-  try {
-    // ✅ Get all grades
-    const { rows: grades } = await client.query("SELECT id, grade_level FROM grades");
-
-    for (const grade of grades) {
-      // ✅ Get subjects under each grade
-      const { rows: subjects } = await client.query(
-        "SELECT id, subject FROM subjects WHERE grade_id=$1",
-        [grade.id]
-      );
-
-      for (const subject of subjects) {
-        // ✅ Get topics under each subject
-        const { rows: topics } = await client.query(
-          "SELECT id, topic FROM topics WHERE subject_id=$1",
-          [subject.id]
-        );
-
-        for (const topic of topics) {
-          // ✅ Insert 100 questions per topic
-          for (let i = 1; i <= 100; i++) {
-            const options = generateOptions();
-            const correctOption = options[Math.floor(Math.random() * 4)].id;
-
-            await client.query(
-              `INSERT INTO questions 
-                (subject, question_text, options, correct_option_id, created_at, 
-                 difficulty_level, grade_level, question_type, question_url, topic_id, 
-                 answer_explanation, answer_file_url, topics)
-               VALUES ($1,$2,$3,$4,NOW(),$5,$6,$7,$8,$9,$10,$11,$12)`,
-              [
-                subject.subject,                                  // subject name
-                `Sample Question ${i} for ${topic.topic}`,        // question_text
-                JSON.stringify(options),                          // options
-                correctOption,                                    // correct option
-                "Easy",                                           // difficulty_level
-                grade.grade_level,                                // grade level string
-                "MCQ",                                            // question_type
-                null,                                             // question_url
-                topic.id,                                         // topic_id
-                "This is a sample explanation.",                  // explanation
-                null,                                             // answer file url
-                topic.topic                                       // topic name
-              ]
-            );
-          }
-        }
-      }
-    }
-
-    return res.status(201).json({
-      success: true,
-      message: "100 questions inserted for each topic under each subject & grade",
-    });
-    console.log("inserted")
-  } catch (error) {
-    console.error("Seed questions error:", error);
-    return res.status(500).json({ success: false, message: "Internal Server Error" });
-  } finally {
-    client.release();
-  }
-};
-
-// seedQuestions()
-
-
+// User reset password....
 
 export const userResetPassword = async (req, res) => {
   try {
@@ -4520,7 +3475,6 @@ export const userResetPassword = async (req, res) => {
   }
 };
 
-
 // confirm password.........
 
 export const userconfirmPassword = async (req, res) => {
@@ -4568,8 +3522,6 @@ export const userconfirmPassword = async (req, res) => {
     });
   }
 };
-
-
 
 // user player id save for onesignal.......
 
@@ -4692,7 +3644,7 @@ export const updatequestion = async (req, res) => {
   }
 };
 
-// admin create subject and topics
+// admin create subject and topics....
 
 export const admincreateSubject = async (req, res) => {
   try {
@@ -4752,7 +3704,6 @@ export const admincreateSubject = async (req, res) => {
     res.status(500).json({ status: false, message: "Server error" });
   }
 };
-
 
 // admin create topics separeatly...
 
@@ -4862,10 +3813,7 @@ export const adminRequestActive = async (req, res) => {
   }
 };
 
-
-
 // user active request.........
-
 
 export const userRequestActive = async (req, res) => {
   const client = await pool.connect();
