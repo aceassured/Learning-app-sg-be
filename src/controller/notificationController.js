@@ -53,61 +53,61 @@ export const getUserNotifications = async (req, res) => {
 
 // get all notification not showed notifications.......
 
-export const getUserNotificationsNotshown = async (req, res) => {
-  const userId = req.query.userId || req.user?.id;
+  export const getUserNotificationsNotshown = async (req, res) => {
+    const userId = req.query.userId || req.user?.id;
 
-  if (!userId) {
-    return res.status(400).json({ error: "Missing userId" });
-  }
+    if (!userId) {
+      return res.status(400).json({ error: "Missing userId" });
+    }
 
-  try {
+    try {
 
-    // 1️⃣ Fetch only NOT SHOWN notifications (used for popup)
-    const popupResult = await pool.query(
-      `SELECT 
-        id, user_id, message, type, subject, is_read, is_viewed, is_shown, created_at,
-        CASE 
-          WHEN created_at >= CURRENT_DATE THEN 'today'
-          WHEN created_at >= CURRENT_DATE - INTERVAL '7 days' THEN 'thisWeek'
-          ELSE 'earlier'
-        END as time_section
-       FROM notifications 
-       WHERE user_id = $1 
-         AND type != 'reminder' 
-         AND is_shown = false
-       ORDER BY created_at DESC`,
-      [userId]
-    );
+      // 1️⃣ Fetch only NOT SHOWN notifications (used for popup)
+      const popupResult = await pool.query(
+        `SELECT 
+          id, user_id, message, type, subject, is_read, is_viewed, is_shown, created_at,
+          CASE 
+            WHEN created_at >= CURRENT_DATE THEN 'today'
+            WHEN created_at >= CURRENT_DATE - INTERVAL '7 days' THEN 'thisWeek'
+            ELSE 'earlier'
+          END as time_section
+        FROM notifications 
+        WHERE user_id = $1 
+          AND type != 'reminder' 
+          AND is_shown = false
+        ORDER BY created_at DESC`,
+        [userId]
+      );
 
-    const notifications = popupResult.rows.map(n => ({
-      ...n,
-      read: n.is_read,
-      viewed: n.is_viewed
-    }));
+      const notifications = popupResult.rows.map(n => ({
+        ...n,
+        read: n.is_read,
+        viewed: n.is_viewed
+      }));
 
-    // 2️⃣ Unread count should include ALL unread notifications, even if is_shown = true
-    const unreadResult = await pool.query(
-      `SELECT COUNT(*) 
-       FROM notifications 
-       WHERE user_id = $1 
-         AND type != 'reminder'
-         AND is_read = false`,
-      [userId]
-    );
+      // 2️⃣ Unread count should include ALL unread notifications, even if is_shown = true
+      const unreadResult = await pool.query(
+        `SELECT COUNT(*) 
+        FROM notifications 
+        WHERE user_id = $1 
+          AND type != 'reminder'
+          AND is_read = false`,
+        [userId]
+      );
 
-    const unreadCount = parseInt(unreadResult.rows[0].count, 10);
+      const unreadCount = parseInt(unreadResult.rows[0].count, 10);
 
-    res.json({
-      notifications, // popup notifications only
-      unreadCount,   // full unread count
-      success: true
-    });
+      res.json({
+        notifications, // popup notifications only
+        unreadCount,   // full unread count
+        success: true
+      });
 
-  } catch (error) {
-    console.error("❌ Error fetching notifications:", error);
-    res.status(500).json({ error: "Failed to fetch notifications" });
-  }
-};
+    } catch (error) {
+      console.error("❌ Error fetching notifications:", error);
+      res.status(500).json({ error: "Failed to fetch notifications" });
+    }
+  };
 
 // Mark notifications as read....
 

@@ -9,4 +9,3 @@ router.get('/analytics', auth, getProgressPageDatanew);
 router.get('/analyticsnew', auth, getProgressPageDatawithMonthly);
 
 export default router;
-``

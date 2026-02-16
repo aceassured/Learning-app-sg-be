@@ -1,0 +1,509 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model admins {
+  id                Int           @id @default(autoincrement())
+  name              String        @db.VarChar(100)
+  email             String        @unique @db.VarChar(150)
+  password          String
+  phone             String?       @db.VarChar(20)
+  department        String?       @db.VarChar(100)
+  employee_id       String?       @unique @db.VarChar(50)
+  created_at        DateTime?     @default(now()) @db.Timestamp(6)
+  updated_at        DateTime?     @default(now()) @db.Timestamp(6)
+  active_status     Boolean?      @default(true)
+  is_active_request Boolean?      @default(false)
+  role              String?       @default("admin") @db.VarChar(450)
+  profile_photo_url String?       @db.VarChar(450)
+  otp               Int?
+  otp_expire_time   DateTime?     @db.Timestamp(6)
+  forum_posts       forum_posts[]
+}
+
+model announcements {
+  id         Int       @id @default(autoincrement())
+  admin_id   Int
+  title      String
+  content    String?
+  created_at DateTime? @default(now()) @db.Timestamptz(6)
+  active     Boolean?  @default(true)
+}
+
+model editing_quiz {
+  id              Int       @id @default(autoincrement())
+  title           String
+  passage         String?
+  grade_id        Int
+  subject_id      Int
+  topic_id        Int
+  created_at      DateTime? @default(now()) @db.Timestamp(6)
+  upload_batch_id String?   @db.Uuid
+  updated_at      DateTime? @db.Timestamp(6)
+}
+
+model editing_quiz_answers {
+  id          Int       @id @default(autoincrement())
+  user_id     Int
+  quiz_id     Int
+  question_id Int
+  user_answer String?
+  is_correct  Boolean?  @default(false)
+  created_at  DateTime? @default(now()) @db.Timestamp(6)
+  session_id  Int?
+}
+
+model editing_quiz_questions {
+  id              Int       @id @default(autoincrement())
+  quiz_id         Int
+  incorrect_word  String    @db.VarChar(255)
+  correct_word    String    @db.VarChar(255)
+  position        Int
+  upload_batch_id String?   @db.Uuid
+  created_at      DateTime? @default(now()) @db.Timestamp(6)
+  updated_at      DateTime? @db.Timestamp(6)
+}
+
+model forum_comments {
+  id          Int          @id @default(autoincrement())
+  post_id     Int?
+  user_id     Int?
+  content     String
+  created_at  DateTime?    @default(now()) @db.Timestamp(6)
+  forum_posts forum_posts? @relation(fields: [post_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  users       users?       @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+}
+
+model forum_files {
+  id           Int            @id @default(autoincrement())
+  post_id      Int?
+  url          String?
+  filename     String?
+  created_at   DateTime?      @default(now()) @db.Timestamp(6)
+  forum_posts  forum_posts?   @relation(fields: [post_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  notes_access notes_access[]
+}
+
+model forum_likes {
+  id          Int          @id @default(autoincrement())
+  post_id     Int?
+  user_id     Int?
+  created_at  DateTime?    @default(now()) @db.Timestamp(6)
+  forum_posts forum_posts? @relation(fields: [post_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  users       users?       @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([post_id, user_id])
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model forum_posts {
+  id                 Int                 @id @default(autoincrement())
+  user_id            Int?
+  content            String?
+  type_of_upload     String?
+  created_at         DateTime?           @default(now()) @db.Timestamp(6)
+  admin_id           Int?
+  grade_level        Int?
+  subject_tag        Int?
+  topic_id           Int?
+  forum_title        String?             @db.VarChar(450)
+  superadmin_id      Int?
+  super_admin_id     Int?
+  subject_id         Int?
+  moderation_status  String?             @default("approved") @db.VarChar(20)
+  moderation_details Json?
+  forum_comments     forum_comments[]
+  forum_files        forum_files[]
+  forum_likes        forum_likes[]
+  admins             admins?             @relation(fields: [admin_id], references: [id], onUpdate: NoAction, map: "fk_forum_admin")
+  superadmin         superadmin?         @relation(fields: [super_admin_id], references: [id], onUpdate: NoAction, map: "fk_forum_superadmin")
+  users              users?              @relation(fields: [user_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  forum_views        forum_views[]
+  user_saved_forums  user_saved_forums[]
+
+  @@index([created_at(sort: Desc)], map: "idx_posts_created_at")
+}
+
+model forum_views {
+  id            Int         @id @default(autoincrement())
+  forum_post_id Int
+  user_id       Int
+  viewed_at     DateTime?   @default(now()) @db.Timestamptz(6)
+  forum_posts   forum_posts @relation(fields: [forum_post_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  users         users       @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([user_id, forum_post_id])
+}
+
+model grades {
+  id            Int        @id @default(autoincrement())
+  grade_level   String     @db.VarChar(450)
+  created_at    DateTime?  @default(now()) @db.Timestamp(6)
+  updated_at    DateTime?  @default(now()) @db.Timestamp(6)
+  active_status Boolean?   @default(true)
+  subjects      subjects[]
+}
+
+model notes_access {
+  id            Int         @id @default(autoincrement())
+  user_id       Int
+  forum_file_id Int
+  action        String      @db.VarChar(50)
+  created_at    DateTime?   @default(now()) @db.Timestamptz(6)
+  forum_files   forum_files @relation(fields: [forum_file_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+}
+
+model notifications {
+  id         Int       @id @default(autoincrement())
+  user_id    Int
+  title      String?   @db.VarChar(255)
+  message    String?
+  type       String?   @db.VarChar(50)
+  is_read    Boolean?  @default(false)
+  created_at DateTime? @default(now()) @db.Timestamptz(6)
+  updated_at DateTime? @default(now()) @db.Timestamptz(6)
+  subject    String?   @db.VarChar(450)
+  is_viewed  Boolean?  @default(false)
+  is_shown   Boolean?  @default(false)
+  users      users     @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_notifications_user")
+}
+
+model playing_with_neon {
+  id    Int    @id @default(autoincrement())
+  name  String
+  value Float? @db.Real
+}
+
+model poll_comments {
+  id         Int       @id @default(autoincrement())
+  user_id    Int
+  poll_id    Int
+  comment    String
+  created_at DateTime? @default(now()) @db.Timestamptz(6)
+  polls      polls     @relation(fields: [poll_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_poll")
+  users      users     @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_user")
+}
+
+model poll_likes {
+  id       Int       @id @default(autoincrement())
+  user_id  Int
+  poll_id  Int
+  liked_at DateTime? @default(now()) @db.Timestamptz(6)
+  polls    polls     @relation(fields: [poll_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_poll_likes_poll")
+  users    users     @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_poll_likes_user")
+
+  @@unique([user_id, poll_id])
+}
+
+model poll_options {
+  id          Int          @id @default(autoincrement())
+  poll_id     Int?
+  option_text String
+  polls       polls?       @relation(fields: [poll_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  poll_votes  poll_votes[]
+
+  @@index([poll_id], map: "idx_poll_options_poll_id")
+}
+
+model poll_views {
+  id        Int       @id @default(autoincrement())
+  poll_id   Int
+  user_id   Int
+  viewed_at DateTime? @default(now()) @db.Timestamptz(6)
+  polls     polls     @relation(fields: [poll_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_poll_views_poll")
+  users     users     @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_poll_views_user")
+
+  @@unique([poll_id, user_id])
+}
+
+model poll_votes {
+  id           Int           @id @default(autoincrement())
+  poll_id      Int?
+  option_id    Int?
+  user_id      Int
+  created_at   DateTime?     @default(now()) @db.Timestamptz(6)
+  users        users         @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_poll_votes_user")
+  poll_options poll_options? @relation(fields: [option_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  polls        polls?        @relation(fields: [poll_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([poll_id, user_id, option_id])
+  @@index([poll_id, user_id], map: "idx_votes_poll_user")
+}
+
+model polls {
+  id               Int                @id @default(autoincrement())
+  question         String
+  allow_multiple   Boolean?           @default(false)
+  expires_at       DateTime?          @db.Timestamptz(6)
+  created_at       DateTime?          @default(now()) @db.Timestamptz(6)
+  active_status    Boolean?           @default(true)
+  subject_id       Int?
+  grade_level      Int?
+  is_poll_ended    Boolean?           @default(false)
+  poll_image_url   String?
+  updated_at       DateTime?          @db.Timestamp(6)
+  poll_comments    poll_comments[]
+  poll_likes       poll_likes[]
+  poll_options     poll_options[]
+  poll_views       poll_views[]
+  poll_votes       poll_votes[]
+  user_saved_polls user_saved_polls[]
+}
+
+model questions {
+  id                      Int                       @id @default(autoincrement())
+  subject                 String?
+  question_text           String
+  options                 Json
+  correct_option_id       Int?
+  question_type           String?
+  created_at              DateTime?                 @default(now()) @db.Timestamp(6)
+  subject_id              Int?
+  topic_id                Int?
+  grade_id                Int?
+  difficulty_level        String?                   @db.VarChar(450)
+  question_url            String?
+  answer_file_url         String?
+  answer_explanation      String?                   @db.VarChar(450)
+  topics                  String?                   @db.VarChar(450)
+  upload_batch_id         String?                   @db.Uuid
+  user_answered_questions user_answered_questions[]
+  user_answers            user_answers[]
+  user_question_status    user_question_status[]
+
+  @@unique([question_text, topic_id], map: "unique_question_per_topic")
+}
+
+model subjects {
+  id            Int       @id @default(autoincrement())
+  subject       String    @db.VarChar(450)
+  created_at    DateTime? @default(now()) @db.Timestamp(6)
+  updated_at    DateTime? @default(now()) @db.Timestamp(6)
+  icon          String?
+  grade_id      Int
+  active_status Boolean?  @default(true)
+  grades        grades    @relation(fields: [grade_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_grade")
+}
+
+model superadmin {
+  id                Int           @id @default(autoincrement())
+  name              String        @db.VarChar(100)
+  email             String        @unique @db.VarChar(150)
+  password          String
+  phone             String?       @db.VarChar(20)
+  department        String?       @db.VarChar(100)
+  employee_id       String?       @unique @db.VarChar(50)
+  created_at        DateTime?     @default(now()) @db.Timestamp(6)
+  updated_at        DateTime?     @default(now()) @db.Timestamp(6)
+  role              String?       @default("superadmin") @db.VarChar(450)
+  profile_photo_url String?
+  forum_posts       forum_posts[]
+}
+
+model topics {
+  id            Int       @id @default(autoincrement())
+  subject_id    Int
+  topic         String    @db.VarChar(255)
+  created_at    DateTime? @default(now()) @db.Timestamptz(6)
+  updated_at    DateTime? @db.Timestamptz(6)
+  active_status Boolean?  @default(true)
+  grade_id      Int?
+  grade_level   String?   @db.VarChar(450)
+}
+
+model upload_history {
+  id              Int       @id @default(autoincrement())
+  filename        String    @db.VarChar(255)
+  uploaded_at     DateTime? @default(now()) @db.Timestamp(6)
+  questions_count Int?      @default(0)
+  status          String    @db.VarChar(50)
+  upload_batch_id String    @db.Uuid
+  file_hash       String?
+  questions_hash  String?
+  type            String?   @db.VarChar(450)
+}
+
+model user_activity {
+  id              Int       @id @default(autoincrement())
+  user_id         Int?
+  activity_date   DateTime? @db.Date
+  correct_count   Int?      @default(0)
+  incorrect_count Int?      @default(0)
+  users           users?    @relation(fields: [user_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@unique([user_id, activity_date], map: "user_activity_unique_user_date")
+}
+
+model user_answered_questions {
+  id          Int       @id @default(autoincrement())
+  user_id     Int
+  question_id Int
+  answered_at DateTime? @default(now()) @db.Timestamptz(6)
+  questions   questions @relation(fields: [question_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_question")
+  users       users     @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_user")
+
+  @@unique([user_id, question_id])
+}
+
+model user_answers {
+  id                 Int                 @id @default(autoincrement())
+  session_id         Int?
+  question_id        Int?
+  selected_option_id Int?
+  is_correct         Boolean?
+  answered_at        DateTime?           @default(now()) @db.Timestamp(6)
+  questions          questions?          @relation(fields: [question_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  user_quiz_sessions user_quiz_sessions? @relation(fields: [session_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([session_id, question_id], map: "user_answers_unique")
+}
+
+model user_question_status {
+  id          Int        @id @default(autoincrement())
+  user_id     Int?
+  question_id Int?
+  status      String?    @default("not_visited") @db.VarChar(450)
+  questions   questions? @relation(fields: [question_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  users       users?     @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+}
+
+model user_quiz_sessions {
+  id                       Int            @id @default(autoincrement())
+  user_id                  Int?
+  started_at               DateTime?      @default(now()) @db.Timestamp(6)
+  finished_at              DateTime?      @db.Timestamp(6)
+  allowed_duration_seconds Int?           @default(300)
+  total_questions          Int?
+  score                    Int?           @default(0)
+  type                     String?        @db.VarChar(450)
+  created_at               DateTime?      @default(now()) @db.Timestamptz(6)
+  user_answers             user_answers[]
+  users                    users?         @relation(fields: [user_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+}
+
+model user_saved_forums {
+  id            Int         @id @default(autoincrement())
+  user_id       Int
+  forum_post_id Int
+  created_at    DateTime?   @default(now()) @db.Timestamptz(6)
+  forum_posts   forum_posts @relation(fields: [forum_post_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  users         users       @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+}
+
+model user_saved_polls {
+  id         Int       @id @default(autoincrement())
+  user_id    Int
+  poll_id    Int
+  created_at DateTime? @default(now()) @db.Timestamptz(6)
+  polls      polls     @relation(fields: [poll_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  users      users     @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+}
+
+model user_settings {
+  id                  Int       @id @default(autoincrement())
+  user_id             Int?      @unique
+  questions_per_day   Int?
+  quiz_time_seconds   Int?
+  daily_reminder_time DateTime? @db.Time(6)
+  reminder_enabled    Boolean?  @default(true)
+  dark_mode           Boolean?  @default(false)
+  sound_enabled       Boolean?  @default(true)
+  study_reminder      Boolean?  @default(true)
+  forum_update        Boolean?  @default(true)
+  updated_at          DateTime? @db.Timestamp(6)
+  users               users?    @relation(fields: [user_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+}
+
+model users {
+  id                      Int                       @id @default(autoincrement())
+  email                   String?                   @unique
+  phone                   String?                   @unique
+  name                    String?
+  school_name             String?
+  grade_level             Int?
+  questions_per_day       Int?
+  daily_reminder_time     DateTime?                 @db.Time(6)
+  selected_subjects       String[]
+  profile_photo_url       String?
+  created_at              DateTime?                 @default(now()) @db.Timestamp(6)
+  grade_id                Int?
+  updated_at              DateTime?                 @db.Timestamp(6)
+  password                String?                   @db.VarChar(450)
+  otp                     Int?
+  otp_expire_time         DateTime?                 @db.Timestamp(6)
+  is_verified             Boolean?                  @default(false)
+  active_status           Boolean?                  @default(true)
+  is_active_request       Boolean?                  @default(false)
+  fcm_token               String?                   @db.VarChar(450)
+  device_type             String?                   @db.VarChar(450)
+  social_id               String?                   @db.VarChar(450)
+  provider                String?                   @db.VarChar(450)
+  is_social_login         Boolean?                  @default(false)
+  biometric_enabled       Boolean?                  @default(false)
+  role                    String?                   @default("Student") @db.VarChar(450)
+  forum_comments          forum_comments[]
+  forum_likes             forum_likes[]
+  forum_posts             forum_posts[]
+  forum_views             forum_views[]
+  notifications           notifications[]
+  poll_comments           poll_comments[]
+  poll_likes              poll_likes[]
+  poll_views              poll_views[]
+  poll_votes              poll_votes[]
+  user_activity           user_activity[]
+  user_answered_questions user_answered_questions[]
+  user_question_status    user_question_status[]
+  user_quiz_sessions      user_quiz_sessions[]
+  user_saved_forums       user_saved_forums[]
+  user_saved_polls        user_saved_polls[]
+  user_settings           user_settings?
+  webauthn_challenges     webauthn_challenges[]
+  webauthn_credentials    webauthn_credentials[]
+}
+
+model webauthn_challenges {
+  id         Int               @id @default(autoincrement())
+  user_id    Int?
+  purpose    challenge_purpose
+  challenge  String
+  expires_at DateTime          @db.Timestamp(6)
+  created_at DateTime?         @default(now()) @db.Timestamp(6)
+  users      users?            @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([expires_at], map: "idx_webauthn_challenges_expires")
+  @@index([user_id, purpose], map: "idx_webauthn_challenges_user_purpose")
+}
+
+model webauthn_credentials {
+  id              Int       @id @default(autoincrement())
+  user_id         Int
+  credential_id   String    @unique
+  public_key      String
+  counter         Int?      @default(0)
+  transports      String[]  @default([])
+  backup_eligible Boolean?  @default(false)
+  backup_state    Boolean?  @default(false)
+  created_at      DateTime? @default(now()) @db.Timestamp(6)
+  updated_at      DateTime? @default(now()) @db.Timestamp(6)
+  users           users     @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([user_id], map: "idx_webauthn_credentials_user")
+}
+
+enum challenge_purpose {
+  register
+  login
+}
+
+enum question_status {
+  not_visited
+  not_answered
+  answered
+  marked_for_review
+  answered_and_marked_for_review
+}

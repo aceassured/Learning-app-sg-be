@@ -6,7 +6,14 @@ import multer from "multer";
 import xlsx from "xlsx";
 import { v4 as uuidv4 } from "uuid";
 import crypto from "crypto";
+import DocumentIntelligence from "@azure-rest/ai-document-intelligence";
+import {
+  getLongRunningPoller,
+  isUnexpected,
+} from "@azure-rest/ai-document-intelligence";
 
+
+import fs from "fs"
 // create poll...........
 
 const norm = (s) => (typeof s === "string" ? s.trim().toLowerCase() : "");
@@ -1846,3 +1853,217 @@ export const adminDashboardApi = async (req, res) => {
 };
 
 
+export const parseQuizData = (analysisResult) => {
+  const { content, paragraphs, tables } = analysisResult.data;
+
+  // Step 1: Extract questions from content
+  const questions = [];
+  const lines = content.split('\n');
+
+  let currentQuestion = null;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
+
+    // Check if line is a question (starts with number and dot)
+    const questionMatch = line.match(/^(\d+)\.\s+(.+)/);
+
+    if (questionMatch) {
+      // Save previous question if exists
+      if (currentQuestion) {
+        questions.push(currentQuestion);
+      }
+
+      // Start new question
+      currentQuestion = {
+        questionNumber: parseInt(questionMatch[1]),
+        questionText: questionMatch[2],
+        options: [],
+        answer: null
+      };
+    }
+    // Check if line contains options (has parentheses with numbers)
+    else if (line.match(/\(\d+\)/)) {
+      if (currentQuestion) {
+        // Split options by pattern (1) option1 (2) option2 etc.
+        const optionMatches = line.matchAll(/\((\d+)\)\s+([^\(]+)(?=\(\d+\)|$)/g);
+
+        for (const match of optionMatches) {
+          const optionNumber = parseInt(match[1]);
+          const optionText = match[2].trim();
+
+          currentQuestion.options.push({
+            number: optionNumber,
+            text: optionText
+          });
+        }
+      }
+    }
+    // Check for standalone options in next lines
+    else if (currentQuestion && line.match(/^[a-zA-Z\s]+$/) && !line.includes(':')) {
+      // This might be part of options text from previous line
+      if (currentQuestion.options.length > 0) {
+        const lastOption = currentQuestion.options[currentQuestion.options.length - 1];
+        lastOption.text += ' ' + line;
+      }
+    }
+  }
+
+  // Add last question
+  if (currentQuestion) {
+    questions.push(currentQuestion);
+  }
+
+  // Step 2: Extract answers from tables
+  const answers = {};
+
+  if (tables && tables.length > 0) {
+    tables.forEach(table => {
+      // Look for answer patterns in table cells
+      table.cells.forEach(cell => {
+        const cellContent = cell.content.trim();
+
+        // Pattern for Q1=4, Q2=2 etc.
+        const answerMatch = cellContent.match(/^Q(\d+)$/);
+        if (answerMatch) {
+          const questionNum = answerMatch[1];
+          const nextCell = table.cells.find(c =>
+            c.rowIndex === cell.rowIndex &&
+            c.columnIndex === cell.columnIndex + 1
+          );
+
+          if (nextCell) {
+            answers[`Q${questionNum}`] = nextCell.content.trim();
+          }
+        }
+      });
+    });
+  }
+
+  // Step 3: Match answers to questions
+  questions.forEach(question => {
+    const answerKey = `Q${question.questionNumber}`;
+    if (answers[answerKey]) {
+      question.answer = answers[answerKey];
+      question.correctOption = question.options.find(
+        opt => opt.number === parseInt(answers[answerKey])
+      );
+    }
+  });
+
+  // Step 4: Also look for answers in paragraph content
+  const answerPattern = /Q(\d+)\s+([A-Za-z0-9,]+)/g;
+  let match;
+  while ((match = answerPattern.exec(content)) !== null) {
+    const questionNum = match[1];
+    const answer = match[2];
+
+    const question = questions.find(q => q.questionNumber.toString() === questionNum);
+    if (question) {
+      question.answer = answer;
+    }
+  }
+
+  return {
+    structuredQuestions: questions,
+    rawContent: content,
+    extractedAnswers: answers
+  };
+};
+
+// export const analyzePDF = async (req, res) => {
+
+// }
+
+
+const upload = multer({ dest: "uploads/" });
+
+// Azure config
+const endpoint = process.env.AZURE_DOC_ENDPOINT;
+const key = process.env.AZURE_DOC_KEY;
+
+
+const client = DocumentIntelligence(endpoint, { key });
+
+export const analyzePDF = async (req, res) => {
+  try {
+    console.log(req.file);
+
+    if (!req.file) {
+      return res.status(400).json({
+        success: false,
+        message: "PDF file required"
+      });
+    }
+
+    // ✅ Direct from buffer (NO fs needed)
+    const base64Source = req.file.buffer.toString("base64");
+
+    const initialResponse = await client
+      .path("/documentModels/{modelId}:analyze", "prebuilt-layout")
+      .post({
+        contentType: "application/json",
+        body: { base64Source }
+      });
+
+    if (isUnexpected(initialResponse)) {
+      throw initialResponse.body.error;
+    }
+
+    const poller = getLongRunningPoller(client, initialResponse);
+    const result = (await poller.pollUntilDone()).body.analyzeResult;
+
+    return res.json({
+      success: true,
+      data: result
+    });
+
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+};
+
+export const prebuildDocument = async (req, res) => {
+  try {
+    const client = DocumentIntelligence(
+      process.env.AZURE_DOC_ENDPOINT,
+      { key: process.env.AZURE_DOC_KEY }
+    );
+
+    const invoiceUrl =
+      "https://9vidjyqlgh6rek5n.public.blob.vercel-storage.com/onequizimage.pdf";
+
+    const initialResponse = await client
+      .path("/documentModels/{modelId}:analyze", "prebuilt-invoice")
+      .post({
+        contentType: "application/json",
+        body: { urlSource: invoiceUrl },
+      });
+
+    if (isUnexpected(initialResponse)) {
+      throw initialResponse.body.error;
+    }
+
+    // ✅ NO await here
+    const poller = getLongRunningPoller(client, initialResponse);
+
+    const result = await poller.pollUntilDone();
+
+    return res.json({
+      status: true,
+      data: result.body.analyzeResult,
+    });
+
+  } catch (error) {
+    console.error("Azure Document Intelligence Error:", error);
+
+    return res.status(500).json({
+      status: false,
+      message: error.message,
+    });
+  }
+};

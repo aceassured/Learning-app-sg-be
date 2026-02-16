@@ -2609,7 +2609,7 @@ export const newQuestionsadd = async (req, res) => {
       parsedOptions.length !== 4 ||
       !correct_option_id ||
       !category ||
-      !topics ||
+      // !topics ||
       !grade_id
     ) {
       return res.status(400).json({ message: "Invalid request body" });
@@ -2626,14 +2626,18 @@ export const newQuestionsadd = async (req, res) => {
     const subjectName = subjectRes.rows[0].subject;
 
     // ✅ Fetch topic name
-    const topicRes = await pool.query(
+    let topicName;
+    if(topics){
+          const topicRes = await pool.query(
       "SELECT topic FROM topics WHERE id=$1",
       [topics]
     );
     if (topicRes.rowCount === 0) {
       return res.status(400).json({ message: "Invalid topic id" });
     }
-    const topicName = topicRes.rows[0].topic;
+     topicName = topicRes.rows[0].topic;
+    }
+
 
     // ✅ Fetch grade level name
     const gradeRes = await pool.query(
@@ -2682,10 +2686,10 @@ export const newQuestionsadd = async (req, res) => {
       grade_id,                // grade_level (string from grades table)
       question_type,
       questionFileUrl,               // question file
-      topics,                        // topic_id (FK)
+      topics ? topics : null,                        // topic_id (FK)
       answer_explanation,
       answerFileUrl,
-      topicName,
+      topicName ? topicName : topicName,
       category             // answer file
     ];
 
