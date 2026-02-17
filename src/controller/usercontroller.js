@@ -2627,15 +2627,15 @@ export const newQuestionsadd = async (req, res) => {
 
     // ✅ Fetch topic name
     let topicName;
-    if(topics){
-          const topicRes = await pool.query(
-      "SELECT topic FROM topics WHERE id=$1",
-      [topics]
-    );
-    if (topicRes.rowCount === 0) {
-      return res.status(400).json({ message: "Invalid topic id" });
-    }
-     topicName = topicRes.rows[0].topic;
+    if (topics) {
+      const topicRes = await pool.query(
+        "SELECT topic FROM topics WHERE id=$1",
+        [topics]
+      );
+      if (topicRes.rowCount === 0) {
+        return res.status(400).json({ message: "Invalid topic id" });
+      }
+      topicName = topicRes.rows[0].topic;
     }
 
 

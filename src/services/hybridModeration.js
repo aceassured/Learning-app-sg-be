@@ -15,7 +15,7 @@ class HybridModeration {
       try {
         console.log('Calling Perspective API...');
         const perspectiveResult = await perspectiveModeration.moderateContent(content);
-        
+
         console.log('Perspective API Raw Result:', perspectiveResult);
 
         // If Perspective API worked (even with error), use its result
@@ -33,7 +33,7 @@ class HybridModeration {
         } else {
           console.log('Perspective API returned error, using fallback');
         }
-        
+
       } catch (error) {
         console.error('Perspective moderation completely failed:', error.message);
       }
@@ -48,7 +48,7 @@ class HybridModeration {
       needsHumanReview: true,
       message: 'Content requires manual review - moderation system issue'
     };
-    
+
     console.log('Fallback result:', fallbackResult);
     return fallbackResult;
   }

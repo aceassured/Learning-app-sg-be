@@ -592,7 +592,7 @@ export const adminCreateEditQuiz = async (req, res) => {
   try {
     const { title, passage, grade_id, subject_id, topic_id, questions } = req.body;
 
-    if (!title || !passage || !grade_id || !subject_id || !topic_id) {
+    if (!title || !passage || !grade_id || !subject_id ) {
       return res.status(400).json({ error: "All fields are required" });
     }
 
