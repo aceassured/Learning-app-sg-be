@@ -475,6 +475,181 @@ export const startQuiz = async (req, res) => {
 };
 
 
+export const startDailyQuiz = async (req, res) => {
+  try {
+    const userId = req.userId;
+    const { subjects } = req.body;
+
+    // ✅ 1️⃣ Get user's daily question limit
+    const userRes = await pool.query(
+      "SELECT questions_per_day FROM users WHERE id=$1",
+      [userId]
+    );
+
+    const qpd = userRes.rows[0]?.questions_per_day || 10;
+
+    // ✅ 2️⃣ Get already answered normal question_ids
+    const answeredRes = await pool.query(
+      "SELECT question_id FROM user_answered_questions WHERE user_id=$1",
+      [userId]
+    );
+
+    const answeredIds = answeredRes.rows.map((r) => r.question_id);
+
+    // ==========================================================
+    // 🎯 3️⃣ Fetch Normal Questions
+    // ==========================================================
+    let normalQuery = `
+      SELECT id, subject, topic_id, question_text, options, question_url,
+             answer_file_url, answer_explanation
+      FROM questions
+      WHERE NOT (id = ANY($1::int[]))
+    `;
+
+    const queryParams = [answeredIds];
+
+    // 🟩 Filter by SUBJECTS (Only filter now)
+    if (subjects?.length) {
+      const subjectNamesRes = await pool.query(
+        "SELECT subject FROM subjects WHERE id = ANY($1)",
+        [subjects]
+      );
+
+      const subjectNames = subjectNamesRes.rows.map((r) =>
+        r.subject.toLowerCase()
+      );
+
+      normalQuery += ` AND LOWER(subject) = ANY($${queryParams.length + 1
+        })`;
+
+      queryParams.push(subjectNames);
+    }
+
+    normalQuery += ` ORDER BY random() LIMIT $${queryParams.length + 1
+      }`;
+
+    queryParams.push(Math.ceil(qpd / 2)); // half from normal
+
+    const normalRes = await pool.query(normalQuery, queryParams);
+
+    // ==========================================================
+    // 🎯 4️⃣ Fetch Editable Quizzes
+    // ==========================================================
+    const desiredEditableCount = Math.floor(qpd / 2);
+
+    let editableQuery = `
+      WITH answered AS (
+        SELECT question_id
+        FROM editing_quiz_answers
+        WHERE user_id = $1
+        GROUP BY question_id
+      )
+      SELECT
+        eq.id AS quiz_id,
+        eq.title,
+        eq.passage,
+        eq.grade_id,
+        eq.subject_id,
+        eq.topic_id,
+        json_agg(
+          json_build_object(
+            'id', eqq.id,
+            'incorrect_word', eqq.incorrect_word,
+            'correct_word', eqq.correct_word,
+            'position', eqq.position
+          )
+          ORDER BY eqq.position
+        ) AS questions
+      FROM editing_quiz eq
+      JOIN editing_quiz_questions eqq ON eqq.quiz_id = eq.id
+      LEFT JOIN answered a ON a.question_id = eqq.id
+      WHERE a.question_id IS NULL
+    `;
+
+    let editableParams = [userId];
+    let paramIndex = 2;
+
+    // 🟩 Filter by SUBJECTS only
+    if (subjects?.length) {
+      editableQuery += ` AND eq.subject_id = ANY($${paramIndex}::int[])`;
+      editableParams.push(subjects);
+      paramIndex++;
+    }
+
+    editableQuery += `
+      GROUP BY eq.id
+      HAVING COUNT(eqq.id) > 0
+      ORDER BY random()
+      LIMIT $${paramIndex}
+    `;
+
+    editableParams.push(desiredEditableCount);
+
+    const editableQuizRes = await pool.query(editableQuery, editableParams);
+
+    // ==========================================================
+    // 🎯 5️⃣ Combine & Format Data
+    // ==========================================================
+    const normalQuestions = normalRes.rows.map((q) => ({
+      id: q.id,
+      subject: q.subject,
+      topic_id: q.topic_id,
+      question_text: q.question_text,
+      options: q.options,
+      question_url: q.question_url,
+      answer_file_url: q.answer_file_url,
+      answer_explanation: q.answer_explanation,
+      type: "normal",
+    }));
+
+    const editableQuizzes = editableQuizRes.rows.map((quiz) => ({
+      id: quiz.quiz_id,
+      title: quiz.title,
+      passage: quiz.passage,
+      grade_id: quiz.grade_id,
+      subject_id: quiz.subject_id,
+      topic_id: quiz.topic_id,
+      questions: quiz.questions,
+      type: "editable",
+    }));
+
+    // ✅ Merge and Shuffle both types
+    const combinedQuestions = [...editableQuizzes, ...normalQuestions].sort(
+      () => Math.random() - 0.5
+    );
+
+    // ==========================================================
+    // 🎯 6️⃣ Insert Quiz Session
+    // ==========================================================
+    const sessionRes = await pool.query(
+      `
+      INSERT INTO user_quiz_sessions
+      (user_id, started_at, allowed_duration_seconds, total_questions, type)
+      VALUES ($1, now(), 300, $2, 'daily')
+      RETURNING *
+      `,
+      [userId, combinedQuestions.length]
+    );
+
+    const session = sessionRes.rows[0];
+
+    // ==========================================================
+    // ✅ 7️⃣ Final Response
+    // ==========================================================
+    return res.status(200).json({
+      ok: true,
+      session,
+      questions: combinedQuestions,
+    });
+  } catch (err) {
+    console.error("startQuiz error:", err);
+    return res.status(500).json({
+      ok: false,
+      message: "Server error",
+    });
+  }
+};
+
 // start big quiz....
 
 // export const startbigQuiz = async (req, res) => {
