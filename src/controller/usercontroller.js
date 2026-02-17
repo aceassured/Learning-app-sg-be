@@ -3587,7 +3587,11 @@ export const updatequestion = async (req, res) => {
     // ✅ Fetch grade, subject, topic names
     const gradeRes = await pool.query("SELECT grade_level FROM grades WHERE id = $1", [grade_id]);
     const subjectRes = await pool.query("SELECT subject FROM subjects WHERE id = $1", [subject_id]);
-    const topicRes = await pool.query("SELECT topic FROM topics WHERE id = $1", [topic_id]);
+
+    let topicRes = null
+    if(topic_id){
+     topicRes = await pool.query("SELECT topic FROM topics WHERE id = $1", [topic_id]);
+    }
 
     const grade_level = gradeRes.rows[0]?.grade_level || null;
     const subject = subjectRes.rows[0]?.subject || null;

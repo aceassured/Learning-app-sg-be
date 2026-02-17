@@ -862,7 +862,7 @@ export const updateEditQuiz = async (req, res) => {
       `UPDATE editing_quiz
        SET title = $1, passage = $2, grade_id = $3, subject_id = $4, topic_id = $5, updated_at = NOW()
        WHERE id = $6`,
-      [title, passage, grade_id, subject_id, topic_id, id]
+      [title, passage, grade_id, subject_id, topic_id ? topic_id : null, id]
     );
 
     // Delete old questions
