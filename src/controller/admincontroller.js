@@ -592,7 +592,7 @@ export const adminCreateEditQuiz = async (req, res) => {
   try {
     const { title, passage, grade_id, subject_id, topic_id, questions } = req.body;
 
-    if (!title || !passage || !grade_id || !subject_id ) {
+    if (!title || !passage || !grade_id || !subject_id) {
       return res.status(400).json({ error: "All fields are required" });
     }
 
@@ -847,44 +847,126 @@ export const getAllEditQuizzesnew = async (req, res) => {
 
 // update editable question.....
 
+// export const updateEditQuiz = async (req, res) => {
+//   try {
+//     const { id } = req.params;
+//     const { title, passage, grade_id, subject_id, topic_id, questions } = req.body;
+
+//     const existingQuiz = await pool.query(`SELECT * FROM editing_quiz WHERE id = $1`, [id]);
+//     if (existingQuiz.rowCount === 0) {
+//       return res.status(404).json({ error: "Quiz not found" });
+//     }
+
+//     // Update quiz details
+//     await pool.query(
+//       `UPDATE editing_quiz
+//        SET title = $1, passage = $2, grade_id = $3, subject_id = $4, topic_id = $5, updated_at = NOW()
+//        WHERE id = $6`,
+//       [title, passage, grade_id, subject_id, topic_id ? topic_id : null, id]
+//     );
+
+//     // Delete old questions
+//     await pool.query(`DELETE FROM editing_quiz_questions WHERE quiz_id = $1`, [id]);
+
+//     // Insert new questions
+//     if (questions && Array.isArray(questions)) {
+//       for (const q of questions) {
+//         await pool.query(
+//           `INSERT INTO editing_quiz_questions (quiz_id, incorrect_word, correct_word)
+//            VALUES ($1, $2, $3)`,
+//           [id, q.incorrect_word, q.correct_word]
+//         );
+//       }
+//     }
+
+//     res.status(200).json({ message: "Quiz updated successfully" });
+//   } catch (err) {
+//     console.error(err);
+//     res.status(500).json({ error: "Server error" });
+//   }
+// };
+
 export const updateEditQuiz = async (req, res) => {
   try {
     const { id } = req.params;
     const { title, passage, grade_id, subject_id, topic_id, questions } = req.body;
 
-    const existingQuiz = await pool.query(`SELECT * FROM editing_quiz WHERE id = $1`, [id]);
+    // ✅ Validate required fields (same as create)
+    if (!title || !passage || !grade_id || !subject_id) {
+      return res.status(400).json({
+        error: "title, passage, grade_id and subject_id are required",
+      });
+    }
+
+    // ✅ Check quiz exists
+    const existingQuiz = await pool.query(
+      `SELECT id FROM editing_quiz WHERE id = $1`,
+      [id]
+    );
+
     if (existingQuiz.rowCount === 0) {
       return res.status(404).json({ error: "Quiz not found" });
     }
 
-    // Update quiz details
+    // ✅ Update quiz
     await pool.query(
       `UPDATE editing_quiz
-       SET title = $1, passage = $2, grade_id = $3, subject_id = $4, topic_id = $5, updated_at = NOW()
+       SET title = $1,
+           passage = $2,
+           grade_id = $3,
+           subject_id = $4,
+           topic_id = $5,
+           updated_at = NOW()
        WHERE id = $6`,
-      [title, passage, grade_id, subject_id, topic_id ? topic_id : null, id]
+      [
+        title,
+        passage,
+        grade_id,
+        subject_id,
+        topic_id || null,
+        id,
+      ]
     );
 
-    // Delete old questions
-    await pool.query(`DELETE FROM editing_quiz_questions WHERE quiz_id = $1`, [id]);
+    // ✅ Delete old questions
+    await pool.query(
+      `DELETE FROM editing_quiz_questions WHERE quiz_id = $1`,
+      [id]
+    );
 
-    // Insert new questions
-    if (questions && Array.isArray(questions)) {
+    // ✅ Insert new questions (WITH POSITION)
+    if (questions && Array.isArray(questions) && questions.length > 0) {
       for (const q of questions) {
+        if (!q.incorrect_word || !q.correct_word) continue;
+
         await pool.query(
-          `INSERT INTO editing_quiz_questions (quiz_id, incorrect_word, correct_word)
-           VALUES ($1, $2, $3)`,
-          [id, q.incorrect_word, q.correct_word]
+          `INSERT INTO editing_quiz_questions
+           (quiz_id, incorrect_word, correct_word, position)
+           VALUES ($1, $2, $3, $4)`,
+          [
+            id,
+            q.incorrect_word,
+            q.correct_word,
+            q.position ?? null, // optional safe
+          ]
         );
       }
     }
 
-    res.status(200).json({ message: "Quiz updated successfully" });
+    return res.status(200).json({
+      success: true,
+      message: "Quiz updated successfully",
+    });
+
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: "Server error" });
+    console.error("updateEditQuiz error:", err);
+    return res.status(500).json({
+      success: false,
+      message: "Server error",
+    });
   }
 };
+
 
 // delete editabe qustion.......
 
