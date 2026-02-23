@@ -674,7 +674,7 @@ export const createPost = async (req, res) => {
   try {
     const { 
       grade_level, 
-      content, 
+      content,  
       subject_tag, 
       type_of_upload, 
       author_type, 
@@ -720,19 +720,19 @@ export const createPost = async (req, res) => {
       query = `INSERT INTO forum_posts 
         (user_id, grade_level, content, subject_tag, type_of_upload, forum_title, topic_id, created_at, moderation_status)
         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`;
-      params = [authorId, grade_level, content, subject_tag, type_of_upload, forum_title, topic_id, created_at, "approved"];
+      params = [authorId, grade_level, content, subject_tag, type_of_upload, forum_title, topic_id || "", created_at, "approved"];
     } 
     else if (author_type === "admin") {
       query = `INSERT INTO forum_posts 
         (admin_id, grade_level, content, subject_tag, type_of_upload, forum_title, topic_id, created_at, moderation_status)
         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`;
-      params = [authorId, grade_level, content, subject_tag, type_of_upload, forum_title, topic_id, created_at, "approved"];
+      params = [authorId, grade_level, content, subject_tag, type_of_upload, forum_title, topic_id || "", created_at, "approved"];
     }
     else if (author_type === "superadmin") {
       query = `INSERT INTO forum_posts 
         (super_admin_id, grade_level, content, subject_tag, type_of_upload, forum_title, topic_id, created_at, moderation_status)
         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`;
-      params = [authorId, grade_level, content, subject_tag, type_of_upload, forum_title, topic_id, created_at, "approved"];
+      params = [authorId, grade_level, content, subject_tag, type_of_upload, forum_title, topic_id || "", created_at, "approved"];
     }
     else {
       return res.status(400).json({ ok: false, message: "Invalid author_type" });
