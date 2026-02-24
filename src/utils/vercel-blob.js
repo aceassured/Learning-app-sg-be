@@ -301,12 +301,386 @@ const generateQuestionsHash = (rows) => {
 };
 
 // Modified questionFileupload function with validation
+// export const questionFileupload = async (req, res) => {
+//   const uploadBatchId = uuidv4();
+//   let questionsInserted = 0;
+
+//   // Helper to send a consistent error and clean extracted folder
+//   const cleanupAndError = (extractDir, statusCode, payload) => {
+//     try {
+//       if (extractDir && fs.existsSync(extractDir)) {
+//         fs.rmSync(extractDir, { recursive: true, force: true });
+//       }
+//     } catch (e) {
+//       console.error("Cleanup error:", e);
+//     }
+//     return res.status(statusCode).json(payload);
+//   };
+
+//   try {
+//     // file required
+//     if (!req.file) {
+//       return res.status(400).json({ success: false, message: "ZIP file is required." });
+//     }
+
+//     const zipPath = req.file.path;
+//     const extractDir = path.join("uploads", "extracted", Date.now().toString());
+//     fs.mkdirSync(extractDir, { recursive: true });
+
+//     // Generate hash of the ZIP file
+//     const zipBuffer = fs.readFileSync(zipPath);
+//     const fileHash = generateFileHash(zipBuffer);
+
+//     // Extract ZIP (await completion)
+//     await fs.createReadStream(zipPath).pipe(unzipper.Extract({ path: extractDir })).promise();
+
+//     // Find Excel (xlsx or csv)
+//     const files = fs.readdirSync(extractDir);
+//     const excelFile = files.find(f => f.endsWith(".xlsx") || f.endsWith(".csv") || f.endsWith(".xls"));
+//     if (!excelFile) {
+//       return cleanupAndError(extractDir, 400, {
+//         success: false,
+//         message: "Excel file not found in zip."
+//       });
+//     }
+
+//     const workbook = XLSX.readFile(path.join(extractDir, excelFile));
+//     const sheetName = workbook.SheetNames[0];
+//     const rows = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { defval: null });
+
+//     // Basic header/column validation (require subject, topic, grade, question_text)
+//     const requiredColumns = ["subject", "topic", "grade", "question_text"];
+//     // check first row's keys (if file is empty, rows.length === 0)
+//     if (!rows || rows.length === 0) {
+//       return cleanupAndError(extractDir, 400, { success: false, message: "Excel sheet is empty." });
+//     }
+
+//     const headerKeys = Object.keys(rows[0]).map(k => k.trim());
+//     for (const col of requiredColumns) {
+//       if (!headerKeys.includes(col)) {
+//         return cleanupAndError(extractDir, 400, {
+//           success: false,
+//           message: `Missing required column "${col}" in Excel. Please include columns: ${requiredColumns.join(", ")}.`
+//         });
+//       }
+//     }
+
+//     // Generate hash of questions content
+//     const questionsHash = generateQuestionsHash(rows);
+
+//     // Duplicate check (same file hash & same questions hash)
+//     const duplicateCheck = await pool.query(
+//       `SELECT uh.*, 
+//         (SELECT COUNT(*) FROM questions WHERE upload_batch_id = uh.upload_batch_id) as actual_questions_count
+//        FROM upload_history uh
+//        WHERE uh.file_hash = $1 AND uh.questions_hash = $2
+//        LIMIT 1`,
+//       [fileHash, questionsHash]
+//     );
+
+//     if (duplicateCheck.rows.length > 0) {
+//       const duplicate = duplicateCheck.rows[0];
+//       return cleanupAndError(extractDir, 400, {
+//         success: false,
+//         message: `This exact file with the same questions was already uploaded on ${new Date(duplicate.uploaded_at).toLocaleString()}. It contains ${duplicate.actual_questions_count} questions. Please upload a different file or modify the questions.`,
+//         duplicate: {
+//           filename: duplicate.filename,
+//           uploaded_at: duplicate.uploaded_at,
+//           questions_count: duplicate.actual_questions_count
+//         }
+//       });
+//     }
+
+//     // Check if same filename exists with different content (warning)
+//     const sameFilenameCheck = await pool.query(
+//       `SELECT id, filename, uploaded_at FROM upload_history 
+//        WHERE filename = $1 AND (file_hash != $2 OR questions_hash != $3)
+//        ORDER BY uploaded_at DESC LIMIT 1`,
+//       [req.file.originalname, fileHash, questionsHash]
+//     );
+
+//     let warningMessage = "";
+//     if (sameFilenameCheck.rows.length > 0) {
+//       const existing = sameFilenameCheck.rows[0];
+//       warningMessage = ` Note: A file with the same name was uploaded on ${new Date(existing.uploaded_at).toLocaleString()} but with different content.`;
+//     }
+
+//     // Cache for uploaded images
+//     const uploadedImagesCache = new Map();
+
+//     const processImage = async (filename) => {
+//       if (!filename) return null;
+//       if (typeof filename === "string" && filename.trim() === "") return null;
+//       if (typeof filename === "string" && filename.startsWith("http")) return filename;
+//       if (uploadedImagesCache.has(filename)) {
+//         return uploadedImagesCache.get(filename);
+//       }
+
+//       const filePath = path.join(extractDir, "images", filename);
+//       if (!fs.existsSync(filePath)) return null;
+
+//       const buffer = fs.readFileSync(filePath);
+//       const url = await uploadBufferToVercel(buffer, filename);
+
+//       uploadedImagesCache.set(filename, url);
+//       return url;
+//     };
+
+//     // Start DB transaction
+//     await pool.query("BEGIN");
+
+//     // iterate with index for error messages (1-based row number)
+//     for (let rowIndex = 0; rowIndex < rows.length; rowIndex++) {
+//       const rowNumber = rowIndex + 2; // +2 because header is row 1 in Excel
+//       const row = rows[rowIndex];
+
+//       // Trim strings and normalize keys
+//       const subjectName = (row.subject || "").toString().trim();
+//       const topicName = (row.topic || "").toString().trim();
+//       const gradeName = (row.grade || "").toString().trim();
+//       const questionText = row.question_text;
+//       // validate existence
+//       if (!subjectName) {
+//         await pool.query("ROLLBACK");
+//         return cleanupAndError(extractDir, 400, {
+//           success: false,
+//           message: `Row ${rowNumber}: 'subject' is required. Please provide subject name.`
+//         });
+//       }
+//       if (!topicName) {
+//         await pool.query("ROLLBACK");
+//         return cleanupAndError(extractDir, 400, {
+//           success: false,
+//           message: `Row ${rowNumber}: 'topic' is required. Please provide topic name.`
+//         });
+//       }
+//       if (!gradeName) {
+//         await pool.query("ROLLBACK");
+//         return cleanupAndError(extractDir, 400, {
+//           success: false,
+//           message: `Row ${rowNumber}: 'grade' is required. Please provide grade (e.g. Primary 3).`
+//         });
+//       }
+//       if (!questionText || questionText === "") {
+//         await pool.query("ROLLBACK");
+//         return cleanupAndError(extractDir, 400, {
+//           success: false,
+//           message: `Row ${rowNumber}: 'question_text' is required.`
+//         });
+//       }
+
+//       // 1) Lookup subject id
+// // 2) Lookup grade id
+// const gradeRes = await pool.query(
+//   `SELECT id FROM grades 
+//    WHERE LOWER(grade_level) = LOWER($1)
+//    AND active_status = true
+//    LIMIT 1`,
+//   [gradeName]
+// );
+
+// if (gradeRes.rowCount === 0) {
+//   await pool.query("ROLLBACK");
+//   return cleanupAndError(extractDir, 400, {
+//     success: false,
+//     message: `Row ${rowNumber}: Grade "${gradeName}" not found or inactive.`
+//   });
+// }
+
+// const gradeId = gradeRes.rows[0].id;
+
+
+// // 1) Lookup subject by name + grade (IMPORTANT FIX)
+// const subjectRes = await pool.query(
+//   `SELECT id FROM subjects 
+//    WHERE LOWER(subject) = LOWER($1) 
+//    AND grade_id = $2
+//    AND active_status = true
+//    LIMIT 1`,
+//   [subjectName, gradeId]
+// );
+
+// if (subjectRes.rowCount === 0) {
+//   await pool.query("ROLLBACK");
+//   return cleanupAndError(extractDir, 400, {
+//     success: false,
+//     message: `Row ${rowNumber}: Subject "${subjectName}" is not found for grade "${gradeName}".`
+//   });
+// }
+
+// const subjectId = subjectRes.rows[0].id;
+
+
+// // 3) Lookup topic with subject + grade (correct)
+// const topicRes = await pool.query(
+//   `SELECT id FROM topics 
+//    WHERE LOWER(topic) = LOWER($1) 
+//    AND subject_id = $2 
+//    AND grade_id = $3
+//    AND active_status = true
+//    LIMIT 1`,
+//   [topicName, subjectId, gradeId]
+// );
+
+// if (topicRes.rowCount === 0) {
+//   await pool.query("ROLLBACK");
+//   return cleanupAndError(extractDir, 400, {
+//     success: false,
+//     message: `Row ${rowNumber}: Topic "${topicName}" not found for subject "${subjectName}" and grade "${gradeName}".`
+//   });
+// }
+
+// const topicId = topicRes.rows[0].id;
+
+
+//       // Process images
+//       const questionUrl = await processImage(row.question_url);
+//       const answerFileUrl = await processImage(row.answer_file_url);
+
+//       // Build options array (same logic as your original code)
+//       const imageExtensions = [".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".svg"];
+//       const options = [];
+//       for (let i = 1; i <= 4; i++) {
+//         let value = row[`option${i}`];
+//         let finalValue = value;
+
+//         if (value !== undefined && value !== null && String(value).trim() !== "") {
+//           if (typeof value === "number") {
+//             finalValue = value.toString();
+//           } else if (typeof value === "string") {
+//             const lowerVal = value.toLowerCase();
+//             if (lowerVal.startsWith("http")) {
+//               finalValue = value;
+//             } else if (imageExtensions.some(ext => lowerVal.endsWith(ext))) {
+//               finalValue = await processImage(value);
+//             } else {
+//               finalValue = value;
+//             }
+//           }
+//         } else {
+//           finalValue = null;
+//         }
+
+//         options.push({ id: i, text: finalValue });
+//       }
+
+//       // Insert or update question (using looked-up ids)
+//       const result = await pool.query(
+//         `
+//   INSERT INTO questions (
+//     question_text,
+//     options,
+//     correct_option_id,
+//     question_type,
+//     question_url,
+//     answer_explanation,
+//     answer_file_url,
+//     topic_id,
+//     subject_id,
+//     grade_id,
+//     upload_batch_id
+//   )
+//   VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+//   ON CONFLICT (question_text, topic_id)
+//   DO UPDATE SET
+//     options = EXCLUDED.options,
+//     correct_option_id = EXCLUDED.correct_option_id,
+//     question_type = EXCLUDED.question_type,
+//     question_url = EXCLUDED.question_url,
+//     answer_explanation = EXCLUDED.answer_explanation,
+//     answer_file_url = EXCLUDED.answer_file_url,
+//     grade_id = EXCLUDED.grade_id,
+//     subject_id = EXCLUDED.subject_id,
+//     upload_batch_id = EXCLUDED.upload_batch_id
+//   RETURNING id;
+//   `,
+//         [
+//           questionText,
+//           JSON.stringify(options),
+//           row.correct_option_id,
+//           row.question_type,
+//           questionUrl,
+//           row.answer_explanation,
+//           answerFileUrl,
+//           topicId,
+//           subjectId,
+//           gradeId,
+//           uploadBatchId
+//         ]
+//       );
+
+
+//       if (result.rowCount > 0) {
+//         questionsInserted++;
+//       }
+//     } // end for rows
+
+//     // Save upload history with hashes
+//     await pool.query(
+//       `INSERT INTO upload_history (filename, questions_count, upload_batch_id, status, file_hash, questions_hash, type)
+//        VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+//       [req.file.originalname, questionsInserted, uploadBatchId, 'success', fileHash, questionsHash, 'normal']
+//     );
+
+//     // Commit transaction
+//     await pool.query("COMMIT");
+
+//     // Clean up extracted files
+//     fs.rmSync(extractDir, { recursive: true, force: true });
+
+//     return res.json({
+//       success: true,
+//       message: `Bulk upload completed successfully! ${questionsInserted} questions uploaded.${warningMessage}`,
+//       uploadBatchId,
+//       questionsInserted
+//     });
+//   } catch (err) {
+//     console.error("Bulk upload error:", err);
+
+//     try {
+//       await pool.query("ROLLBACK");
+//     } catch (rErr) {
+//       console.error("Rollback error:", rErr);
+//     }
+
+//     // Save failed upload history (best-effort)
+//     try {
+//       await pool.query(
+//         `INSERT INTO upload_history (filename, questions_count, upload_batch_id, status, type)
+//          VALUES ($1, $2, $3, $4, $5)`,
+//         [req.file?.originalname || 'unknown', 0, uploadBatchId, 'failed', 'normal']
+//       );
+//     } catch (uhErr) {
+//       console.error("Failed to insert upload_history for failed upload:", uhErr);
+//     }
+
+//     // Clean up extracted files if exist
+//     try {
+//       const extractDir = path.join("uploads", "extracted", Date.now().toString());
+//       if (fs.existsSync(extractDir)) fs.rmSync(extractDir, { recursive: true, force: true });
+//     } catch (cleanupErr) {
+//       // ignore
+//     }
+
+//     return res.status(500).json({
+//       success: false,
+//       message: "Error processing bulk upload",
+//       error: err.message
+//     });
+//   }
+// };
+
 export const questionFileupload = async (req, res) => {
   const uploadBatchId = uuidv4();
   let questionsInserted = 0;
+  let extractDir = null;
 
-  // Helper to send a consistent error and clean extracted folder
-  const cleanupAndError = (extractDir, statusCode, payload) => {
+  // Helper to send consistent error and clean extracted folder
+  const cleanupAndError = async (statusCode, payload) => {
+    try {
+      await pool.query("ROLLBACK");
+    } catch (e) {}
+
     try {
       if (extractDir && fs.existsSync(extractDir)) {
         fs.rmSync(extractDir, { recursive: true, force: true });
@@ -314,61 +688,79 @@ export const questionFileupload = async (req, res) => {
     } catch (e) {
       console.error("Cleanup error:", e);
     }
+
     return res.status(statusCode).json(payload);
   };
 
   try {
-    // file required
+    // 1️⃣ File required
     if (!req.file) {
-      return res.status(400).json({ success: false, message: "ZIP file is required." });
+      return res.status(400).json({
+        success: false,
+        message: "ZIP file is required.",
+      });
     }
 
     const zipPath = req.file.path;
-    const extractDir = path.join("uploads", "extracted", Date.now().toString());
+    extractDir = path.join("uploads", "extracted", Date.now().toString());
     fs.mkdirSync(extractDir, { recursive: true });
 
-    // Generate hash of the ZIP file
+    // 2️⃣ Generate file hash
     const zipBuffer = fs.readFileSync(zipPath);
     const fileHash = generateFileHash(zipBuffer);
 
-    // Extract ZIP (await completion)
-    await fs.createReadStream(zipPath).pipe(unzipper.Extract({ path: extractDir })).promise();
+    // 3️⃣ Extract ZIP
+    await fs
+      .createReadStream(zipPath)
+      .pipe(unzipper.Extract({ path: extractDir }))
+      .promise();
 
-    // Find Excel (xlsx or csv)
+    // 4️⃣ Find Excel file
     const files = fs.readdirSync(extractDir);
-    const excelFile = files.find(f => f.endsWith(".xlsx") || f.endsWith(".csv") || f.endsWith(".xls"));
+    const excelFile = files.find(
+      (f) =>
+        f.endsWith(".xlsx") ||
+        f.endsWith(".xls") ||
+        f.endsWith(".csv")
+    );
+
     if (!excelFile) {
-      return cleanupAndError(extractDir, 400, {
+      return cleanupAndError(400, {
         success: false,
-        message: "Excel file not found in zip."
+        message: "Excel file not found in zip.",
       });
     }
 
     const workbook = XLSX.readFile(path.join(extractDir, excelFile));
     const sheetName = workbook.SheetNames[0];
-    const rows = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { defval: null });
+    const rows = XLSX.utils.sheet_to_json(
+      workbook.Sheets[sheetName],
+      { defval: null }
+    );
 
-    // Basic header/column validation (require subject, topic, grade, question_text)
-    const requiredColumns = ["subject", "topic", "grade", "question_text"];
-    // check first row's keys (if file is empty, rows.length === 0)
     if (!rows || rows.length === 0) {
-      return cleanupAndError(extractDir, 400, { success: false, message: "Excel sheet is empty." });
+      return cleanupAndError(400, {
+        success: false,
+        message: "Excel sheet is empty.",
+      });
     }
 
-    const headerKeys = Object.keys(rows[0]).map(k => k.trim());
+    // 5️⃣ Required columns (topic removed)
+    const requiredColumns = ["subject", "grade", "question_text"];
+    const headerKeys = Object.keys(rows[0]).map((k) => k.trim());
+
     for (const col of requiredColumns) {
       if (!headerKeys.includes(col)) {
-        return cleanupAndError(extractDir, 400, {
+        return cleanupAndError(400, {
           success: false,
-          message: `Missing required column "${col}" in Excel. Please include columns: ${requiredColumns.join(", ")}.`
+          message: `Missing required column "${col}" in Excel.`,
         });
       }
     }
 
-    // Generate hash of questions content
     const questionsHash = generateQuestionsHash(rows);
 
-    // Duplicate check (same file hash & same questions hash)
+    // 6️⃣ Duplicate file check
     const duplicateCheck = await pool.query(
       `SELECT uh.*, 
         (SELECT COUNT(*) FROM questions WHERE upload_batch_id = uh.upload_batch_id) as actual_questions_count
@@ -380,41 +772,24 @@ export const questionFileupload = async (req, res) => {
 
     if (duplicateCheck.rows.length > 0) {
       const duplicate = duplicateCheck.rows[0];
-      return cleanupAndError(extractDir, 400, {
+      return cleanupAndError(400, {
         success: false,
-        message: `This exact file with the same questions was already uploaded on ${new Date(duplicate.uploaded_at).toLocaleString()}. It contains ${duplicate.actual_questions_count} questions. Please upload a different file or modify the questions.`,
-        duplicate: {
-          filename: duplicate.filename,
-          uploaded_at: duplicate.uploaded_at,
-          questions_count: duplicate.actual_questions_count
-        }
+        message: `This exact file was already uploaded on ${new Date(
+          duplicate.uploaded_at
+        ).toLocaleString()}.`,
       });
     }
 
-    // Check if same filename exists with different content (warning)
-    const sameFilenameCheck = await pool.query(
-      `SELECT id, filename, uploaded_at FROM upload_history 
-       WHERE filename = $1 AND (file_hash != $2 OR questions_hash != $3)
-       ORDER BY uploaded_at DESC LIMIT 1`,
-      [req.file.originalname, fileHash, questionsHash]
-    );
-
-    let warningMessage = "";
-    if (sameFilenameCheck.rows.length > 0) {
-      const existing = sameFilenameCheck.rows[0];
-      warningMessage = ` Note: A file with the same name was uploaded on ${new Date(existing.uploaded_at).toLocaleString()} but with different content.`;
-    }
-
-    // Cache for uploaded images
+    // 7️⃣ Image cache
     const uploadedImagesCache = new Map();
 
     const processImage = async (filename) => {
       if (!filename) return null;
-      if (typeof filename === "string" && filename.trim() === "") return null;
-      if (typeof filename === "string" && filename.startsWith("http")) return filename;
-      if (uploadedImagesCache.has(filename)) {
+      if (typeof filename === "string" && filename.startsWith("http"))
+        return filename;
+
+      if (uploadedImagesCache.has(filename))
         return uploadedImagesCache.get(filename);
-      }
 
       const filePath = path.join(extractDir, "images", filename);
       if (!fs.existsSync(filePath)) return null;
@@ -426,174 +801,115 @@ export const questionFileupload = async (req, res) => {
       return url;
     };
 
-    // Start DB transaction
+    // 8️⃣ Start transaction
     await pool.query("BEGIN");
 
-    // iterate with index for error messages (1-based row number)
     for (let rowIndex = 0; rowIndex < rows.length; rowIndex++) {
-      const rowNumber = rowIndex + 2; // +2 because header is row 1 in Excel
+      const rowNumber = rowIndex + 2;
       const row = rows[rowIndex];
 
-      // Trim strings and normalize keys
       const subjectName = (row.subject || "").toString().trim();
-      const topicName = (row.topic || "").toString().trim();
       const gradeName = (row.grade || "").toString().trim();
       const questionText = row.question_text;
-      // validate existence
+
       if (!subjectName) {
-        await pool.query("ROLLBACK");
-        return cleanupAndError(extractDir, 400, {
+        return cleanupAndError(400, {
           success: false,
-          message: `Row ${rowNumber}: 'subject' is required. Please provide subject name.`
+          message: `Row ${rowNumber}: subject is required.`,
         });
       }
-      if (!topicName) {
-        await pool.query("ROLLBACK");
-        return cleanupAndError(extractDir, 400, {
-          success: false,
-          message: `Row ${rowNumber}: 'topic' is required. Please provide topic name.`
-        });
-      }
+
       if (!gradeName) {
-        await pool.query("ROLLBACK");
-        return cleanupAndError(extractDir, 400, {
+        return cleanupAndError(400, {
           success: false,
-          message: `Row ${rowNumber}: 'grade' is required. Please provide grade (e.g. Primary 3).`
-        });
-      }
-      if (!questionText || questionText === "") {
-        await pool.query("ROLLBACK");
-        return cleanupAndError(extractDir, 400, {
-          success: false,
-          message: `Row ${rowNumber}: 'question_text' is required.`
+          message: `Row ${rowNumber}: grade is required.`,
         });
       }
 
-      // 1) Lookup subject id
-// 2) Lookup grade id
-const gradeRes = await pool.query(
-  `SELECT id FROM grades 
-   WHERE LOWER(grade_level) = LOWER($1)
-   AND active_status = true
-   LIMIT 1`,
-  [gradeName]
-);
+      if (!questionText) {
+        return cleanupAndError(400, {
+          success: false,
+          message: `Row ${rowNumber}: question_text is required.`,
+        });
+      }
 
-if (gradeRes.rowCount === 0) {
-  await pool.query("ROLLBACK");
-  return cleanupAndError(extractDir, 400, {
-    success: false,
-    message: `Row ${rowNumber}: Grade "${gradeName}" not found or inactive.`
-  });
-}
+      // 🔹 Grade lookup
+      const gradeRes = await pool.query(
+        `SELECT id FROM grades 
+         WHERE LOWER(grade_level) = LOWER($1)
+         AND active_status = true
+         LIMIT 1`,
+        [gradeName]
+      );
 
-const gradeId = gradeRes.rows[0].id;
+      if (gradeRes.rowCount === 0) {
+        return cleanupAndError(400, {
+          success: false,
+          message: `Row ${rowNumber}: Grade "${gradeName}" not found.`,
+        });
+      }
 
+      const gradeId = gradeRes.rows[0].id;
 
-// 1) Lookup subject by name + grade (IMPORTANT FIX)
-const subjectRes = await pool.query(
-  `SELECT id FROM subjects 
-   WHERE LOWER(subject) = LOWER($1) 
-   AND grade_id = $2
-   AND active_status = true
-   LIMIT 1`,
-  [subjectName, gradeId]
-);
+      // 🔹 Subject lookup (by grade)
+      const subjectRes = await pool.query(
+        `SELECT id FROM subjects 
+         WHERE LOWER(subject) = LOWER($1)
+         AND grade_id = $2
+         AND active_status = true
+         LIMIT 1`,
+        [subjectName, gradeId]
+      );
 
-if (subjectRes.rowCount === 0) {
-  await pool.query("ROLLBACK");
-  return cleanupAndError(extractDir, 400, {
-    success: false,
-    message: `Row ${rowNumber}: Subject "${subjectName}" is not found for grade "${gradeName}".`
-  });
-}
+      if (subjectRes.rowCount === 0) {
+        return cleanupAndError(400, {
+          success: false,
+          message: `Row ${rowNumber}: Subject "${subjectName}" not found for grade "${gradeName}".`,
+        });
+      }
 
-const subjectId = subjectRes.rows[0].id;
+      const subjectId = subjectRes.rows[0].id;
 
-
-// 3) Lookup topic with subject + grade (correct)
-const topicRes = await pool.query(
-  `SELECT id FROM topics 
-   WHERE LOWER(topic) = LOWER($1) 
-   AND subject_id = $2 
-   AND grade_id = $3
-   AND active_status = true
-   LIMIT 1`,
-  [topicName, subjectId, gradeId]
-);
-
-if (topicRes.rowCount === 0) {
-  await pool.query("ROLLBACK");
-  return cleanupAndError(extractDir, 400, {
-    success: false,
-    message: `Row ${rowNumber}: Topic "${topicName}" not found for subject "${subjectName}" and grade "${gradeName}".`
-  });
-}
-
-const topicId = topicRes.rows[0].id;
-
-
-      // Process images
+      // 🔹 Process images
       const questionUrl = await processImage(row.question_url);
       const answerFileUrl = await processImage(row.answer_file_url);
 
-      // Build options array (same logic as your original code)
-      const imageExtensions = [".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".svg"];
       const options = [];
       for (let i = 1; i <= 4; i++) {
         let value = row[`option${i}`];
-        let finalValue = value;
-
-        if (value !== undefined && value !== null && String(value).trim() !== "") {
-          if (typeof value === "number") {
-            finalValue = value.toString();
-          } else if (typeof value === "string") {
-            const lowerVal = value.toLowerCase();
-            if (lowerVal.startsWith("http")) {
-              finalValue = value;
-            } else if (imageExtensions.some(ext => lowerVal.endsWith(ext))) {
-              finalValue = await processImage(value);
-            } else {
-              finalValue = value;
-            }
-          }
-        } else {
-          finalValue = null;
-        }
-
-        options.push({ id: i, text: finalValue });
+        options.push({
+          id: i,
+          text: value ? value.toString() : null,
+        });
       }
 
-      // Insert or update question (using looked-up ids)
       const result = await pool.query(
         `
-  INSERT INTO questions (
-    question_text,
-    options,
-    correct_option_id,
-    question_type,
-    question_url,
-    answer_explanation,
-    answer_file_url,
-    topic_id,
-    subject_id,
-    grade_id,
-    upload_batch_id
-  )
-  VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
-  ON CONFLICT (question_text, topic_id)
-  DO UPDATE SET
-    options = EXCLUDED.options,
-    correct_option_id = EXCLUDED.correct_option_id,
-    question_type = EXCLUDED.question_type,
-    question_url = EXCLUDED.question_url,
-    answer_explanation = EXCLUDED.answer_explanation,
-    answer_file_url = EXCLUDED.answer_file_url,
-    grade_id = EXCLUDED.grade_id,
-    subject_id = EXCLUDED.subject_id,
-    upload_batch_id = EXCLUDED.upload_batch_id
-  RETURNING id;
-  `,
+        INSERT INTO questions (
+          question_text,
+          options,
+          correct_option_id,
+          question_type,
+          question_url,
+          answer_explanation,
+          answer_file_url,
+          subject_id,
+          grade_id,
+          upload_batch_id
+        )
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+        ON CONFLICT (question_text, subject_id)
+        DO UPDATE SET
+          options = EXCLUDED.options,
+          correct_option_id = EXCLUDED.correct_option_id,
+          question_type = EXCLUDED.question_type,
+          question_url = EXCLUDED.question_url,
+          answer_explanation = EXCLUDED.answer_explanation,
+          answer_file_url = EXCLUDED.answer_file_url,
+          grade_id = EXCLUDED.grade_id,
+          upload_batch_id = EXCLUDED.upload_batch_id
+        RETURNING id;
+        `,
         [
           questionText,
           JSON.stringify(options),
@@ -602,70 +918,58 @@ const topicId = topicRes.rows[0].id;
           questionUrl,
           row.answer_explanation,
           answerFileUrl,
-          topicId,
           subjectId,
           gradeId,
-          uploadBatchId
+          uploadBatchId,
         ]
       );
-
 
       if (result.rowCount > 0) {
         questionsInserted++;
       }
-    } // end for rows
+    }
 
-    // Save upload history with hashes
+    // 9️⃣ Save upload history
     await pool.query(
-      `INSERT INTO upload_history (filename, questions_count, upload_batch_id, status, file_hash, questions_hash, type)
+      `INSERT INTO upload_history 
+       (filename, questions_count, upload_batch_id, status, file_hash, questions_hash, type)
        VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-      [req.file.originalname, questionsInserted, uploadBatchId, 'success', fileHash, questionsHash, 'normal']
+      [
+        req.file.originalname,
+        questionsInserted,
+        uploadBatchId,
+        "success",
+        fileHash,
+        questionsHash,
+        "normal",
+      ]
     );
 
-    // Commit transaction
     await pool.query("COMMIT");
 
-    // Clean up extracted files
     fs.rmSync(extractDir, { recursive: true, force: true });
 
     return res.json({
       success: true,
-      message: `Bulk upload completed successfully! ${questionsInserted} questions uploaded.${warningMessage}`,
+      message: `Bulk upload completed successfully! ${questionsInserted} questions uploaded.`,
       uploadBatchId,
-      questionsInserted
+      questionsInserted,
     });
   } catch (err) {
     console.error("Bulk upload error:", err);
 
     try {
       await pool.query("ROLLBACK");
-    } catch (rErr) {
-      console.error("Rollback error:", rErr);
-    }
+    } catch (e) {}
 
-    // Save failed upload history (best-effort)
-    try {
-      await pool.query(
-        `INSERT INTO upload_history (filename, questions_count, upload_batch_id, status, type)
-         VALUES ($1, $2, $3, $4, $5)`,
-        [req.file?.originalname || 'unknown', 0, uploadBatchId, 'failed', 'normal']
-      );
-    } catch (uhErr) {
-      console.error("Failed to insert upload_history for failed upload:", uhErr);
-    }
-
-    // Clean up extracted files if exist
-    try {
-      const extractDir = path.join("uploads", "extracted", Date.now().toString());
-      if (fs.existsSync(extractDir)) fs.rmSync(extractDir, { recursive: true, force: true });
-    } catch (cleanupErr) {
-      // ignore
+    if (extractDir && fs.existsSync(extractDir)) {
+      fs.rmSync(extractDir, { recursive: true, force: true });
     }
 
     return res.status(500).json({
       success: false,
       message: "Error processing bulk upload",
-      error: err.message
+      error: err.message,
     });
   }
 };
