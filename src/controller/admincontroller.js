@@ -1228,98 +1228,532 @@ export const getAllQuestionsnew = async (req, res) => {
 
 // Create bulk editing quiz questions
 
+// export const adminCreateBulkEditableQuizQuestions = async (req, res) => {
+//   if (!req.file) return res.status(400).json({ error: "No file uploaded; field name must be 'file'." });
+
+//   let workbook;
+//   try {
+//     workbook = xlsx.read(req.file.buffer, { type: "buffer" });
+//   } catch (err) {
+//     return res.status(400).json({ error: "Invalid Excel file.", detail: err.message });
+//   }
+
+//   const sheetName = workbook.SheetNames[0];
+//   const rawRows = xlsx.utils.sheet_to_json(workbook.Sheets[sheetName], { defval: "" });
+
+//   if (!rawRows || rawRows.length === 0) {
+//     return res.status(400).json({ error: "Excel is empty" });
+//   }
+
+//   // create a batch id for this upload
+//   const uploadBatchId = uuidv4();
+
+//   // compute file hash (sha256) for exact-file duplication detection
+//   const fileHash = crypto.createHash("sha256").update(req.file.buffer).digest("hex");
+
+
+//   // Preload lookup tables
+//   try {
+//     const [gradesRes, subjectsRes, topicsRes] = await Promise.all([
+//       pool.query('SELECT id, grade_level FROM grades'),
+//       pool.query('SELECT id, subject, grade_id FROM subjects'),
+//       pool.query('SELECT id, topic, subject_id, grade_id FROM topics'),
+//     ]);
+
+//     const gradeMap = new Map();
+//     gradesRes.rows.forEach(g => gradeMap.set(norm(g.grade_level), g.id));
+
+//     const subjectMap = new Map();
+//     subjectsRes.rows.forEach(s => subjectMap.set(norm(s.subject), s));
+
+//     const topicMap = new Map(); // key = norm(topic) + '||' + subject_id
+//     topicsRes.rows.forEach(t => topicMap.set(`${norm(t.topic)}||${t.subject_id}`, t));
+
+//     // Process rows in order, respecting type=quiz / type=question logic
+//     const errors = [];
+//     const quizzesInFile = []; // ordered list of {meta, questions:[]}
+//     let currentQuizMeta = null;
+//     let rowIndex = 1; // 1-based for human friendly messages (first data row = 1)
+
+//     for (const raw of rawRows) {
+//       const row = {};
+//       // normalize keys to lowercase to tolerate Excel casing
+//       Object.keys(raw).forEach(k => {
+//         row[k.toString().toLowerCase()] = raw[k];
+//       });
+
+//       const type = (row.type ?? "").toString().trim().toLowerCase();
+//       if (!type) {
+//         errors.push({ row: rowIndex, message: "Missing 'type' (must be 'quiz' or 'question')" });
+//         rowIndex++;
+//         continue;
+//       }
+
+//       if (type !== "quiz" && type !== "question") {
+//         errors.push({ row: rowIndex, message: `Invalid type '${row.type}'; allowed: 'quiz' or 'question'` });
+//         rowIndex++;
+//         continue;
+//       }
+
+//       if (type === "quiz") {
+//         // read header fields from this row
+//         const title = (row.title ?? "").toString().trim();
+//         const passage = (row.passage ?? "").toString().trim();
+//         const grade_level = (row.grade_level ?? row.grade ?? "").toString().trim();
+//         const subjectText = (row.subject ?? "").toString().trim();
+//         const topicText = (row.topic ?? "").toString().trim();
+
+//         if (!title) errors.push({ row: rowIndex, field: "title", message: "Missing title in quiz row" });
+//         if (!passage) errors.push({ row: rowIndex, field: "passage", message: "Missing passage in quiz row" });
+//         if (!grade_level) errors.push({ row: rowIndex, field: "grade_level", message: "Missing grade_level in quiz row" });
+//         if (!subjectText) errors.push({ row: rowIndex, field: "subject", message: "Missing subject in quiz row" });
+//         if (!topicText) errors.push({ row: rowIndex, field: "topic", message: "Missing topic in quiz row" });
+
+//         const grade_id = gradeMap.get(norm(grade_level)) ?? null;
+//         if (!grade_id) errors.push({ row: rowIndex, field: "grade_level", message: `Grade '${grade_level}' not found` });
+
+//         const subjRow = subjectMap.get(norm(subjectText)) ?? null;
+//         if (!subjRow) errors.push({ row: rowIndex, field: "subject", message: `Subject '${subjectText}' not found` });
+
+//         let topicRow = null;
+//         if (subjRow) {
+//           topicRow = topicMap.get(`${norm(topicText)}||${subjRow.id}`) ?? null;
+//           if (!topicRow) errors.push({ row: rowIndex, field: "topic", message: `Topic '${topicText}' not found under subject '${subjectText}'` });
+//         }
+
+//         currentQuizMeta = {
+//           rowNumber: rowIndex,
+//           title,
+//           passage,
+//           grade_level,
+//           grade_id,
+//           subject: subjectText,
+//           subject_id: subjRow ? subjRow.id : null,
+//           topic: topicText,
+//           topic_id: topicRow ? topicRow.id : null,
+//           questions: [],
+//         };
+
+//         quizzesInFile.push(currentQuizMeta);
+//       } else { // question row
+//         if (!currentQuizMeta) {
+//           errors.push({ row: rowIndex, message: "Question row appeared before any quiz header" });
+//           rowIndex++;
+//           continue;
+//         }
+
+//         const incorrect_word = (row.incorrect_word ?? row.incorrect ?? "").toString().trim();
+//         const correct_word = (row.correct_word ?? row.correct ?? "").toString().trim();
+
+//         if (!incorrect_word) errors.push({ row: rowIndex, field: "incorrect_word", message: "Missing incorrect_word in question row" });
+//         if (!correct_word) errors.push({ row: rowIndex, field: "correct_word", message: "Missing correct_word in question row" });
+
+//         const position = null; // always null — we auto-generate later
+
+
+//         currentQuizMeta.questions.push({
+//           rowNumber: rowIndex,
+//           incorrect_word,
+//           correct_word,
+//           position,
+//         });
+//       }
+
+//       rowIndex++;
+//     } // end for rows
+
+//     if (errors.length > 0) {
+//       return res.status(400).json({ error: "Validation failed", details: errors });
+//     }
+
+//     // Validate per-quiz positions: fill missing positions; ensure uniqueness within quiz
+//     // const perQuizIssues = [];
+//     // for (const q of quizzesInFile) {
+//     //   // NEW VALIDATION: quiz must have at least 1 question
+//     //   if (q.questions.length === 0) {
+//     //     perQuizIssues.push({
+//     //       row: q.rowNumber,
+//     //       message: "Each quiz must contain at least one question"
+//     //     });
+//     //     continue;
+//     //   }
+
+//     //   // assign positions sequentially if not provided - start from 1 in-file
+//     //   let nextPos = 1;
+//     //   // if some positions provided, keep them and fill gaps with next available numbers
+//     //   for (const question of q.questions) {
+//     //     if (question.position == null) {
+//     //       while (q.questions.some(x => x.position === nextPos)) nextPos++;
+//     //       question.position = nextPos;
+//     //       nextPos++;
+//     //     }
+//     //   }
+//     //   // check duplicates
+//     //   const seen = new Set();
+//     //   for (const question of q.questions) {
+//     //     if (seen.has(question.position)) {
+//     //       perQuizIssues.push({ quizRow: q.rowNumber, row: question.rowNumber, message: `Duplicate position ${question.position} in same quiz` });
+//     //     } else {
+//     //       seen.add(question.position);
+//     //     }
+//     //   }
+//     // }
+//     // if (perQuizIssues.length > 0) {
+//     //   return res.status(400).json({ error: "Position validation failed", details: perQuizIssues });
+//     // }
+
+//     // ===================================================================
+//     // Compute a deterministic questions hash for content-duplicate detection
+//     // ===================================================================
+
+//     const perQuizIssues = [];
+//     for (const q of quizzesInFile) {
+
+//       if (q.questions.length === 0) {
+//         perQuizIssues.push({
+//           row: q.rowNumber,
+//           message: "Each quiz must contain at least one question"
+//         });
+//       }
+
+//     }
+
+//     if (perQuizIssues.length > 0) {
+//       return res.status(400).json({
+//         error: "Validation failed",
+//         details: perQuizIssues
+//       });
+//     }
+
+
+//     const generateQuestionsHash = (quizzes) => {
+//       // produce a stable representation: sort quizzes and questions
+//       const normalized = quizzes.map(qz => ({
+//         title: qz.title ?? "",
+//         passage: qz.passage ?? "",
+//         grade_id: qz.grade_id ?? null,
+//         subject_id: qz.subject_id ?? null,
+//         topic_id: qz.topic_id ?? null,
+//         questions: (qz.questions || []).map(qq => ({
+//           incorrect_word: qq.incorrect_word ?? "",
+//           correct_word: qq.correct_word ?? "",
+//           position: qq.position ?? 0
+//         })).sort((a, b) => (a.position - b.position))
+//       })).sort((a, b) => a.title.localeCompare(b.title));
+
+//       const str = JSON.stringify(normalized);
+//       return crypto.createHash('sha256').update(str).digest('hex');
+//     };
+
+//     const questionsHash = generateQuestionsHash(quizzesInFile);
+
+//     // ===================================================================
+//     // Duplicate check: if same file bytes OR same questions content exists
+//     // ===================================================================
+//     const dupCheck = await pool.query(
+//       `SELECT id, filename, uploaded_at, questions_count 
+//       FROM upload_history 
+//       WHERE file_hash = $1 OR questions_hash = $2
+//       LIMIT 1`,
+//       [fileHash, questionsHash]
+//     );
+
+//     if (dupCheck.rowCount > 0) {
+//       const dup = dupCheck.rows[0];
+//       return res.status(400).json({
+//         error: "Duplicate upload",
+//         detail: [
+//           {
+//             message: `This file or identical questions were already uploaded as "${dup.filename}" on ${dup.uploaded_at}. It contains ${dup.questions_count} questions.`
+//           }
+//         ]
+//       });
+//     }
+
+
+//     // ensure batch id doesn't already exist
+//     const exists = await pool.query(
+//       "SELECT 1 FROM upload_history WHERE upload_batch_id = $1 LIMIT 1",
+//       [uploadBatchId]
+//     );
+
+//     if (exists.rowCount > 0) {
+//       return res.status(400).json({
+//         error: "Duplicate upload",
+//         detail: [
+//           {
+//             message: `Upload batch ID ${uploadBatchId} has already been used. Please try uploading again.`,
+//           }
+//         ]
+//       });
+//     }
+
+
+//     // Start DB transaction and insert/create or append as per option C
+//     const client = await pool.connect();
+//     try {
+//       await client.query("BEGIN");
+
+//       const createdOrUpdated = [];
+
+//       for (const q of quizzesInFile) {
+//         // ensure foreign ids exist (should be validated earlier but double-check)
+//         if (!q.grade_id || !q.subject_id || !q.topic_id) {
+//           throw new Error(`Internal mapping missing for quiz at row ${q.rowNumber}`);
+//         }
+
+//         // find existing quiz by unique key: title (case-insensitive) + grade_id + subject_id + topic_id
+//         const findQuizSql = `
+//           SELECT id FROM editing_quiz
+//           WHERE lower(title) = lower($1) AND grade_id = $2 AND subject_id = $3 AND topic_id = $4
+//           LIMIT 1
+//         `;
+//         const findQuizRes = await client.query(findQuizSql, [q.title, q.grade_id, q.subject_id, q.topic_id]);
+
+//         let quizId;
+//         let action; // 'created' or 'appended'
+
+
+//         if (findQuizRes.rowCount > 0) {
+//           // append to existing quiz
+//           quizId = findQuizRes.rows[0].id;
+//           action = "appended";
+
+//           // fetch current max position for this quiz to avoid collisions if input positions overlap
+//           const maxPosRes = await client.query(
+//             `SELECT COALESCE(MAX(position), 0) as max_pos FROM editing_quiz_questions WHERE quiz_id = $1`,
+//             [quizId]
+//           );
+//           const existingMax = parseInt(maxPosRes.rows[0].max_pos, 10);
+
+//           // If any incoming question positions collide with existing ones, we will shift incoming positions up
+//           // Strategy: If incoming positions are 1..n and existingMax >= 1, we'll add existingMax to incoming positions
+//           // But preserve explicit absolute positions if admin expects absolute positions — safer to shift.
+//           // We'll shift all incoming positions by existingMax to append them at the end while preserving relative ordering.
+//           const shift = existingMax;
+//           const values = [];
+//           const params = [];
+//           let p = 1;
+//           let idx = 0;
+//           for (const question of q.questions) {
+//             const finalPos = existingMax + idx + 1;
+//             params.push(quizId, question.incorrect_word, question.correct_word, finalPos, uploadBatchId);
+//             values.push(`($${p++}, $${p++}, $${p++}, $${p++}, $${p++})`);
+//             idx++;
+//           }
+
+//           const insertQSql = `
+//   INSERT INTO editing_quiz_questions 
+//   (quiz_id, incorrect_word, correct_word, position, upload_batch_id)
+//   VALUES ${values.join(", ")}
+// `;
+
+//           if (values.length > 0) {
+//             await client.query(insertQSql, params);
+//           }
+
+
+//         } else {
+//           // create new quiz row
+//           const insertQuizSql = `
+//             INSERT INTO editing_quiz (title, passage, grade_id, subject_id, topic_id, upload_batch_id)
+//             VALUES ($1, $2, $3, $4, $5, $6)
+//             RETURNING id
+//           `;
+//           const insertRes = await client.query(insertQuizSql, [q.title, q.passage, q.grade_id, q.subject_id, q.topic_id, uploadBatchId]);
+//           quizId = insertRes.rows[0].id;
+//           action = "created";
+
+//           // Insert provided questions as-is (positions already validated and unique within file)
+//           if (q.questions.length > 0) {
+//             const values = [];
+//             const params = [];
+//             let p = 1;
+//             let idx = 0;
+//             for (const question of q.questions) {
+//               const autoPos = idx + 1;
+//               params.push(quizId, question.incorrect_word, question.correct_word, autoPos, uploadBatchId);
+//               values.push(`($${p++}, $${p++}, $${p++}, $${p++}, $${p++})`);
+//               idx++;
+//             }
+
+//             const insertQSql = `
+//   INSERT INTO editing_quiz_questions 
+//   (quiz_id, incorrect_word, correct_word, position, upload_batch_id)
+//   VALUES ${values.join(", ")}
+// `;
+
+//             if (values.length > 0) {
+//               await client.query(insertQSql, params);
+//             }
+
+
+//           }
+//         }
+
+//         createdOrUpdated.push({
+//           quizTitle: q.title,
+//           quizRow: q.rowNumber,
+//           action,
+//           quizId,
+//           questionsInserted: q.questions.length,
+//         });
+//       } // end for quizzesInFile
+
+//       await client.query(
+//         `INSERT INTO upload_history 
+//     (filename, questions_count, upload_batch_id, status, file_hash, questions_hash, type)
+//    VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+//         [
+//           req.file.originalname,
+//           createdOrUpdated.reduce((sum, q) => sum + q.questionsInserted, 0),
+//           uploadBatchId,
+//           "success",
+//           fileHash,
+//           questionsHash,
+//           "editable"
+//         ]
+//       );
+
+//       await client.query("COMMIT");
+
+//       return res.status(201).json({ message: "Bulk import processed", results: createdOrUpdated });
+
+//     } catch (err) {
+//       await client.query("ROLLBACK");
+//       //     await pool.query(
+//       //       `INSERT INTO upload_history 
+//       //   (filename, questions_count, upload_batch_id, status, type)
+//       //  VALUES ($1, $2, $3, $4, $5)`,
+//       //       [
+//       //         req.file?.originalname || "unknown",
+//       //         0,
+//       //         uploadBatchId,
+//       //         "failed",
+//       //         "editable"
+//       //       ]
+//       //     );
+//       console.error("Transaction error:", err);
+//       return res.status(500).json({ error: "Database transaction failed", detail: err.message });
+//     } finally {
+//       client.release();
+//     }
+
+//   } catch (err) {
+//     console.error("Server error:", err);
+//     return res.status(500).json({ error: "Server error", detail: err.message });
+//   }
+
+// };
+
 export const adminCreateBulkEditableQuizQuestions = async (req, res) => {
-  if (!req.file) return res.status(400).json({ error: "No file uploaded; field name must be 'file'." });
+  if (!req.file) {
+    return res.status(400).json({
+      error: "No file uploaded; field name must be 'file'."
+    });
+  }
 
   let workbook;
   try {
     workbook = xlsx.read(req.file.buffer, { type: "buffer" });
   } catch (err) {
-    return res.status(400).json({ error: "Invalid Excel file.", detail: err.message });
+    return res.status(400).json({
+      error: "Invalid Excel file.",
+      detail: err.message
+    });
   }
 
   const sheetName = workbook.SheetNames[0];
-  const rawRows = xlsx.utils.sheet_to_json(workbook.Sheets[sheetName], { defval: "" });
+  const rawRows = xlsx.utils.sheet_to_json(
+    workbook.Sheets[sheetName],
+    { defval: "" }
+  );
 
   if (!rawRows || rawRows.length === 0) {
     return res.status(400).json({ error: "Excel is empty" });
   }
 
-  // create a batch id for this upload
   const uploadBatchId = uuidv4();
+  const fileHash = crypto
+    .createHash("sha256")
+    .update(req.file.buffer)
+    .digest("hex");
 
-  // compute file hash (sha256) for exact-file duplication detection
-  const fileHash = crypto.createHash("sha256").update(req.file.buffer).digest("hex");
-
-
-  // Preload lookup tables
   try {
-    const [gradesRes, subjectsRes, topicsRes] = await Promise.all([
-      pool.query('SELECT id, grade_level FROM grades'),
-      pool.query('SELECT id, subject, grade_id FROM subjects'),
-      pool.query('SELECT id, topic, subject_id, grade_id FROM topics'),
+    // 🔥 Preload only grades and subjects (topic removed)
+    const [gradesRes, subjectsRes] = await Promise.all([
+      pool.query("SELECT id, grade_level FROM grades"),
+      pool.query("SELECT id, subject, grade_id FROM subjects"),
     ]);
 
     const gradeMap = new Map();
-    gradesRes.rows.forEach(g => gradeMap.set(norm(g.grade_level), g.id));
+    gradesRes.rows.forEach(g =>
+      gradeMap.set(norm(g.grade_level), g.id)
+    );
 
     const subjectMap = new Map();
-    subjectsRes.rows.forEach(s => subjectMap.set(norm(s.subject), s));
+    subjectsRes.rows.forEach(s =>
+      subjectMap.set(norm(s.subject), s)
+    );
 
-    const topicMap = new Map(); // key = norm(topic) + '||' + subject_id
-    topicsRes.rows.forEach(t => topicMap.set(`${norm(t.topic)}||${t.subject_id}`, t));
-
-    // Process rows in order, respecting type=quiz / type=question logic
     const errors = [];
-    const quizzesInFile = []; // ordered list of {meta, questions:[]}
+    const quizzesInFile = [];
     let currentQuizMeta = null;
-    let rowIndex = 1; // 1-based for human friendly messages (first data row = 1)
+    let rowIndex = 1;
 
     for (const raw of rawRows) {
       const row = {};
-      // normalize keys to lowercase to tolerate Excel casing
       Object.keys(raw).forEach(k => {
         row[k.toString().toLowerCase()] = raw[k];
       });
 
-      const type = (row.type ?? "").toString().trim().toLowerCase();
+      const type = (row.type ?? "")
+        .toString()
+        .trim()
+        .toLowerCase();
+
       if (!type) {
-        errors.push({ row: rowIndex, message: "Missing 'type' (must be 'quiz' or 'question')" });
+        errors.push({
+          row: rowIndex,
+          message: "Missing 'type' (must be 'quiz' or 'question')"
+        });
         rowIndex++;
         continue;
       }
 
       if (type !== "quiz" && type !== "question") {
-        errors.push({ row: rowIndex, message: `Invalid type '${row.type}'; allowed: 'quiz' or 'question'` });
+        errors.push({
+          row: rowIndex,
+          message: `Invalid type '${row.type}'; allowed: 'quiz' or 'question'`
+        });
         rowIndex++;
         continue;
       }
 
       if (type === "quiz") {
-        // read header fields from this row
         const title = (row.title ?? "").toString().trim();
         const passage = (row.passage ?? "").toString().trim();
-        const grade_level = (row.grade_level ?? row.grade ?? "").toString().trim();
+        const grade_level = (row.grade_level ?? row.grade ?? "")
+          .toString()
+          .trim();
         const subjectText = (row.subject ?? "").toString().trim();
-        const topicText = (row.topic ?? "").toString().trim();
 
-        if (!title) errors.push({ row: rowIndex, field: "title", message: "Missing title in quiz row" });
-        if (!passage) errors.push({ row: rowIndex, field: "passage", message: "Missing passage in quiz row" });
-        if (!grade_level) errors.push({ row: rowIndex, field: "grade_level", message: "Missing grade_level in quiz row" });
-        if (!subjectText) errors.push({ row: rowIndex, field: "subject", message: "Missing subject in quiz row" });
-        if (!topicText) errors.push({ row: rowIndex, field: "topic", message: "Missing topic in quiz row" });
+        if (!title)
+          errors.push({ row: rowIndex, field: "title", message: "Missing title in quiz row" });
+        if (!passage)
+          errors.push({ row: rowIndex, field: "passage", message: "Missing passage in quiz row" });
+        if (!grade_level)
+          errors.push({ row: rowIndex, field: "grade_level", message: "Missing grade_level in quiz row" });
+        if (!subjectText)
+          errors.push({ row: rowIndex, field: "subject", message: "Missing subject in quiz row" });
 
         const grade_id = gradeMap.get(norm(grade_level)) ?? null;
-        if (!grade_id) errors.push({ row: rowIndex, field: "grade_level", message: `Grade '${grade_level}' not found` });
+        if (!grade_id)
+          errors.push({ row: rowIndex, field: "grade_level", message: `Grade '${grade_level}' not found` });
 
         const subjRow = subjectMap.get(norm(subjectText)) ?? null;
-        if (!subjRow) errors.push({ row: rowIndex, field: "subject", message: `Subject '${subjectText}' not found` });
-
-        let topicRow = null;
-        if (subjRow) {
-          topicRow = topicMap.get(`${norm(topicText)}||${subjRow.id}`) ?? null;
-          if (!topicRow) errors.push({ row: rowIndex, field: "topic", message: `Topic '${topicText}' not found under subject '${subjectText}'` });
-        }
+        if (!subjRow)
+          errors.push({ row: rowIndex, field: "subject", message: `Subject '${subjectText}' not found` });
 
         currentQuizMeta = {
           rowNumber: rowIndex,
@@ -1329,93 +1763,60 @@ export const adminCreateBulkEditableQuizQuestions = async (req, res) => {
           grade_id,
           subject: subjectText,
           subject_id: subjRow ? subjRow.id : null,
-          topic: topicText,
-          topic_id: topicRow ? topicRow.id : null,
           questions: [],
         };
 
         quizzesInFile.push(currentQuizMeta);
-      } else { // question row
+
+      } else {
         if (!currentQuizMeta) {
-          errors.push({ row: rowIndex, message: "Question row appeared before any quiz header" });
+          errors.push({
+            row: rowIndex,
+            message: "Question row appeared before any quiz header"
+          });
           rowIndex++;
           continue;
         }
 
-        const incorrect_word = (row.incorrect_word ?? row.incorrect ?? "").toString().trim();
-        const correct_word = (row.correct_word ?? row.correct ?? "").toString().trim();
+        const incorrect_word = (row.incorrect_word ?? row.incorrect ?? "")
+          .toString()
+          .trim();
+        const correct_word = (row.correct_word ?? row.correct ?? "")
+          .toString()
+          .trim();
 
-        if (!incorrect_word) errors.push({ row: rowIndex, field: "incorrect_word", message: "Missing incorrect_word in question row" });
-        if (!correct_word) errors.push({ row: rowIndex, field: "correct_word", message: "Missing correct_word in question row" });
-
-        const position = null; // always null — we auto-generate later
-
+        if (!incorrect_word)
+          errors.push({ row: rowIndex, field: "incorrect_word", message: "Missing incorrect_word in question row" });
+        if (!correct_word)
+          errors.push({ row: rowIndex, field: "correct_word", message: "Missing correct_word in question row" });
 
         currentQuizMeta.questions.push({
           rowNumber: rowIndex,
           incorrect_word,
           correct_word,
-          position,
+          position: null,
         });
       }
 
       rowIndex++;
-    } // end for rows
-
-    if (errors.length > 0) {
-      return res.status(400).json({ error: "Validation failed", details: errors });
     }
 
-    // Validate per-quiz positions: fill missing positions; ensure uniqueness within quiz
-    // const perQuizIssues = [];
-    // for (const q of quizzesInFile) {
-    //   // NEW VALIDATION: quiz must have at least 1 question
-    //   if (q.questions.length === 0) {
-    //     perQuizIssues.push({
-    //       row: q.rowNumber,
-    //       message: "Each quiz must contain at least one question"
-    //     });
-    //     continue;
-    //   }
+    if (errors.length > 0) {
+      return res.status(400).json({
+        error: "Validation failed",
+        details: errors
+      });
+    }
 
-    //   // assign positions sequentially if not provided - start from 1 in-file
-    //   let nextPos = 1;
-    //   // if some positions provided, keep them and fill gaps with next available numbers
-    //   for (const question of q.questions) {
-    //     if (question.position == null) {
-    //       while (q.questions.some(x => x.position === nextPos)) nextPos++;
-    //       question.position = nextPos;
-    //       nextPos++;
-    //     }
-    //   }
-    //   // check duplicates
-    //   const seen = new Set();
-    //   for (const question of q.questions) {
-    //     if (seen.has(question.position)) {
-    //       perQuizIssues.push({ quizRow: q.rowNumber, row: question.rowNumber, message: `Duplicate position ${question.position} in same quiz` });
-    //     } else {
-    //       seen.add(question.position);
-    //     }
-    //   }
-    // }
-    // if (perQuizIssues.length > 0) {
-    //   return res.status(400).json({ error: "Position validation failed", details: perQuizIssues });
-    // }
-
-    // ===================================================================
-    // Compute a deterministic questions hash for content-duplicate detection
-    // ===================================================================
-
+    // Validate quiz has at least one question
     const perQuizIssues = [];
     for (const q of quizzesInFile) {
-
       if (q.questions.length === 0) {
         perQuizIssues.push({
           row: q.rowNumber,
           message: "Each quiz must contain at least one question"
         });
       }
-
     }
 
     if (perQuizIssues.length > 0) {
@@ -1425,36 +1826,34 @@ export const adminCreateBulkEditableQuizQuestions = async (req, res) => {
       });
     }
 
-
+    // 🔥 Hash generation (topic removed)
     const generateQuestionsHash = (quizzes) => {
-      // produce a stable representation: sort quizzes and questions
       const normalized = quizzes.map(qz => ({
         title: qz.title ?? "",
         passage: qz.passage ?? "",
         grade_id: qz.grade_id ?? null,
         subject_id: qz.subject_id ?? null,
-        topic_id: qz.topic_id ?? null,
-        questions: (qz.questions || []).map(qq => ({
+        questions: (qz.questions || []).map((qq, idx) => ({
           incorrect_word: qq.incorrect_word ?? "",
           correct_word: qq.correct_word ?? "",
-          position: qq.position ?? 0
-        })).sort((a, b) => (a.position - b.position))
+          position: idx + 1
+        }))
       })).sort((a, b) => a.title.localeCompare(b.title));
 
-      const str = JSON.stringify(normalized);
-      return crypto.createHash('sha256').update(str).digest('hex');
+      return crypto
+        .createHash("sha256")
+        .update(JSON.stringify(normalized))
+        .digest("hex");
     };
 
     const questionsHash = generateQuestionsHash(quizzesInFile);
 
-    // ===================================================================
-    // Duplicate check: if same file bytes OR same questions content exists
-    // ===================================================================
+    // Duplicate check
     const dupCheck = await pool.query(
       `SELECT id, filename, uploaded_at, questions_count 
-      FROM upload_history 
-      WHERE file_hash = $1 OR questions_hash = $2
-      LIMIT 1`,
+       FROM upload_history 
+       WHERE file_hash = $1 OR questions_hash = $2
+       LIMIT 1`,
       [fileHash, questionsHash]
     );
 
@@ -1462,132 +1861,123 @@ export const adminCreateBulkEditableQuizQuestions = async (req, res) => {
       const dup = dupCheck.rows[0];
       return res.status(400).json({
         error: "Duplicate upload",
-        detail: [
-          {
-            message: `This file or identical questions were already uploaded as "${dup.filename}" on ${dup.uploaded_at}. It contains ${dup.questions_count} questions.`
-          }
-        ]
+        detail: [{
+          message: `This file or identical questions were already uploaded as "${dup.filename}" on ${dup.uploaded_at}. It contains ${dup.questions_count} questions.`
+        }]
       });
     }
 
-
-    // ensure batch id doesn't already exist
-    const exists = await pool.query(
-      "SELECT 1 FROM upload_history WHERE upload_batch_id = $1 LIMIT 1",
-      [uploadBatchId]
-    );
-
-    if (exists.rowCount > 0) {
-      return res.status(400).json({
-        error: "Duplicate upload",
-        detail: [
-          {
-            message: `Upload batch ID ${uploadBatchId} has already been used. Please try uploading again.`,
-          }
-        ]
-      });
-    }
-
-
-    // Start DB transaction and insert/create or append as per option C
     const client = await pool.connect();
+
     try {
       await client.query("BEGIN");
 
       const createdOrUpdated = [];
 
       for (const q of quizzesInFile) {
-        // ensure foreign ids exist (should be validated earlier but double-check)
-        if (!q.grade_id || !q.subject_id || !q.topic_id) {
+        if (!q.grade_id || !q.subject_id) {
           throw new Error(`Internal mapping missing for quiz at row ${q.rowNumber}`);
         }
 
-        // find existing quiz by unique key: title (case-insensitive) + grade_id + subject_id + topic_id
         const findQuizSql = `
           SELECT id FROM editing_quiz
-          WHERE lower(title) = lower($1) AND grade_id = $2 AND subject_id = $3 AND topic_id = $4
+          WHERE lower(title) = lower($1)
+          AND grade_id = $2
+          AND subject_id = $3
           LIMIT 1
         `;
-        const findQuizRes = await client.query(findQuizSql, [q.title, q.grade_id, q.subject_id, q.topic_id]);
+
+        const findQuizRes = await client.query(findQuizSql, [
+          q.title,
+          q.grade_id,
+          q.subject_id
+        ]);
 
         let quizId;
-        let action; // 'created' or 'appended'
-
+        let action;
 
         if (findQuizRes.rowCount > 0) {
-          // append to existing quiz
           quizId = findQuizRes.rows[0].id;
           action = "appended";
 
-          // fetch current max position for this quiz to avoid collisions if input positions overlap
           const maxPosRes = await client.query(
-            `SELECT COALESCE(MAX(position), 0) as max_pos FROM editing_quiz_questions WHERE quiz_id = $1`,
+            `SELECT COALESCE(MAX(position), 0) as max_pos 
+             FROM editing_quiz_questions WHERE quiz_id = $1`,
             [quizId]
           );
+
           const existingMax = parseInt(maxPosRes.rows[0].max_pos, 10);
 
-          // If any incoming question positions collide with existing ones, we will shift incoming positions up
-          // Strategy: If incoming positions are 1..n and existingMax >= 1, we'll add existingMax to incoming positions
-          // But preserve explicit absolute positions if admin expects absolute positions — safer to shift.
-          // We'll shift all incoming positions by existingMax to append them at the end while preserving relative ordering.
-          const shift = existingMax;
           const values = [];
           const params = [];
           let p = 1;
           let idx = 0;
+
           for (const question of q.questions) {
             const finalPos = existingMax + idx + 1;
-            params.push(quizId, question.incorrect_word, question.correct_word, finalPos, uploadBatchId);
+            params.push(
+              quizId,
+              question.incorrect_word,
+              question.correct_word,
+              finalPos,
+              uploadBatchId
+            );
             values.push(`($${p++}, $${p++}, $${p++}, $${p++}, $${p++})`);
             idx++;
           }
 
-          const insertQSql = `
-  INSERT INTO editing_quiz_questions 
-  (quiz_id, incorrect_word, correct_word, position, upload_batch_id)
-  VALUES ${values.join(", ")}
-`;
-
           if (values.length > 0) {
-            await client.query(insertQSql, params);
+            await client.query(
+              `INSERT INTO editing_quiz_questions
+               (quiz_id, incorrect_word, correct_word, position, upload_batch_id)
+               VALUES ${values.join(", ")}`,
+              params
+            );
           }
 
-
         } else {
-          // create new quiz row
           const insertQuizSql = `
-            INSERT INTO editing_quiz (title, passage, grade_id, subject_id, topic_id, upload_batch_id)
-            VALUES ($1, $2, $3, $4, $5, $6)
+            INSERT INTO editing_quiz
+            (title, passage, grade_id, subject_id, upload_batch_id)
+            VALUES ($1, $2, $3, $4, $5)
             RETURNING id
           `;
-          const insertRes = await client.query(insertQuizSql, [q.title, q.passage, q.grade_id, q.subject_id, q.topic_id, uploadBatchId]);
+
+          const insertRes = await client.query(insertQuizSql, [
+            q.title,
+            q.passage,
+            q.grade_id,
+            q.subject_id,
+            uploadBatchId
+          ]);
+
           quizId = insertRes.rows[0].id;
           action = "created";
 
-          // Insert provided questions as-is (positions already validated and unique within file)
-          if (q.questions.length > 0) {
-            const values = [];
-            const params = [];
-            let p = 1;
-            let idx = 0;
-            for (const question of q.questions) {
-              const autoPos = idx + 1;
-              params.push(quizId, question.incorrect_word, question.correct_word, autoPos, uploadBatchId);
-              values.push(`($${p++}, $${p++}, $${p++}, $${p++}, $${p++})`);
-              idx++;
-            }
+          const values = [];
+          const params = [];
+          let p = 1;
+          let idx = 0;
 
-            const insertQSql = `
-  INSERT INTO editing_quiz_questions 
-  (quiz_id, incorrect_word, correct_word, position, upload_batch_id)
-  VALUES ${values.join(", ")}
-`;
+          for (const question of q.questions) {
+            params.push(
+              quizId,
+              question.incorrect_word,
+              question.correct_word,
+              idx + 1,
+              uploadBatchId
+            );
+            values.push(`($${p++}, $${p++}, $${p++}, $${p++}, $${p++})`);
+            idx++;
+          }
 
-            if (values.length > 0) {
-              await client.query(insertQSql, params);
-            }
-
-
+          if (values.length > 0) {
+            await client.query(
+              `INSERT INTO editing_quiz_questions
+               (quiz_id, incorrect_word, correct_word, position, upload_batch_id)
+               VALUES ${values.join(", ")}`,
+              params
+            );
           }
         }
 
@@ -1596,14 +1986,14 @@ export const adminCreateBulkEditableQuizQuestions = async (req, res) => {
           quizRow: q.rowNumber,
           action,
           quizId,
-          questionsInserted: q.questions.length,
+          questionsInserted: q.questions.length
         });
-      } // end for quizzesInFile
+      }
 
       await client.query(
-        `INSERT INTO upload_history 
-    (filename, questions_count, upload_batch_id, status, file_hash, questions_hash, type)
-   VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+        `INSERT INTO upload_history
+        (filename, questions_count, upload_batch_id, status, file_hash, questions_hash, type)
+        VALUES ($1, $2, $3, $4, $5, $6, $7)`,
         [
           req.file.originalname,
           createdOrUpdated.reduce((sum, q) => sum + q.questionsInserted, 0),
@@ -1617,34 +2007,31 @@ export const adminCreateBulkEditableQuizQuestions = async (req, res) => {
 
       await client.query("COMMIT");
 
-      return res.status(201).json({ message: "Bulk import processed", results: createdOrUpdated });
+      return res.status(201).json({
+        message: "Bulk import processed",
+        results: createdOrUpdated
+      });
 
     } catch (err) {
       await client.query("ROLLBACK");
-      //     await pool.query(
-      //       `INSERT INTO upload_history 
-      //   (filename, questions_count, upload_batch_id, status, type)
-      //  VALUES ($1, $2, $3, $4, $5)`,
-      //       [
-      //         req.file?.originalname || "unknown",
-      //         0,
-      //         uploadBatchId,
-      //         "failed",
-      //         "editable"
-      //       ]
-      //     );
       console.error("Transaction error:", err);
-      return res.status(500).json({ error: "Database transaction failed", detail: err.message });
+      return res.status(500).json({
+        error: "Database transaction failed",
+        detail: err.message
+      });
     } finally {
       client.release();
     }
 
   } catch (err) {
     console.error("Server error:", err);
-    return res.status(500).json({ error: "Server error", detail: err.message });
+    return res.status(500).json({
+      error: "Server error",
+      detail: err.message
+    });
   }
-
 };
+
 
 // get editable upload history.......
 
