@@ -1,7 +1,11 @@
 import express from 'express';
 import multer from 'multer';
 import auth from '../middleware/auth.js';
-import { addComment, addLike, addView, createPost, deleteComment, deleteForum, deleteForumNotefiles, editComment, editPost, endThePoll, getAlllikesandComments, getForumAndPollFeed, getNotesfromTopics, getonlyForumNotes, listPosts, removeLike, savedForumAndPolls, saveForumOrPoll, trackNoteAccess } from '../controller/forumcontroller.js';
+import {
+  addComment, addLike, addView, createPost, deleteComment, deleteForum, deleteForumNotefiles,
+  editComment, editPost, endThePoll, getAlllikesandComments, getForumAndPollFeed, getNotesfromTopics,
+  getonlyForumNotes, listPosts, removeLike, savedForumAndPolls, saveForumOrPoll, trackNoteAccess, uploadNestedZipNotes
+} from '../controller/forumcontroller.js';
 
 const storage = multer.memoryStorage();
 
@@ -56,6 +60,7 @@ router.put('/editcomment', auth, editComment);
 router.delete('/removecomment', auth, deleteComment);
 router.post('/likesandcomments', auth, getAlllikesandComments);
 router.post('/create', auth, upload.array('files', 5), createPost);
+router.post('/upload-notes-zip', auth, upload.single("file"), uploadNestedZipNotes);
 router.post('/edit', auth, upload.array('files', 5), editPost);
 router.delete("/deleteforum", deleteForum)
 router.post("/deletenotefile", deleteForumNotefiles)

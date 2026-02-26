@@ -976,6 +976,8 @@ export const startbigQuiz = async (req, res) => {
       type: "editable",
     }));
 
+    console.log("normalQuestions", normalQuestions)
+    console.log("editableQuizzes", editableQuizzes)
     // ✅ Merge and Shuffle both types
     const combinedQuestions = [...editableQuizzes, ...normalQuestions].sort(
       () => Math.random() - 0.5

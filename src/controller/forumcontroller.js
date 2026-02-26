@@ -3,6 +3,8 @@ import pool from '../../database.js';
 import hybridModeration from '../services/hybridModeration.js';
 import { compressFile } from '../utils/compressFile.js';
 import { uploadBufferforumToVercel, uploadBufferToVercel } from '../utils/vercel-blob.js';
+import AdmZip from "adm-zip";
+
 
 
 export const listPosts = async (req, res) => {
@@ -1934,44 +1936,131 @@ export const addView = async (req, res) => {
 
 // get notes files.............
 
+// export const getNotesfromTopics = async (req, res) => {
+//   try {
+//     const { topic_id, search } = req.body;
+
+//     if (!topic_id) {
+//       return res.status(400).json({ message: "topic_id is required" });
+//     }
+
+//     // -----------------------------------
+//     // Check topic exists
+//     // -----------------------------------
+//     const topicCheckQuery = `
+//       SELECT id, topic 
+//       FROM topics 
+//       WHERE id = $1 
+//       LIMIT 1
+//     `;
+//     const topicCheck = await pool.query(topicCheckQuery, [topic_id]);
+
+//     if (topicCheck.rowCount === 0) {
+//       return res.status(404).json({ message: "Topic not found" });
+//     }
+
+//     const topicName = topicCheck.rows[0].topic;
+
+//     // -----------------------------------
+//     // Fetch notes for topic
+//     // -----------------------------------
+//     let notesQuery = `
+//       SELECT ff.*,fp.user_id
+//       FROM forum_posts fp
+//       JOIN forum_files ff ON ff.post_id = fp.id
+//       WHERE fp.topic_id = $1
+//         AND fp.type_of_upload = 'Notes'
+//         AND ff.url IS NOT NULL
+//     `;
+
+//     const values = [topic_id];
+
+//     if (search) {
+//       notesQuery += ` AND ff.filename ILIKE $2`;
+//       values.push(`%${search}%`);
+//     }
+
+//     notesQuery += ` ORDER BY ff.created_at DESC`;
+
+//     const result = await pool.query(notesQuery, values);
+//     const rows = result.rows;
+
+//     // -----------------------------------
+//     // If no URL/notes found → return topic only
+//     // -----------------------------------
+//     if (rows.length === 0) {
+//       return res.status(200).json({
+//         success: true,
+//         topic_name: topicName,
+//         data: [],
+//         message: "No notes found for this topic",
+//       });
+//     }
+
+//     // -----------------------------------
+//     // Return notes if exists
+//     // -----------------------------------
+//     return res.status(200).json({
+//       success: true,
+//       topic_name: topicName,
+//       search: search || null,
+//       data: rows,
+//     });
+
+//   } catch (error) {
+//     console.error("Error fetching notes:", error);
+//     return res.status(500).json({
+//       success: false,
+//       message: "Internal server error",
+//     });
+//   }
+// };
+
 export const getNotesfromTopics = async (req, res) => {
   try {
-    const { topic_id, search } = req.body;
+    const { subject_id, search } = req.body;
 
-    if (!topic_id) {
-      return res.status(400).json({ message: "topic_id is required" });
+    if (!subject_id) {
+      return res.status(400).json({
+        success: false,
+        message: "subject_id is required"
+      });
     }
 
     // -----------------------------------
-    // Check topic exists
+    // Check subject exists
     // -----------------------------------
-    const topicCheckQuery = `
-      SELECT id, topic 
-      FROM topics 
-      WHERE id = $1 
+    const subjectCheckQuery = `
+      SELECT id, subject
+      FROM subjects
+      WHERE id = $1
       LIMIT 1
     `;
-    const topicCheck = await pool.query(topicCheckQuery, [topic_id]);
 
-    if (topicCheck.rowCount === 0) {
-      return res.status(404).json({ message: "Topic not found" });
+    const subjectCheck = await pool.query(subjectCheckQuery, [subject_id]);
+
+    if (subjectCheck.rowCount === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "Subject not found"
+      });
     }
 
-    const topicName = topicCheck.rows[0].topic;
+    const subjectName = subjectCheck.rows[0].subject;
 
     // -----------------------------------
-    // Fetch notes for topic
+    // Fetch notes by subject
     // -----------------------------------
     let notesQuery = `
-      SELECT ff.*,fp.user_id
+      SELECT ff.*, fp.user_id
       FROM forum_posts fp
       JOIN forum_files ff ON ff.post_id = fp.id
-      WHERE fp.topic_id = $1
-        AND fp.type_of_upload = 'Notes'
+      WHERE fp.subject_tag = $1
+        AND fp.type_of_upload = 'notes'
         AND ff.url IS NOT NULL
     `;
 
-    const values = [topic_id];
+    const values = [subject_id];
 
     if (search) {
       notesQuery += ` AND ff.filename ILIKE $2`;
@@ -1984,32 +2073,33 @@ export const getNotesfromTopics = async (req, res) => {
     const rows = result.rows;
 
     // -----------------------------------
-    // If no URL/notes found → return topic only
+    // If no notes found
     // -----------------------------------
     if (rows.length === 0) {
       return res.status(200).json({
         success: true,
-        topic_name: topicName,
+        subject_name: subjectName,
         data: [],
-        message: "No notes found for this topic",
+        message: "No notes found for this subject"
       });
     }
 
     // -----------------------------------
-    // Return notes if exists
+    // Return notes
     // -----------------------------------
     return res.status(200).json({
       success: true,
-      topic_name: topicName,
+      subject_name: subjectName,
       search: search || null,
-      data: rows,
+      total: rows.length,
+      data: rows
     });
 
   } catch (error) {
     console.error("Error fetching notes:", error);
     return res.status(500).json({
       success: false,
-      message: "Internal server error",
+      message: "Internal server error"
     });
   }
 };
@@ -2076,5 +2166,176 @@ export const endThePoll = async (req, res) => {
   } catch (error) {
     console.error("Error ending poll:", error);
     return res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+export const uploadNestedZipNotes = async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({
+        ok: false,
+        message: "Parent ZIP file is required"
+      });
+    }
+
+    const { forum_title, content, author_type } = req.body;
+    const authorId = req.userId;
+
+    if (!author_type) {
+      return res.status(400).json({
+        ok: false,
+        message: "author_type is required"
+      });
+    }
+
+    // 🔥 Extract grade & subject from parent zip name
+    const parentZipName = req.file.originalname.replace(".zip", "");
+
+    if (!parentZipName.includes("_")) {
+      return res.status(400).json({
+        ok: false,
+        message: "Parent ZIP must be like Secondary_3_Physics.zip"
+      });
+    }
+
+    const parts = parentZipName.split("_");
+
+    if (parts.length < 3) {
+      return res.status(400).json({
+        ok: false,
+        message: "Invalid parent ZIP format"
+      });
+    }
+
+    const grade_level = parts[1];
+    const subjectName = parts.slice(2).join(" ");
+
+    // 🔍 Find subject ID
+    const subjectRes = await pool.query(
+      `SELECT id FROM subjects 
+       WHERE LOWER(subject) = LOWER($1) LIMIT 1`,
+      [subjectName]
+    );
+
+    if (!subjectRes.rows.length) {
+      return res.status(400).json({
+        ok: false,
+        message: `Subject '${subjectName}' not found`
+      });
+    }
+
+    const subject_tag = subjectRes.rows[0].id;
+    const created_at = new Date().toISOString();
+
+    const parentZip = new AdmZip(req.file.buffer);
+    const parentEntries = parentZip.getEntries();
+
+    let totalCreated = 0;
+    let failedFiles = [];
+
+    // 🔥 Loop inner ZIP files
+    for (const entry of parentEntries) {
+
+      if (!entry.entryName.endsWith(".zip")) continue;
+
+      try {
+        const innerZip = new AdmZip(entry.getData());
+        const innerEntries = innerZip.getEntries();
+
+        // 🔥 Loop PDFs inside inner zip
+        for (const pdfEntry of innerEntries) {
+
+          if (!pdfEntry.entryName.endsWith(".pdf")) continue;
+
+          const fileName = pdfEntry.entryName.split("/").pop();
+          const pdfBuffer = pdfEntry.getData();
+
+          const url = await uploadBufferforumToVercel(pdfBuffer, fileName);
+
+          // Optional defaults
+          const finalTitle = forum_title && forum_title.trim() !== ""
+            ? forum_title
+            : fileName.replace(".pdf", "");
+
+          const finalContent = content && content.trim() !== ""
+            ? content
+            : "Notes uploaded";
+
+          let query, params;
+
+          if (author_type === "admin") {
+            query = `INSERT INTO forum_posts 
+              (admin_id, grade_level, content, subject_tag, type_of_upload, forum_title, topic_id, created_at, moderation_status)
+              VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`;
+
+            params = [
+              authorId,
+              grade_level,
+              finalContent,
+              subject_tag,
+              "notes",
+              finalTitle,
+              0,
+              created_at,
+              "approved"
+            ];
+          }
+
+          else if (author_type === "superadmin") {
+            query = `INSERT INTO forum_posts 
+              (super_admin_id, grade_level, content, subject_tag, type_of_upload, forum_title, topic_id, created_at, moderation_status)
+              VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`;
+
+            params = [
+              authorId,
+              grade_level,
+              finalContent,
+              subject_tag,
+              "notes",
+              finalTitle,
+              0,
+              created_at,
+              "approved"
+            ];
+          }
+
+          else {
+            failedFiles.push(fileName);
+            continue;
+          }
+
+          const postRes = await pool.query(query, params);
+          const post = postRes.rows[0];
+
+          await pool.query(
+            `INSERT INTO forum_files (post_id, url, filename)
+             VALUES ($1,$2,$3)`,
+            [post.id, url, fileName]
+          );
+
+          totalCreated++;
+        }
+
+      } catch (innerError) {
+        console.error("Inner ZIP error:", entry.entryName, innerError);
+        failedFiles.push(entry.entryName);
+      }
+    }
+
+    res.json({
+      ok: true,
+      message: "Nested ZIP upload completed",
+      grade_level,
+      subject: subjectName,
+      totalNotesCreated: totalCreated,
+      failedFiles
+    });
+
+  } catch (err) {
+    console.error("Upload error:", err);
+    res.status(500).json({
+      ok: false,
+      message: "Server error"
+    });
   }
 };
