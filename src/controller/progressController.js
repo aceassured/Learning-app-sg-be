@@ -6,73 +6,97 @@ export const getProgressPageData = async (req, res) => {
   const userId = req.userId;
 
   try {
-    const totalRes = await pool.query(
-      `SELECT COUNT(a.*)::int AS total_questions
-       FROM user_answers a
-       JOIN user_quiz_sessions s ON a.session_id = s.id
-       WHERE s.user_id = $1`,
-      [userId]
-    );
+    // ======================================================
+    // Run Independent Queries In Parallel
+    // ======================================================
+    const [
+      totalRes,
+      accuracyRes,
+      trendRes,
+      subjectPerfRes,
+      recentActivityRes
+    ] = await Promise.all([
 
-    const accuracyRes = await pool.query(
-      `SELECT ROUND(AVG(CASE WHEN a.is_correct THEN 1 ELSE 0 END) * 100, 1) AS accuracy
-       FROM user_answers a
-       JOIN user_quiz_sessions s ON a.session_id = s.id
-       WHERE s.user_id = $1`,
-      [userId]
-    );
-
-    const trendRes = await pool.query(
-      `WITH days AS (
-         SELECT generate_series::date AS day
-         FROM generate_series(
-           current_date - interval '29 days',
-           current_date,
-           '1 day'
-         )
-       ),
-       stats AS (
-         SELECT DATE_TRUNC('day', a.answered_at)::date AS answered_day,
-                ROUND(AVG(CASE WHEN a.is_correct THEN 1 ELSE 0 END) * 100, 1) AS daily_accuracy
+      // 1️⃣ Total Questions Attempted
+      pool.query(
+        `SELECT COUNT(*)::int AS total_questions
          FROM user_answers a
          JOIN user_quiz_sessions s ON a.session_id = s.id
+         WHERE s.user_id = $1`,
+        [userId]
+      ),
+
+      // 2️⃣ Overall Accuracy
+      pool.query(
+        `SELECT ROUND(
+            AVG(CASE WHEN a.is_correct THEN 1 ELSE 0 END) * 100, 1
+          ) AS accuracy
+         FROM user_answers a
+         JOIN user_quiz_sessions s ON a.session_id = s.id
+         WHERE s.user_id = $1`,
+        [userId]
+      ),
+
+      // 3️⃣ 30 Day Accuracy Trend
+      pool.query(
+        `WITH days AS (
+           SELECT generate_series(
+             current_date - interval '29 days',
+             current_date,
+             '1 day'
+           )::date AS day
+         ),
+         stats AS (
+           SELECT DATE(a.answered_at) AS answered_day,
+                  ROUND(
+                    AVG(CASE WHEN a.is_correct THEN 1 ELSE 0 END) * 100, 1
+                  ) AS daily_accuracy
+           FROM user_answers a
+           JOIN user_quiz_sessions s ON a.session_id = s.id
+           WHERE s.user_id = $1
+             AND a.answered_at >= current_date - interval '30 days'
+           GROUP BY answered_day
+         )
+         SELECT d.day,
+                COALESCE(s.daily_accuracy, 0) AS accuracy
+         FROM days d
+         LEFT JOIN stats s ON d.day = s.answered_day
+         ORDER BY d.day`,
+        [userId]
+      ),
+
+      // 4️⃣ Subject Performance
+      pool.query(
+        `SELECT q.subject_id,
+                ROUND(
+                  AVG(CASE WHEN a.is_correct THEN 1 ELSE 0 END) * 100, 1
+                ) AS accuracy
+         FROM user_answers a
+         JOIN user_quiz_sessions s ON a.session_id = s.id
+         JOIN questions q ON a.question_id = q.id
          WHERE s.user_id = $1
-           AND a.answered_at >= current_date - interval '30 days'
-         GROUP BY answered_day
-       )
-       SELECT d.day,
-              COALESCE(s.daily_accuracy, 0) AS accuracy
-       FROM days d
-       LEFT JOIN stats s ON d.day = s.answered_day
-       ORDER BY d.day`,
-      [userId]
-    );
-    const subjectPerfRes = await pool.query(
-      `SELECT q.subject,
-              ROUND(AVG(CASE WHEN a.is_correct THEN 1 ELSE 0 END) * 100, 1) AS accuracy
-       FROM user_answers a
-       JOIN user_quiz_sessions s ON a.session_id = s.id
-       JOIN questions q ON a.question_id = q.id
-       WHERE s.user_id = $1
-       GROUP BY q.subject
-       ORDER BY accuracy DESC`,
-      [userId]
-    );
+         GROUP BY q.subject_id
+         ORDER BY accuracy DESC`,
+        [userId]
+      ),
 
-    const recentActivityRes = await pool.query(
-      `SELECT s.id AS session_id,
-              s.started_at,
-              s.finished_at,
-              s.score,
-              s.total_questions
-       FROM user_quiz_sessions s
-       WHERE s.user_id = $1
-       ORDER BY s.finished_at DESC
-       LIMIT 10`,
-      [userId]
-    );
+      // 5️⃣ Recent Activity
+      pool.query(
+        `SELECT id AS session_id,
+                started_at,
+                finished_at,
+                score,
+                total_questions
+         FROM user_quiz_sessions
+         WHERE user_id = $1
+         ORDER BY finished_at DESC
+         LIMIT 10`,
+        [userId]
+      )
 
-    res.json({
+    ]);
+
+    return res.json({
       ok: true,
       totalQuestions: totalRes.rows[0]?.total_questions || 0,
       overallAccuracy: accuracyRes.rows[0]?.accuracy || 0,
@@ -80,12 +104,15 @@ export const getProgressPageData = async (req, res) => {
       performanceBySubject: subjectPerfRes.rows,
       recentActivity: recentActivityRes.rows
     });
+
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ ok: false, message: "Server error" });
+    console.error("Progress API Error:", err);
+    return res.status(500).json({
+      ok: false,
+      message: "Server error"
+    });
   }
 };
-
 // new analytics page...........
 
 export const getProgressPageDatanew = async (req, res) => {
@@ -258,305 +285,237 @@ export const getProgressPageDatawithMonthly = async (req, res) => {
   const { subject_id, start_date, end_date } = req.query;
 
   try {
-    // -----------------------------
-    // 1) Notes Access (unchanged)
-    // -----------------------------
-    const notesRes = await pool.query(
-      `SELECT COUNT(*)::int AS notes_accessed
-       FROM notes_access
-       WHERE user_id = $1`,
-      [userId]
-    );
+    // =====================================================
+    // Common Date Filter Builder
+    // =====================================================
+    const buildDateClause = (column, startIndex = 2) => {
+      if (start_date && end_date) {
+        return {
+          clause: `AND ${column} BETWEEN $${startIndex} AND $${startIndex + 1}`,
+          params: [start_date, end_date],
+        };
+      }
+      return { clause: "", params: [] };
+    };
 
-    // -----------------------------
-    // 2) Total Quizzes Taken - Count distinct sessions from user_quiz_sessions
-    // -----------------------------
-    const quizzesParams = [userId];
-    let quizzesDateClause = "";
-    if (start_date && end_date) {
-      quizzesParams.push(start_date, end_date);
-      quizzesDateClause = `AND finished_at BETWEEN $2 AND $3`;
-    }
+    // =====================================================
+    // 1️⃣ Run Independent Queries In Parallel
+    // =====================================================
+    const [
+      notesRes,
+      quizzesTakenRes,
+      miniQuizRes,
+      monthlyAnalyticsRes,
+      topicBreakdownRes,
+      weeklyStatsRes,
+      streakRes
+    ] = await Promise.all([
 
-    const quizzesTakenRes = await pool.query(
-      `SELECT COUNT(*)::int AS total_quizzes
-       FROM user_quiz_sessions
-       WHERE user_id = $1 AND finished_at IS NOT NULL
-       ${quizzesDateClause}`,
-      quizzesParams
-    );
-
-    const quizzesTaken = quizzesTakenRes.rows[0]?.total_quizzes || 0;
-
-    // -----------------------------
-    // 3) Mini Quiz Analytics (for mini type sessions only)
-    // -----------------------------
-    const miniParams = [userId];
-    let miniDateClause = "";
-    if (start_date && end_date) {
-      miniParams.push(start_date, end_date);
-      miniDateClause = `AND s.finished_at BETWEEN $2 AND $3`;
-    }
-
-    const lastScoreParams = [userId];
-    let lastScoreDateClause = "";
-    if (start_date && end_date) {
-      lastScoreParams.push(start_date, end_date);
-      lastScoreDateClause = `AND finished_at BETWEEN $2 AND $3`;
-    }
-
-    const miniQuizRes = await pool.query(
-      `SELECT 
-          ROUND(AVG(EXTRACT(EPOCH FROM (a.answered_at - s.started_at)) / NULLIF(s.total_questions,0)),1) AS avg_time,
-          ROUND(AVG(CASE WHEN a.is_correct THEN 1 ELSE 0 END) * 100, 1) AS accuracy,
-          (
-            SELECT score 
-            FROM user_quiz_sessions 
-            WHERE user_id = $1
-              AND type = 'mini'
-              ${lastScoreDateClause}
-            ORDER BY finished_at DESC
-            LIMIT 1
-          ) AS last_score
-       FROM user_answers a
-       JOIN user_quiz_sessions s ON a.session_id = s.id
-       WHERE s.user_id = $1
-         AND s.type = 'mini'
-         ${miniDateClause}`,
-      miniParams
-    );
-
-    // -----------------------------
-    // 4) MONTHLY ANALYTICS - Get data for entire current year
-    // -----------------------------
-    const monthlyAnalyticsQuery = `
-      WITH all_months AS (
-        -- Generate all months for the current year
-        SELECT to_char(generate_series(
-          date_trunc('year', CURRENT_DATE),
-          date_trunc('year', CURRENT_DATE) + INTERVAL '1 year - 1 day',
-          '1 month'::interval
-        ), 'YYYY-MM') AS month
+      // ---------------- NOTES ----------------
+      pool.query(
+        `SELECT COUNT(*)::int AS notes_accessed
+         FROM notes_access
+         WHERE user_id = $1`,
+        [userId]
       ),
-      quiz_data AS (
-        -- Get quiz scores for the current year
-        SELECT 
-          to_char(DATE_TRUNC('month', finished_at), 'YYYY-MM') AS month,
-          SUM(score)::int AS score
-        FROM user_quiz_sessions
-        WHERE user_id = $1
-          AND finished_at IS NOT NULL
-          AND finished_at >= date_trunc('year', CURRENT_DATE)
-          AND finished_at < date_trunc('year', CURRENT_DATE) + INTERVAL '1 year'
-        GROUP BY DATE_TRUNC('month', finished_at)
+
+      // ---------------- TOTAL QUIZZES ----------------
+      (() => {
+        const { clause, params } = buildDateClause("finished_at");
+        return pool.query(
+          `SELECT COUNT(*)::int AS total_quizzes
+           FROM user_quiz_sessions
+           WHERE user_id = $1
+             AND finished_at IS NOT NULL
+             ${clause}`,
+          [userId, ...params]
+        );
+      })(),
+
+      // ---------------- MINI QUIZ ANALYTICS ----------------
+      (() => {
+        const { clause, params } = buildDateClause("s.finished_at");
+        return pool.query(
+          `SELECT 
+              ROUND(AVG(EXTRACT(EPOCH FROM (a.answered_at - s.started_at)) 
+              / NULLIF(s.total_questions,0)),1) AS avg_time,
+              ROUND(AVG(CASE WHEN a.is_correct THEN 1 ELSE 0 END) * 100, 1) AS accuracy,
+              (
+                SELECT score 
+                FROM user_quiz_sessions 
+                WHERE user_id = $1
+                  AND type = 'mini'
+                  ${clause.replace("s.", "")}
+                ORDER BY finished_at DESC
+                LIMIT 1
+              ) AS last_score
+           FROM user_answers a
+           JOIN user_quiz_sessions s ON a.session_id = s.id
+           WHERE s.user_id = $1
+             AND s.type = 'mini'
+             ${clause}`,
+          [userId, ...params]
+        );
+      })(),
+
+      // ---------------- MONTHLY ANALYTICS ----------------
+      pool.query(
+        `WITH months AS (
+           SELECT generate_series(
+             date_trunc('year', CURRENT_DATE),
+             date_trunc('year', CURRENT_DATE) + interval '11 months',
+             '1 month'
+           ) AS month
+         ),
+         data AS (
+           SELECT date_trunc('month', finished_at) AS month,
+                  SUM(score)::int AS score
+           FROM user_quiz_sessions
+           WHERE user_id = $1
+             AND finished_at IS NOT NULL
+             AND finished_at >= date_trunc('year', CURRENT_DATE)
+           GROUP BY 1
+         )
+         SELECT to_char(m.month,'YYYY-MM') AS month,
+                COALESCE(d.score,0) AS score
+         FROM months m
+         LEFT JOIN data d ON m.month = d.month
+         ORDER BY m.month`,
+        [userId]
+      ),
+
+      // ---------------- TOPIC BREAKDOWN ----------------
+      (() => {
+        const { clause, params } = buildDateClause("s.finished_at");
+        let subjectFilter = "";
+        let subjectParam = [];
+
+        if (subject_id) {
+          subjectFilter = `AND a.subject_id = $${params.length + 2}`;
+          subjectParam = [subject_id];
+        }
+
+        return pool.query(
+          `WITH combined AS (
+             SELECT q.topic_id, q.subject_id,
+                    (CASE WHEN a.is_correct THEN 1 ELSE 0 END)::int AS is_correct,
+                    s.finished_at
+             FROM user_answers a
+             JOIN user_quiz_sessions s ON a.session_id = s.id
+             JOIN questions q ON a.question_id = q.id
+             WHERE s.user_id = $1
+             ${clause}
+
+             UNION ALL
+
+             SELECT eq.topic_id, eq.subject_id,
+                    (CASE WHEN e.is_correct THEN 1 ELSE 0 END)::int,
+                    s.finished_at
+             FROM editing_quiz_answers e
+             JOIN editing_quiz eq ON e.quiz_id = eq.id
+             JOIN user_quiz_sessions s ON e.session_id = s.id
+             WHERE e.user_id = $1
+             ${clause}
+           )
+           SELECT t.id AS topic_id,
+                  t.topic,
+                  sub.subject,
+                  COUNT(*)::int AS answered,
+                  ROUND(AVG(is_correct)*100,1) AS accuracy,
+                  MAX(finished_at) AS last_attempt
+           FROM combined a
+           JOIN topics t ON t.id = a.topic_id
+           LEFT JOIN subjects sub ON sub.id = a.subject_id
+           WHERE 1=1
+           ${subjectFilter}
+           GROUP BY t.id, t.topic, sub.subject
+           ORDER BY accuracy DESC`,
+          [userId, ...params, ...subjectParam]
+        );
+      })(),
+
+      // ---------------- WEEKLY POINTS (COMBINED QUERY) ----------------
+      pool.query(
+        `SELECT 
+            COUNT(DISTINCT s.id)::int AS sessions,
+            COALESCE(SUM(CASE WHEN a.is_correct THEN 1 ELSE 0 END),0)::int AS correct_normal,
+            (
+              SELECT COALESCE(SUM(CASE WHEN e.is_correct THEN 1 ELSE 0 END),0)
+              FROM editing_quiz_answers e
+              JOIN user_quiz_sessions s2 ON e.session_id = s2.id
+              WHERE e.user_id = $1
+                AND e.created_at >= date_trunc('week', CURRENT_DATE)
+            )::int AS correct_editable
+         FROM user_quiz_sessions s
+         LEFT JOIN user_answers a ON a.session_id = s.id
+         WHERE s.user_id = $1
+           AND s.finished_at >= date_trunc('week', CURRENT_DATE)`,
+        [userId]
+      ),
+
+      // ---------------- STREAK ----------------
+      pool.query(
+        `WITH dates AS (
+           SELECT DISTINCT DATE(finished_at) d
+           FROM user_quiz_sessions
+           WHERE user_id = $1
+             AND finished_at IS NOT NULL
+             AND finished_at >= CURRENT_DATE - interval '6 days'
+         ),
+         grp AS (
+           SELECT d,
+             d - INTERVAL '1 day' *
+             ROW_NUMBER() OVER (ORDER BY d) g
+           FROM dates
+         )
+         SELECT MAX(COUNT(*)) OVER () AS max_streak
+         FROM grp
+         GROUP BY g`,
+        [userId]
       )
-      SELECT 
-        am.month,
-        COALESCE(qd.score, 0) AS score
-      FROM all_months am
-      LEFT JOIN quiz_data qd ON am.month = qd.month
-      ORDER BY am.month;
-    `;
 
-    const monthlyAnalyticsRes = await pool.query(monthlyAnalyticsQuery, [userId]);
+    ]);
 
-    // -----------------------------
-    // 5) TOPIC BREAKDOWN - Combine normal and editable answers from same sessions
-    // -----------------------------
-    const topicParams = [userId];
-    let topicDateClause = "";
-    if (start_date && end_date) {
-      topicParams.push(start_date, end_date);
-      topicDateClause = `AND finished_at BETWEEN $2 AND $3`;
-    }
-
-    if (subject_id) {
-      topicParams.push(subject_id);
-    }
-
-    const topicBreakdownQuery = `
-      WITH all_answers AS (
-        -- normal answers from questions
-        SELECT
-          q.topic_id::int AS topic_id,
-          q.subject_id::int AS subject_id,
-          (CASE WHEN a.is_correct THEN 1 ELSE 0 END)::int AS is_correct,
-          s.finished_at::timestamp AS finished_at
-        FROM user_answers a
-        JOIN user_quiz_sessions s ON a.session_id = s.id
-        JOIN questions q ON a.question_id = q.id
-        WHERE s.user_id = $1
-          ${start_date && end_date ? `AND s.finished_at BETWEEN $2 AND $3` : ""}
-
-        UNION ALL
-
-        -- editable answers from editing quizzes
-        SELECT
-          eq.topic_id::int AS topic_id,
-          eq.subject_id::int AS subject_id,
-          (CASE WHEN e.is_correct THEN 1 ELSE 0 END)::int AS is_correct,
-          s.finished_at::timestamp AS finished_at
-        FROM editing_quiz_answers e
-        JOIN editing_quiz eq ON e.quiz_id = eq.id
-        JOIN user_quiz_sessions s ON e.session_id = s.id
-        WHERE e.user_id = $1
-          ${start_date && end_date ? `AND s.finished_at BETWEEN $2 AND $3` : ""}
-      )
-
-      SELECT
-        t.id AS topic_id,
-        t.topic AS topic,
-        sub.subject AS subject,
-        COUNT(a.*)::int AS questions_answered,
-        ROUND(AVG(a.is_correct::int)::numeric * 100, 1) AS accuracy,
-        MAX(a.finished_at) AS last_attempt
-      FROM all_answers a
-      JOIN topics t ON t.id = a.topic_id
-      LEFT JOIN subjects sub ON sub.id = a.subject_id
-      WHERE 1=1
-        ${subject_id ? `AND a.subject_id = $${topicParams.length}` : ""}
-      GROUP BY t.id, t.topic, sub.subject
-      ORDER BY accuracy DESC;
-    `;
-
-    const topicBreakdownRes = await pool.query(topicBreakdownQuery, topicParams);
-
-    // -----------------------------
-    // 6) Weekly Points - Based on sessions and correct answers from both types
-    // -----------------------------
-    const normalThisWeekRes = await pool.query(
-      `SELECT COUNT(DISTINCT id)::int AS normal_sessions
-       FROM user_quiz_sessions
-       WHERE user_id = $1
-         AND finished_at IS NOT NULL
-         AND finished_at >= date_trunc('week', CURRENT_DATE)`,
-      [userId]
-    );
-
-    // Correct answers from normal questions this week
-    const normalCorrectThisWeekRes = await pool.query(
-      `SELECT COALESCE(SUM(CASE WHEN a.is_correct THEN 1 ELSE 0 END),0)::int AS correct_normal
-       FROM user_answers a
-       JOIN user_quiz_sessions s ON a.session_id = s.id
-       WHERE s.user_id = $1
-         AND a.answered_at >= date_trunc('week', CURRENT_DATE)`,
-      [userId]
-    );
-
-    // Correct answers from editable questions this week
-    const editableCorrectThisWeekRes = await pool.query(
-      `SELECT COALESCE(SUM(CASE WHEN e.is_correct THEN 1 ELSE 0 END),0)::int AS correct_editable
-       FROM editing_quiz_answers e
-       JOIN user_quiz_sessions s ON e.session_id = s.id
-       WHERE e.user_id = $1
-         AND e.created_at >= date_trunc('week', CURRENT_DATE)`,
-      [userId]
-    );
-
+    // =====================================================
+    // Compute Weekly Points
+    // =====================================================
+    const weekly = weeklyStatsRes.rows[0] || {};
     const weeklyPoints =
-      (normalThisWeekRes.rows[0]?.normal_sessions || 0) * 10 +
-      (normalCorrectThisWeekRes.rows[0]?.correct_normal || 0) +
-      (editableCorrectThisWeekRes.rows[0]?.correct_editable || 0);
+      (weekly.sessions || 0) * 10 +
+      (weekly.correct_normal || 0) +
+      (weekly.correct_editable || 0);
 
-    // -----------------------------
-    // 7) Quizzes in Week Achievement (>=5)
-    // -----------------------------
-    const quizzesInWeekRes = await pool.query(
-      `SELECT COUNT(*)::int AS quizzes_this_week
-       FROM user_quiz_sessions
-       WHERE user_id = $1
-         AND finished_at IS NOT NULL
-         AND finished_at >= date_trunc('week', CURRENT_DATE)`,
-      [userId]
-    );
-
-    const quizzesInWeekCount = quizzesInWeekRes.rows[0]?.quizzes_this_week || 0;
-
-    // -----------------------------
-    // 8) 3 Days Continuous Streak Badge
-    //    Check if user has completed quizzes for 3 consecutive days including today
-    // -----------------------------
-    const streakRes = await pool.query(
-      `WITH quiz_dates AS (
-        SELECT DISTINCT DATE(finished_at) AS activity_date
-        FROM user_quiz_sessions 
-        WHERE user_id = $1 
-          AND finished_at IS NOT NULL
-          AND finished_at >= CURRENT_DATE - INTERVAL '6 days'
-      ),
-      consecutive_groups AS (
-        SELECT 
-          activity_date,
-          activity_date - INTERVAL '1 day' * 
-            ROW_NUMBER() OVER (ORDER BY activity_date) AS grp
-        FROM quiz_dates
-      ),
-      consecutive_counts AS (
-        SELECT 
-          grp,
-          COUNT(*) AS consecutive_days,
-          MIN(activity_date) AS start_date,
-          MAX(activity_date) AS end_date
-        FROM consecutive_groups
-        GROUP BY grp
-      )
-      SELECT MAX(consecutive_days) AS max_streak
-      FROM consecutive_counts
-      WHERE end_date >= CURRENT_DATE - INTERVAL '1 day'`,
-      [userId]
-    );
-
-    const hasThreeDayStreak = streakRes.rows[0]?.max_streak >= 3;
-
-    // -----------------------------
-    // Build response
-    // -----------------------------
-    res.json({
+    // =====================================================
+    // Response
+    // =====================================================
+    return res.json({
       ok: true,
-      subjectId: subject_id || null,
-      dateRange: {
-        start_date: start_date || null,
-        end_date: end_date || null,
-      },
-
       notesAccessed: notesRes.rows[0]?.notes_accessed || 0,
-      quizzesTaken,
+      quizzesTaken: quizzesTakenRes.rows[0]?.total_quizzes || 0,
 
-      miniQuiz: {
-        avgTime: miniQuizRes.rows[0]?.avg_time || 0,
-        accuracy: miniQuizRes.rows[0]?.accuracy || 0,
-        lastScore: miniQuizRes.rows[0]?.last_score || 0,
-      },
+      miniQuiz: miniQuizRes.rows[0] || {},
 
       monthlyQuiz: {
-        chart: monthlyAnalyticsRes.rows.map((r) => ({
-          month: r.month,
-          score: r.score,
-        })),
+        chart: monthlyAnalyticsRes.rows
       },
 
-      topicBreakdown: topicBreakdownRes.rows.map((r) => ({
-        topicId: r.topic_id,
-        topic: r.topic,
-        subject: r.subject,
-        answered: r.questions_answered,
-        accuracy: r.accuracy,
-        lastAttempt: r.last_attempt,
-      })),
+      topicBreakdown: topicBreakdownRes.rows,
 
       achievements: {
-        weeklyGoal: {
-          points: weeklyPoints,
-          total: 100,
-        },
+        weeklyGoal: { points: weeklyPoints, total: 100 },
         badges: {
-          quizzesInWeek: quizzesInWeekCount >= 5,
-          threeDayStreak: hasThreeDayStreak,
+          quizzesInWeek: (weekly.sessions || 0) >= 5,
+          threeDayStreak:
+            (streakRes.rows[0]?.max_streak || 0) >= 3,
         },
       },
     });
+
   } catch (err) {
-    console.error("Error in getProgressPageDatawithMonthly:", err);
-    res.status(500).json({ ok: false, message: "Server error" });
+    console.error("Progress API Error:", err);
+    return res.status(500).json({
+      ok: false,
+      message: "Server error",
+    });
   }
 };

@@ -2359,7 +2359,7 @@ export const getAllGradesWithoutPagination = async (req, res) => {
       message: "Internal server error",
     });
   }
-  
+
 };
 
 // admin edit...
@@ -2625,71 +2625,84 @@ export const newQuestionsadd = async (req, res) => {
   try {
     const {
       question_text,
-      question_type,
-      topics,        // topic_id
+      question_type = "normal",
+      topic_id,
       options,
       correct_option_id,
-      difficulty_level,
-      grade_id,   // grade_id
-      category,      // subject_id
+      difficulty_level = "Easy",
+      grade_id,
+      subject_id,
       answer_explanation,
     } = req.body;
 
-    // ✅ Validate options
-    let parsedOptions;
-    try {
-      parsedOptions =
-        typeof options === "string" ? JSON.parse(options) : options;
-    } catch (err) {
-      return res.status(400).json({ message: "Invalid options format" });
-    }
-
+    // ==========================================================
+    // 1️⃣ Validate Required Fields
+    // ==========================================================
     if (
-      !parsedOptions ||
-      parsedOptions.length !== 4 ||
-      !correct_option_id ||
-      !category ||
-      // !topics ||
-      !grade_id
+      !question_text ||
+      !grade_id ||
+      !subject_id ||
+      question_type === "normal" &&
+      (!options || !correct_option_id)
     ) {
-      return res.status(400).json({ message: "Invalid request body" });
+      return res.status(400).json({
+        message: "Missing required fields",
+      });
     }
 
-    // ✅ Fetch subject name
-    const subjectRes = await pool.query(
-      "SELECT subject FROM subjects WHERE id=$1",
-      [category]
-    );
-    if (subjectRes.rowCount === 0) {
-      return res.status(400).json({ message: "Invalid subject id" });
-    }
-    const subjectName = subjectRes.rows[0].subject;
+    // ==========================================================
+    // 2️⃣ Parse Options (Only for Normal Questions)
+    // ==========================================================
+    let parsedOptions = null;
 
-    // ✅ Fetch topic name
-    let topicName;
-    if (topics) {
-      const topicRes = await pool.query(
-        "SELECT topic FROM topics WHERE id=$1",
-        [topics]
-      );
-      if (topicRes.rowCount === 0) {
-        return res.status(400).json({ message: "Invalid topic id" });
+    if (question_type === "normal") {
+      try {
+        parsedOptions =
+          typeof options === "string"
+            ? JSON.parse(options)
+            : options;
+
+        if (!Array.isArray(parsedOptions) || parsedOptions.length !== 4) {
+          return res.status(400).json({
+            message: "Options must be an array of 4 items",
+          });
+        }
+      } catch (err) {
+        return res.status(400).json({
+          message: "Invalid options format",
+        });
       }
-      topicName = topicRes.rows[0].topic;
     }
 
-
-    // ✅ Fetch grade level name
-    const gradeRes = await pool.query(
-      "SELECT grade_level FROM grades WHERE id=$1",
+    // ==========================================================
+    // 3️⃣ Validate Foreign Keys (Optional but Good Practice)
+    // ==========================================================
+    const gradeCheck = await pool.query(
+      "SELECT id FROM grades WHERE id=$1",
       [grade_id]
     );
-    if (gradeRes.rowCount === 0) {
-      return res.status(400).json({ message: "Invalid grade id" });
-    }
-    // const gradeLevelName = gradeRes.rows[0].grade_level;
+    if (!gradeCheck.rowCount)
+      return res.status(400).json({ message: "Invalid grade_id" });
 
-    // ✅ Handle file uploads
+    const subjectCheck = await pool.query(
+      "SELECT id FROM subjects WHERE id=$1",
+      [subject_id]
+    );
+    if (!subjectCheck.rowCount)
+      return res.status(400).json({ message: "Invalid subject_id" });
+
+    if (topic_id) {
+      const topicCheck = await pool.query(
+        "SELECT id FROM topics WHERE id=$1",
+        [topic_id]
+      );
+      if (!topicCheck.rowCount)
+        return res.status(400).json({ message: "Invalid topic_id" });
+    }
+
+    // ==========================================================
+    // 4️⃣ Handle File Uploads
+    // ==========================================================
     let questionFileUrl = null;
     let answerFileUrl = null;
 
@@ -2709,39 +2722,60 @@ export const newQuestionsadd = async (req, res) => {
       );
     }
 
-    // ✅ Insert into questions
-    const query = `
-      INSERT INTO questions 
-      (subject, question_text, options, correct_option_id, created_at, difficulty_level, grade_id, question_type, question_url, topic_id, answer_explanation, answer_file_url, topics, subject_id) 
-      VALUES ($1, $2, $3, $4, NOW(), $5, $6, $7, $8, $9, $10, $11, $12, $13)
+    // ==========================================================
+    // 5️⃣ Insert Into Questions Table
+    // ==========================================================
+    const insertQuery = `
+      INSERT INTO questions (
+        question_text,
+        question_type,
+        options,
+        correct_option_id,
+        difficulty_level,
+        grade_id,
+        subject_id,
+        topic_id,
+        question_url,
+        answer_file_url,
+        answer_explanation,
+        created_at
+      )
+      VALUES (
+        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,NOW()
+      )
       RETURNING *;
     `;
 
     const values = [
-      subjectName,                   // subject (string from subjects table)
       question_text,
-      JSON.stringify(parsedOptions),
-      correct_option_id,
-      difficulty_level || "Easy",
-      grade_id,                // grade_level (string from grades table)
       question_type,
-      questionFileUrl,               // question file
-      topics ? topics : null,                        // topic_id (FK)
-      answer_explanation,
+      question_type === "normal"
+        ? JSON.stringify(parsedOptions)
+        : null,
+      question_type === "normal"
+        ? correct_option_id
+        : null,
+      difficulty_level,
+      grade_id,
+      subject_id,
+      topic_id || null,
+      questionFileUrl,
       answerFileUrl,
-      topicName ? topicName : topicName,
-      category             // answer file
+      answer_explanation || null,
     ];
 
-    const result = await pool.query(query, values);
+    const result = await pool.query(insertQuery, values);
 
     return res.status(201).json({
       message: "Question added successfully",
       question: result.rows[0],
     });
+
   } catch (error) {
-    console.error("Error adding new question:", error);
-    return res.status(500).json({ message: "Internal Server Error" });
+    console.error("Error adding question:", error);
+    return res.status(500).json({
+      message: "Internal Server Error",
+    });
   }
 };
 
@@ -2749,17 +2783,100 @@ export const newQuestionsadd = async (req, res) => {
 
 export const getAllquestions = async (req, res) => {
   try {
-    const query = `SELECT * FROM questions ORDER BY created_at DESC;`;
-    const result = await pool.query(query);
+    const {
+      page = 1,
+      limit = 20,
+      grade_id,
+      subject_id,
+      topic_id,
+      question_type,
+      difficulty_level,
+    } = req.query;
+
+    const offset = (page - 1) * limit;
+
+    let conditions = [];
+    let values = [];
+    let index = 1;
+
+    // =====================================================
+    // Filters
+    // =====================================================
+
+    if (grade_id) {
+      conditions.push(`grade_id = $${index++}`);
+      values.push(grade_id);
+    }
+
+    if (subject_id) {
+      conditions.push(`subject_id = $${index++}`);
+      values.push(subject_id);
+    }
+
+    if (topic_id) {
+      conditions.push(`topic_id = $${index++}`);
+      values.push(topic_id);
+    }
+
+    if (question_type) {
+      conditions.push(`question_type = $${index++}`);
+      values.push(question_type);
+    }
+
+    if (difficulty_level) {
+      conditions.push(`difficulty_level = $${index++}`);
+      values.push(difficulty_level);
+    }
+
+    const whereClause =
+      conditions.length > 0
+        ? `WHERE ${conditions.join(" AND ")}`
+        : "";
+
+    // =====================================================
+    // Get Total Count
+    // =====================================================
+
+    const countQuery = `
+      SELECT COUNT(*) FROM questions
+      ${whereClause};
+    `;
+
+    const countResult = await pool.query(countQuery, values);
+    const total = parseInt(countResult.rows[0].count);
+
+    // =====================================================
+    // Get Paginated Data
+    // =====================================================
+
+    const dataQuery = `
+      SELECT *
+      FROM questions
+      ${whereClause}
+      ORDER BY created_at DESC
+      LIMIT $${index++}
+      OFFSET $${index};
+    `;
+
+    const dataResult = await pool.query(dataQuery, [
+      ...values,
+      limit,
+      offset,
+    ]);
 
     return res.status(200).json({
       message: "Questions fetched successfully",
-      total: result.rows.length,
-      questions: result.rows,
+      total,
+      currentPage: Number(page),
+      totalPages: Math.ceil(total / limit),
+      questions: dataResult.rows,
     });
+
   } catch (error) {
     console.error("Error fetching questions:", error);
-    return res.status(500).json({ message: "Internal Server Error" });
+    return res.status(500).json({
+      message: "Internal Server Error",
+    });
   }
 };
 
@@ -3661,8 +3778,8 @@ export const updatequestion = async (req, res) => {
     const subjectRes = await pool.query("SELECT subject FROM subjects WHERE id = $1", [subject_id]);
 
     let topicRes = null
-    if(topic_id){
-     topicRes = await pool.query("SELECT topic FROM topics WHERE id = $1", [topic_id]);
+    if (topic_id) {
+      topicRes = await pool.query("SELECT topic FROM topics WHERE id = $1", [topic_id]);
     }
 
     const grade_level = gradeRes.rows[0]?.grade_level || null;

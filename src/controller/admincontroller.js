@@ -626,18 +626,53 @@ export const deletePoll = async (req, res) => {
 // };
 
 export const adminCreateEditQuiz = async (req, res) => {
-  try {
-    const { title, passage, grade_id, subject_id, questions } = req.body;
+  const client = await pool.connect();
 
+  try {
+    const { title, passage, grade_id, subject_id, topic_id, questions } = req.body;
+
+    // 🔹 Basic Validation
     if (!title || !passage || !grade_id || !subject_id) {
-      return res.status(400).json({ error: "All fields are required" });
+      return res.status(400).json({
+        error: "title, passage, grade_id and subject_id are required"
+      });
     }
 
     if (!questions || !Array.isArray(questions) || questions.length === 0) {
-      return res.status(400).json({ error: "Questions are required" });
+      return res.status(400).json({
+        error: "At least one incorrect word is required"
+      });
     }
 
-    // Prepare extra_data JSON
+    // 🔹 Validate each blank
+    for (const q of questions) {
+      if (!q.incorrect_word || !q.correct_word || !q.position) {
+        return res.status(400).json({
+          error: "Each question must contain incorrect_word, correct_word and position"
+        });
+      }
+    }
+
+    await client.query("BEGIN");
+
+    // 🔹 Optional: Prevent duplicate passage for same subject & grade
+    const duplicateCheck = await client.query(
+      `SELECT id FROM questions 
+       WHERE question_text = $1 
+       AND subject_id = $2 
+       AND grade_id = $3 
+       AND question_type = 'editable'`,
+      [passage, subject_id, grade_id]
+    );
+
+    if (duplicateCheck.rowCount > 0) {
+      await client.query("ROLLBACK");
+      return res.status(409).json({
+        error: "This editable passage already exists for this subject and grade"
+      });
+    }
+
+    // 🔹 Prepare JSON structure
     const extraData = {
       title,
       passage,
@@ -648,29 +683,47 @@ export const adminCreateEditQuiz = async (req, res) => {
       }))
     };
 
-    // Insert into centralized questions table
-    const result = await pool.query(
-      `INSERT INTO questions 
-        (question_text, question_type, grade_id, subject_id, extra_data)
-       VALUES ($1, $2, $3, $4, $5)
+    // 🔹 Insert into centralized questions table
+    const insertResult = await client.query(
+      `INSERT INTO questions (
+          question_text,
+          question_type,
+          grade_id,
+          subject_id,
+          topic_id,
+          extra_data,
+          created_at,
+          updated_at
+       )
+       VALUES ($1, $2, $3, $4, $5, $6, NOW(), NOW())
        RETURNING *`,
       [
         passage,
         'editable',
         grade_id,
         subject_id,
+        topic_id || null,
         JSON.stringify(extraData)
       ]
     );
 
-    res.status(201).json({
-      message: "Editable Quiz created successfully",
-      question: result.rows[0]
+    await client.query("COMMIT");
+
+    return res.status(201).json({
+      message: "Editable quiz created successfully",
+      question: insertResult.rows[0]
     });
 
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: "Server error" });
+    await client.query("ROLLBACK");
+    console.error("Error creating editable quiz:", err);
+
+    return res.status(500).json({
+      error: "Server error",
+      detail: err.message
+    });
+  } finally {
+    client.release();
   }
 };
 
@@ -730,7 +783,11 @@ export const adminCreateEditQuiz = async (req, res) => {
 
 export const getUserEditingQuiz = async (req, res) => {
   try {
-    const { grade_id, subject_id } = req.query;
+    const { grade_id, subject_id, page = 1, limit = 10 } = req.query;
+
+    const pageNumber = parseInt(page);
+    const pageSize = Math.min(parseInt(limit), 50); // max 50 per request
+    const offset = (pageNumber - 1) * pageSize;
 
     let query = `
       SELECT 
@@ -758,11 +815,34 @@ export const getUserEditingQuiz = async (req, res) => {
       query += ` AND q.subject_id = $${params.length}`;
     }
 
-    query += ` ORDER BY q.created_at DESC`;
+    query += `
+      ORDER BY q.created_at DESC
+      LIMIT $${params.length + 1}
+      OFFSET $${params.length + 2}
+    `;
+
+    params.push(pageSize, offset);
 
     const { rows } = await pool.query(query, params);
 
-    res.status(200).json(rows);
+    // 🔹 Format Response (Clean structure)
+    const formatted = rows.map(row => ({
+      id: row.id,
+      title: row.extra_data?.title || null,
+      passage: row.question_text,
+      blanks: row.extra_data?.blanks || [],
+      grade_name: row.grade_name,
+      subject_name: row.subject_name,
+      created_at: row.created_at
+    }));
+
+    res.status(200).json({
+      success: true,
+      page: pageNumber,
+      limit: pageSize,
+      total_returned: formatted.length,
+      data: formatted
+    });
 
   } catch (err) {
     console.error("Error fetching editable quizzes:", err);
@@ -818,36 +898,58 @@ export const getUserEditingQuiz = async (req, res) => {
 
 export const getAllEditQuizzes = async (req, res) => {
   try {
-    const { search = "" } = req.query;
+    const { search = "", page = 1, limit = 10 } = req.query;
 
-    const result = await pool.query(
-      `
+    const pageNumber = parseInt(page);
+    const pageSize = Math.min(parseInt(limit), 50); // max 50 per request
+    const offset = (pageNumber - 1) * pageSize;
+
+    let query = `
       SELECT 
         q.id,
         q.question_text AS passage,
+        q.extra_data->>'title' AS title,
+        jsonb_array_length(q.extra_data->'blanks') AS blanks_count,
         q.grade_id,
         g.grade_level AS grade_name,
         q.subject_id,
         s.subject AS subject_name,
-        q.created_at,
-        q.extra_data
+        q.created_at
       FROM questions q
       LEFT JOIN grades g ON q.grade_id = g.id
       LEFT JOIN subjects s ON q.subject_id = s.id
       WHERE q.question_type = 'editable'
+    `;
+
+    const params = [];
+
+    if (search) {
+      params.push(`%${search}%`);
+      query += `
         AND (
-          LOWER(q.question_text) LIKE LOWER($1)
-          OR LOWER(g.grade_level) LIKE LOWER($1)
-          OR LOWER(s.subject) LIKE LOWER($1)
+          LOWER(q.question_text) LIKE LOWER($${params.length})
+          OR LOWER(g.grade_level) LIKE LOWER($${params.length})
+          OR LOWER(s.subject) LIKE LOWER($${params.length})
         )
+      `;
+    }
+
+    query += `
       ORDER BY q.created_at DESC
-      `,
-      [`%${search}%`]
-    );
+      LIMIT $${params.length + 1}
+      OFFSET $${params.length + 2}
+    `;
+
+    params.push(pageSize, offset);
+
+    const { rows } = await pool.query(query, params);
 
     res.status(200).json({
-      message: "All editable quizzes fetched successfully",
-      quizzes: result.rows,
+      success: true,
+      page: pageNumber,
+      limit: pageSize,
+      total_returned: rows.length,
+      data: rows
     });
 
   } catch (err) {
@@ -983,14 +1085,14 @@ export const getAllEditQuizzesnew = async (req, res) => {
       search = "",
       subject_id,
       grade_id,
-      start_date = "",
-      end_date = "",
+      start_date,
+      end_date,
       page = 1,
       limit = 10,
     } = req.query;
 
-    page = parseInt(page, 10);
-    limit = parseInt(limit, 10);
+    page = parseInt(page, 10) || 1;
+    limit = Math.min(parseInt(limit, 10) || 10, 50); // 🔥 max 50
     const offset = (page - 1) * limit;
 
     const whereClauses = [`q.question_type = 'editable'`];
@@ -1007,17 +1109,15 @@ export const getAllEditQuizzesnew = async (req, res) => {
       values.push(grade_id);
     }
 
-    // Date filters
-    if (start_date && end_date) {
-      whereClauses.push(`DATE(q.created_at) BETWEEN $${idx} AND $${idx + 1}`);
-      values.push(start_date, end_date);
-      idx += 2;
-    } else if (start_date) {
-      whereClauses.push(`DATE(q.created_at) >= $${idx++}`);
-      values.push(start_date);
-    } else if (end_date) {
-      whereClauses.push(`DATE(q.created_at) <= $${idx++}`);
-      values.push(end_date);
+    // ✅ Optimized Date Filtering (no DATE() function)
+    if (start_date) {
+      whereClauses.push(`q.created_at >= $${idx++}`);
+      values.push(`${start_date} 00:00:00`);
+    }
+
+    if (end_date) {
+      whereClauses.push(`q.created_at <= $${idx++}`);
+      values.push(`${end_date} 23:59:59`);
     }
 
     if (search) {
@@ -1040,6 +1140,7 @@ export const getAllEditQuizzesnew = async (req, res) => {
         q.id,
         q.question_text AS passage,
         q.extra_data->>'title' AS title,
+        jsonb_array_length(q.extra_data->'blanks') AS blanks_count,
         q.grade_id,
         g.grade_level AS grade_name,
         q.subject_id,
@@ -1072,7 +1173,7 @@ export const getAllEditQuizzesnew = async (req, res) => {
     const totalPages = Math.ceil(total / limit);
 
     res.status(200).json({
-      message: "Editable quizzes fetched successfully",
+      success: true,
       total,
       totalPages,
       currentPage: page,
@@ -1214,9 +1315,15 @@ export const getAllEditQuizzesnew = async (req, res) => {
 // };
 
 export const updateEditQuiz = async (req, res) => {
+  const client = await pool.connect();
+
   try {
     const { id } = req.params;
-    const { title, passage, grade_id, subject_id, questions } = req.body;
+    const { title, passage, grade_id, subject_id, topic_id, questions } = req.body;
+
+    if (!id) {
+      return res.status(400).json({ error: "Quiz ID is required" });
+    }
 
     // ✅ Validate required fields
     if (!title || !passage || !grade_id || !subject_id) {
@@ -1225,48 +1332,88 @@ export const updateEditQuiz = async (req, res) => {
       });
     }
 
-    // ✅ Check question exists & is editable type
-    const existing = await pool.query(
+    if (!Array.isArray(questions) || questions.length === 0) {
+      return res.status(400).json({
+        error: "At least one blank is required",
+      });
+    }
+
+    // ✅ Validate each blank
+    for (const q of questions) {
+      if (!q.incorrect_word || !q.correct_word || typeof q.position !== "number") {
+        return res.status(400).json({
+          error: "Each blank must have incorrect_word, correct_word and numeric position",
+        });
+      }
+    }
+
+    await client.query("BEGIN");
+
+    // ✅ Check existence
+    const existing = await client.query(
       `SELECT id FROM questions 
        WHERE id = $1 AND question_type = 'editable'`,
       [id]
     );
 
     if (existing.rowCount === 0) {
+      await client.query("ROLLBACK");
       return res.status(404).json({ error: "Editable quiz not found" });
     }
 
-    // ✅ Prepare new extra_data JSON
+    // ✅ Prevent duplicate passage (excluding current id)
+    const duplicateCheck = await client.query(
+      `SELECT id FROM questions
+       WHERE question_text = $1
+         AND subject_id = $2
+         AND grade_id = $3
+         AND question_type = 'editable'
+         AND id <> $4`,
+      [passage, subject_id, grade_id, id]
+    );
+
+    if (duplicateCheck.rowCount > 0) {
+      await client.query("ROLLBACK");
+      return res.status(409).json({
+        error: "Another editable passage already exists for this subject and grade",
+      });
+    }
+
+    // ✅ Prepare updated JSON
     const extraData = {
       title,
       passage,
-      blanks: (questions || []).map((q) => ({
+      blanks: questions.map((q) => ({
         incorrect_word: q.incorrect_word,
         correct_word: q.correct_word,
-        position: q.position ?? null,
+        position: q.position,
       })),
     };
 
-    // ✅ Update centralized questions table
-    await pool.query(
+    // ✅ Update
+    await client.query(
       `
       UPDATE questions
       SET 
         question_text = $1,
         grade_id = $2,
         subject_id = $3,
-        extra_data = $4,
+        topic_id = $4,
+        extra_data = $5,
         updated_at = NOW()
-      WHERE id = $5
+      WHERE id = $6
       `,
       [
         passage,
         grade_id,
         subject_id,
+        topic_id || null,
         JSON.stringify(extraData),
         id,
       ]
     );
+
+    await client.query("COMMIT");
 
     return res.status(200).json({
       success: true,
@@ -1274,14 +1421,16 @@ export const updateEditQuiz = async (req, res) => {
     });
 
   } catch (err) {
+    await client.query("ROLLBACK");
     console.error("updateEditQuiz error:", err);
     return res.status(500).json({
       success: false,
       message: "Server error",
     });
+  } finally {
+    client.release();
   }
 };
-
 // delete editabe qustion.......
 
 //old delete edit quiz.... 
@@ -1420,12 +1569,12 @@ export const getParticularEditableQuiz = async (req, res) => {
         q.id,
         q.question_text AS passage,
         q.extra_data->>'title' AS title,
+        COALESCE(q.extra_data->'blanks', '[]'::jsonb) AS blanks,
         q.grade_id,
         g.grade_level AS grade_name,
         q.subject_id,
         s.subject AS subject_name,
-        q.created_at,
-        q.extra_data
+        q.created_at
       FROM questions q
       LEFT JOIN grades g ON q.grade_id = g.id
       LEFT JOIN subjects s ON q.subject_id = s.id
@@ -1441,16 +1590,18 @@ export const getParticularEditableQuiz = async (req, res) => {
 
     const quiz = result.rows[0];
 
-    res.status(200).json({
-      message: "Editable quiz fetched successfully",
-      quiz,
+    return res.status(200).json({
+      success: true,
+      data: quiz
     });
 
   } catch (err) {
     console.error("Error fetching editable quiz:", err);
-    res.status(500).json({ error: "Server error" });
+    return res.status(500).json({ error: "Server error" });
   }
 };
+
+
 // admin update active inactive user.......
 
 export const adminUpdateUserStatus = async (req, res) => {
@@ -2558,38 +2709,53 @@ export const adminCreateBulkEditableQuizQuestions = async (req, res) => {
   }
 
   const sheetName = workbook.SheetNames[0];
-  const rawRows = xlsx.utils.sheet_to_json(workbook.Sheets[sheetName], { defval: "" });
+  const rawRows = xlsx.utils.sheet_to_json(
+    workbook.Sheets[sheetName],
+    { defval: "" }
+  );
 
   if (!rawRows || rawRows.length === 0) {
     return res.status(400).json({ error: "Excel is empty" });
   }
 
   const uploadBatchId = uuidv4();
-  const fileHash = crypto.createHash("sha256").update(req.file.buffer).digest("hex");
+  const fileHash = crypto
+    .createHash("sha256")
+    .update(req.file.buffer)
+    .digest("hex");
 
   try {
-    // preload grades & subjects
+    // 🔹 Preload grades & subjects
     const [gradesRes, subjectsRes] = await Promise.all([
       pool.query("SELECT id, grade_level FROM grades"),
       pool.query("SELECT id, subject FROM subjects")
     ]);
 
     const gradeMap = new Map();
-    gradesRes.rows.forEach(g => gradeMap.set(g.grade_level.toLowerCase().trim(), g.id));
+    gradesRes.rows.forEach(g =>
+      gradeMap.set(g.grade_level.toLowerCase().trim(), g.id)
+    );
 
     const subjectMap = new Map();
-    subjectsRes.rows.forEach(s => subjectMap.set(s.subject.toLowerCase().trim(), s.id));
+    subjectsRes.rows.forEach(s =>
+      subjectMap.set(s.subject.toLowerCase().trim(), s.id)
+    );
 
     const quizzes = [];
     const errors = [];
     let currentQuiz = null;
-    let rowIndex = 1;
+    let rowIndex = 2; // Assuming row 1 is header
 
-    // parse rows
+    // 🔹 Parse Excel rows
     for (const raw of rawRows) {
       const type = (raw.type ?? "").toString().trim().toLowerCase();
-      if (!type) { rowIndex++; continue; }
 
+      if (!type) {
+        rowIndex++;
+        continue;
+      }
+
+      // ================= QUIZ ROW =================
       if (type === "quiz") {
         const title = (raw.title ?? "").toString().trim();
         const passage = (raw.passage ?? "").toString().trim();
@@ -2597,43 +2763,68 @@ export const adminCreateBulkEditableQuizQuestions = async (req, res) => {
         const subjectText = (raw.subject ?? "").toString().trim();
 
         if (!title || !passage || !gradeLevel || !subjectText) {
-          errors.push({ row: rowIndex, message: "Invalid quiz row" });
-          rowIndex++; continue;
+          errors.push({
+            row: rowIndex,
+            message: "Missing title, passage, grade_level or subject"
+          });
+          rowIndex++;
+          continue;
         }
 
         const grade_id = gradeMap.get(gradeLevel.toLowerCase());
         const subject_id = subjectMap.get(subjectText.toLowerCase());
 
-        if (!grade_id) errors.push({ row: rowIndex, message: `Grade '${gradeLevel}' not found` });
-        if (!subject_id) errors.push({ row: rowIndex, message: `Subject '${subjectText}' not found` });
+        if (!grade_id || !subject_id) {
+          errors.push({
+            row: rowIndex,
+            message: `Invalid grade '${gradeLevel}' or subject '${subjectText}'`
+          });
+          rowIndex++;
+          continue; // IMPORTANT FIX
+        }
 
         currentQuiz = {
           title,
           passage,
           grade_id,
           subject_id,
-          words: [] // collect all incorrect/correct words here
+          blanks: []
         };
-        quizzes.push(currentQuiz);
 
-      } else if (type === "question") {
+        quizzes.push(currentQuiz);
+      }
+
+      // ================= QUESTION ROW =================
+      else if (type === "question") {
         if (!currentQuiz) {
-          errors.push({ row: rowIndex, message: "Question row appeared before quiz row" });
-          rowIndex++; continue;
+          errors.push({
+            row: rowIndex,
+            message: "Question row appeared before quiz row"
+          });
+          rowIndex++;
+          continue;
         }
 
-        const incorrectWord = (raw.incorrect_word ?? "").toString().trim();
-        const correctWord = (raw.correct_word ?? "").toString().trim();
+        const incorrectWord = (raw.incorrect_word ?? "")
+          .toString()
+          .trim();
+        const correctWord = (raw.correct_word ?? "")
+          .toString()
+          .trim();
 
         if (!incorrectWord || !correctWord) {
-          errors.push({ row: rowIndex, message: "Missing incorrect_word or correct_word" });
-          rowIndex++; continue;
+          errors.push({
+            row: rowIndex,
+            message: "Missing incorrect_word or correct_word"
+          });
+          rowIndex++;
+          continue;
         }
 
-        currentQuiz.words.push({
+        currentQuiz.blanks.push({
           incorrect_word: incorrectWord,
           correct_word: correctWord,
-          position: currentQuiz.words.length + 1
+          position: currentQuiz.blanks.length + 1
         });
       }
 
@@ -2641,39 +2832,51 @@ export const adminCreateBulkEditableQuizQuestions = async (req, res) => {
     }
 
     if (errors.length > 0) {
-      return res.status(400).json({ error: "Validation failed", details: errors });
+      return res.status(400).json({
+        error: "Validation failed",
+        details: errors
+      });
     }
 
-    // prepare questions for insert
+    // 🔹 Prepare data for insert
     const questionsToInsert = quizzes
-      .filter(q => q.words.length > 0)
+      .filter(q => q.blanks.length > 0)
       .map(q => ({
         question_text: q.passage,
         question_type: "editable",
         grade_id: q.grade_id,
         subject_id: q.subject_id,
         extra_data: {
-          quiz_title: q.title,
-          words: q.words
+          title: q.title,
+          passage: q.passage,
+          blanks: q.blanks
         }
       }));
 
     if (questionsToInsert.length === 0) {
-      return res.status(400).json({ error: "No valid questions found" });
+      return res.status(400).json({
+        error: "No valid quizzes with questions found"
+      });
     }
 
-    // generate questions hash
-    const questionsHash = crypto.createHash("sha256").update(JSON.stringify(questionsToInsert)).digest("hex");
+    // 🔹 Create questions hash
+    const questionsHash = crypto
+      .createHash("sha256")
+      .update(JSON.stringify(questionsToInsert))
+      .digest("hex");
 
+    // 🔹 Duplicate Check
     const dupCheck = await pool.query(
-      `SELECT id FROM upload_history 
+      `SELECT id FROM upload_history
        WHERE file_hash = $1 OR questions_hash = $2
        LIMIT 1`,
       [fileHash, questionsHash]
     );
 
     if (dupCheck.rowCount > 0) {
-      return res.status(400).json({ error: "Duplicate upload detected" });
+      return res.status(400).json({
+        error: "Duplicate upload detected"
+      });
     }
 
     const client = await pool.connect();
@@ -2686,8 +2889,18 @@ export const adminCreateBulkEditableQuizQuestions = async (req, res) => {
       let p = 1;
 
       for (const q of questionsToInsert) {
-        params.push(q.question_text, q.question_type, q.grade_id, q.subject_id, JSON.stringify(q.extra_data), uploadBatchId);
-        values.push(`($${p++}, $${p++}, $${p++}, $${p++}, $${p++}::jsonb, $${p++})`);
+        params.push(
+          q.question_text,
+          q.question_type,
+          q.grade_id,
+          q.subject_id,
+          JSON.stringify(q.extra_data),
+          uploadBatchId
+        );
+
+        values.push(
+          `($${p++}, $${p++}, $${p++}, $${p++}, $${p++}::jsonb, $${p++})`
+        );
       }
 
       await client.query(
@@ -2715,7 +2928,8 @@ export const adminCreateBulkEditableQuizQuestions = async (req, res) => {
       await client.query("COMMIT");
 
       return res.status(201).json({
-        message: "Editable questions imported successfully",
+        success: true,
+        message: "Editable quizzes imported successfully",
         totalInserted: questionsToInsert.length
       });
 
@@ -2727,8 +2941,11 @@ export const adminCreateBulkEditableQuizQuestions = async (req, res) => {
     }
 
   } catch (err) {
-    console.error("Server error:", err);
-    return res.status(500).json({ error: "Server error", detail: err.message });
+    console.error("Bulk Editable Upload Error:", err);
+    return res.status(500).json({
+      error: "Server error",
+      detail: err.message
+    });
   }
 };
 
@@ -2754,28 +2971,34 @@ export const adminCreateBulkEditableQuizQuestions = async (req, res) => {
 export const getEditableUploadHistory = async (req, res) => {
   try {
     const result = await pool.query(`
-SELECT
-  uh.id,
-  uh.filename,
-  uh.questions_count,
-  uh.upload_batch_id,
-  uh.status,
-  uh.uploaded_at,
-  (
-    SELECT COUNT(*) 
-    FROM questions q
-    WHERE q.upload_batch_id = uh.upload_batch_id
-    AND q.question_type = 'editable'
-  ) AS actual_inserted_count,
-  (
-    SELECT COALESCE(SUM(jsonb_array_length(q.extra_data->'words')),0)
-    FROM questions q
-    WHERE q.upload_batch_id = uh.upload_batch_id
-    AND q.question_type = 'editable'
-  ) AS total_words_count
-FROM upload_history uh
-WHERE uh.type = 'editable'
-ORDER BY uh.uploaded_at DESC
+      SELECT
+        uh.id,
+        uh.filename,
+        uh.questions_count,
+        uh.upload_batch_id,
+        uh.status,
+        uh.uploaded_at,
+
+        COUNT(q.id) AS actual_inserted_count,
+
+        COALESCE(
+          SUM(
+            jsonb_array_length(
+              COALESCE(q.extra_data->'blanks', '[]'::jsonb)
+            )
+          ), 0
+        ) AS total_blanks_count
+
+      FROM upload_history uh
+
+      LEFT JOIN questions q
+        ON q.upload_batch_id = uh.upload_batch_id
+        AND q.question_type = 'editable'
+
+      WHERE uh.type = 'editable'
+
+      GROUP BY uh.id
+      ORDER BY uh.uploaded_at DESC
     `);
 
     return res.status(200).json({
@@ -2785,7 +3008,7 @@ ORDER BY uh.uploaded_at DESC
     });
 
   } catch (err) {
-    console.error(err);
+    console.error("Editable Upload History Error:", err);
     return res.status(500).json({
       success: false,
       message: "Error fetching editable upload history"
@@ -2932,40 +3155,46 @@ export const getEditableUploadData = async (req, res) => {
 
   try {
     const result = await pool.query(
-      `SELECT *
+      `SELECT 
+          id,
+          question_text,
+          grade_id,
+          subject_id,
+          extra_data,
+          created_at
        FROM questions
        WHERE upload_batch_id = $1
        AND question_type = 'editable'
-       ORDER BY (extra_data->>'quiz_title') ASC`,
+       ORDER BY (extra_data->>'title') ASC`,
       [uploadBatchId]
     );
 
     if (result.rowCount === 0) {
       return res.status(404).json({
         success: false,
-        message: "No editable questions found for this batch"
+        message: "No editable quizzes found for this batch"
       });
     }
 
-    // 🔥 Each row is already one question with all words in extra_data.words
     const quizzes = result.rows.map(row => ({
       id: row.id,
-      quiz_title: row.extra_data?.quiz_title || "Untitled Quiz",
+      title: row.extra_data?.title || "Untitled Quiz",
       passage: row.question_text,
+      blanks: row.extra_data?.blanks || [],
       grade_id: row.grade_id,
       subject_id: row.subject_id,
-      questions: row.extra_data?.words || []
+      created_at: row.created_at
     }));
 
     return res.status(200).json({
       success: true,
       uploadBatchId,
-      total_questions: result.rows.length,
+      total_quizzes: quizzes.length,
       quizzes
     });
 
   } catch (err) {
-    console.error(err);
+    console.error("Get Editable Upload Data Error:", err);
     return res.status(500).json({
       success: false,
       message: "Error fetching upload data",
@@ -2979,170 +3208,105 @@ export const getEditableUploadData = async (req, res) => {
 export const adminDashboardApi = async (req, res) => {
   try {
 
-    // ---------------- TOP STATS ----------------
-    const totalUsers = (await pool.query(
-      `SELECT COUNT(*) FROM users`
-    )).rows[0].count;
+    const [
+      totalUsersRes,
+      totalQuestionsRes,
+      pendingApprovalsRes,
+      newForumPostsTodayRes,
+      lastMonthUsersRes,
+      thisMonthUsersRes,
+      lastMonthQuestionsRes,
+      thisMonthQuestionsRes,
+      lastMonthForumRes,
+      thisMonthForumRes
+    ] = await Promise.all([
 
-    const totalQuestions = (await pool.query(
-      `SELECT COUNT(*) FROM questions`
-    )).rows[0].count;
+      pool.query(`SELECT COUNT(*) FROM users`),
 
-    const pendingApprovals = (await pool.query(
-      `SELECT COUNT(*) FROM users WHERE is_active_request = false AND active_status != TRUE`
-    )).rows[0].count;
+      pool.query(`SELECT COUNT(*) FROM questions`),
 
-    const newForumPostsToday = (await pool.query(
-      `SELECT COUNT(*) FROM forum_posts`
-    )).rows[0].count;
+      pool.query(`
+        SELECT COUNT(*) 
+        FROM users 
+        WHERE is_active_request = false 
+        AND active_status != TRUE
+      `),
 
-    console.log("newForumPostsToday", newForumPostsToday)
-    // -------- MONTHLY COMPARISON COUNTS --------
-    const lastMonthUsers = (await pool.query(`
-      SELECT COUNT(*) FROM users
-      WHERE DATE_TRUNC('month', created_at) = DATE_TRUNC('month', CURRENT_DATE - INTERVAL '1 month')
-    `)).rows[0].count;
+      pool.query(`
+        SELECT COUNT(*) 
+        FROM forum_posts
+        WHERE DATE(created_at) = CURRENT_DATE
+      `),
 
-    const thisMonthUsers = (await pool.query(`
-      SELECT COUNT(*) FROM users
-      WHERE DATE_TRUNC('month', created_at) = DATE_TRUNC('month', CURRENT_DATE)
-    `)).rows[0].count;
+      pool.query(`
+        SELECT COUNT(*) FROM users
+        WHERE DATE_TRUNC('month', created_at) =
+              DATE_TRUNC('month', CURRENT_DATE - INTERVAL '1 month')
+      `),
 
+      pool.query(`
+        SELECT COUNT(*) FROM users
+        WHERE DATE_TRUNC('month', created_at) =
+              DATE_TRUNC('month', CURRENT_DATE)
+      `),
 
-    const lastMonthQuestions = (await pool.query(`
-      SELECT COUNT(*) FROM questions
-      WHERE DATE_TRUNC('month', created_at) = DATE_TRUNC('month', CURRENT_DATE - INTERVAL '1 month')
-    `)).rows[0].count;
+      pool.query(`
+        SELECT COUNT(*) FROM questions
+        WHERE DATE_TRUNC('month', created_at) =
+              DATE_TRUNC('month', CURRENT_DATE - INTERVAL '1 month')
+      `),
 
-    const thisMonthQuestions = (await pool.query(`
-      SELECT COUNT(*) FROM questions
-      WHERE DATE_TRUNC('month', created_at) = DATE_TRUNC('month', CURRENT_DATE)
-    `)).rows[0].count;
+      pool.query(`
+        SELECT COUNT(*) FROM questions
+        WHERE DATE_TRUNC('month', created_at) =
+              DATE_TRUNC('month', CURRENT_DATE)
+      `),
 
+      pool.query(`
+        SELECT COUNT(*) FROM forum_posts
+        WHERE DATE_TRUNC('month', created_at) =
+              DATE_TRUNC('month', CURRENT_DATE - INTERVAL '1 month')
+      `),
 
-    const lastMonthForumPosts = (await pool.query(`
-      SELECT COUNT(*) FROM forum_posts
-      WHERE DATE_TRUNC('month', created_at) = DATE_TRUNC('month', CURRENT_DATE - INTERVAL '1 month')
-    `)).rows[0].count;
-
-    const thisMonthForumPosts = (await pool.query(`
-      SELECT COUNT(*) FROM forum_posts
-      WHERE DATE_TRUNC('month', created_at) = DATE_TRUNC('month', CURRENT_DATE)
-    `)).rows[0].count;
-
-
-    // -------- GROWTH PERCENTAGE CALCULATION --------
-    function calcGrowth(current, previous) {
-      if (previous == 0) return current > 0 ? 100 : 0;
-      return ((current - previous) / previous * 100).toFixed(2);
-    }
-
-    const usersGrowthPercentage = calcGrowth(thisMonthUsers, lastMonthUsers);
-    const questionsGrowthPercentage = calcGrowth(thisMonthQuestions, lastMonthQuestions);
-    const forumPostsGrowthPercentage = calcGrowth(thisMonthForumPosts, lastMonthForumPosts);
-
-
-    // ---------------- ACTIVITY TRENDS (Last 7 Days) ----------------
-    const activityTrends = await pool.query(`
-      WITH days AS (
-        SELECT generate_series(CURRENT_DATE - 6, CURRENT_DATE, '1 day') AS day
-      )
-      SELECT 
-        to_char(days.day, 'Dy') AS label,
-        COALESCE(active.count, 0) AS active_users,
-        COALESCE(q.count, 0) AS questions_added
-      FROM days
-      LEFT JOIN (
-        SELECT DATE(activity_date) AS day, COUNT(DISTINCT user_id) AS count
-        FROM user_activity
-        GROUP BY DATE(activity_date)
-      ) active ON active.day = days.day
-      LEFT JOIN (
-        SELECT DATE(created_at) AS day, COUNT(*) AS count
-        FROM questions
-        GROUP BY DATE(created_at)
-      ) q ON q.day = days.day
-      ORDER BY days.day ASC
-    `);
-
-    const labels = activityTrends.rows.map(r => r.label);
-    const activeUsers = activityTrends.rows.map(r => r.active_users);
-    const questionsAdded = activityTrends.rows.map(r => r.questions_added);
+      pool.query(`
+        SELECT COUNT(*) FROM forum_posts
+        WHERE DATE_TRUNC('month', created_at) =
+              DATE_TRUNC('month', CURRENT_DATE)
+      `)
+    ]);
 
 
-    // ---------------- RECENT ACTIONS (User Added should be first, latest only) ----------------
-    const recentActions = await pool.query(`
-      SELECT * FROM (
-          SELECT * FROM (
-              SELECT 'User Added' AS type,
-                    name AS title,
-                    created_at
-              FROM users
-              ORDER BY created_at DESC
-              LIMIT 1
-          ) AS ua
+    const totalUsers = Number(totalUsersRes.rows[0].count);
+    const totalQuestions = Number(totalQuestionsRes.rows[0].count);
+    const pendingApprovals = Number(pendingApprovalsRes.rows[0].count);
+    const newForumPostsToday = Number(newForumPostsTodayRes.rows[0].count);
 
-          UNION ALL
+    const lastMonthUsers = Number(lastMonthUsersRes.rows[0].count);
+    const thisMonthUsers = Number(thisMonthUsersRes.rows[0].count);
 
-          SELECT * FROM (
-              SELECT 'Questions Added' AS type,
-                    CONCAT('Questions Count: ', COUNT(*)) AS title,
-                    MAX(created_at) AS created_at
-              FROM questions
-          ) AS qa
+    const lastMonthQuestions = Number(lastMonthQuestionsRes.rows[0].count);
+    const thisMonthQuestions = Number(thisMonthQuestionsRes.rows[0].count);
 
-          UNION ALL
-
-          SELECT * FROM (
-              SELECT 'Poll Created' AS type,
-                    CONCAT(p.question, ' - Grade: ', g.grade_level) AS title,
-                    p.created_at
-              FROM polls p
-              LEFT JOIN grades g ON p.grade_level = g.id
-              ORDER BY p.created_at DESC
-              LIMIT 1
-          ) AS pc
-
-          UNION ALL
-
-          SELECT * FROM (
-              SELECT 'New Forum Post' AS type,
-                    CONCAT(f.forum_title, ' - Grade: ', g.grade_level) AS title,
-                    f.created_at
-              FROM forum_posts f
-              LEFT JOIN grades g ON f.grade_level = g.id
-              ORDER BY f.created_at DESC
-              LIMIT 1
-          ) AS fp
-      ) AS actions
-      ORDER BY 
-        CASE 
-          WHEN type = 'User Added' THEN 0
-          ELSE 1
-        END,
-        created_at DESC
-    `);
+    const lastMonthForumPosts = Number(lastMonthForumRes.rows[0].count);
+    const thisMonthForumPosts = Number(thisMonthForumRes.rows[0].count);
 
 
-    // ---------------- PLATFORM INSIGHTS ----------------
-    const qaBankUploads = (await pool.query(`
-      SELECT COUNT(*) FROM questions
-      WHERE created_at >= NOW() - INTERVAL '7 days'
-    `)).rows[0].count;
+    const calcGrowth = (current, previous) => {
+      if (previous === 0) return current > 0 ? 100 : 0;
+      return parseFloat(((current - previous) / previous * 100).toFixed(2));
+    };
 
-    const forumPostsThisWeek = (await pool.query(`
-      SELECT COUNT(*) FROM forum_posts
-      WHERE created_at >= NOW() - INTERVAL '7 days'
-    `)).rows[0].count;
+    const usersGrowthPercentage =
+      calcGrowth(thisMonthUsers, lastMonthUsers);
 
-    const pollsThisWeek = (await pool.query(`
-      SELECT COUNT(*) FROM polls
-      WHERE created_at >= NOW() - INTERVAL '7 days'
-    `)).rows[0].count;
+    const questionsGrowthPercentage =
+      calcGrowth(thisMonthQuestions, lastMonthQuestions);
+
+    const forumPostsGrowthPercentage =
+      calcGrowth(thisMonthForumPosts, lastMonthForumPosts);
 
 
-    // ---------------- SEND RESPONSE ----------------
-    res.json({
+    return res.json({
       ok: true,
       topStats: {
         totalUsers,
@@ -3152,17 +3316,6 @@ export const adminDashboardApi = async (req, res) => {
         usersGrowthPercentage,
         questionsGrowthPercentage,
         forumPostsGrowthPercentage
-      },
-      activityTrends: {
-        labels,
-        activeUsers,
-        questionsAdded
-      },
-      recentActions: recentActions.rows,
-      platformInsights: {
-        qaBankUploads,
-        forumPostsThisWeek,
-        pollsThisWeek
       }
     });
 
