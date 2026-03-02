@@ -33,7 +33,8 @@ import {
   superadminRegister,
   adminRequestActive,
   userRequestActive,
-  downloadAllGradeSubjectTopics
+  downloadAllGradeSubjectTopics,
+  getAllGradesWithoutPagination
 } from '../controller/usercontroller.js';
 import { deleteForum, deleteUser } from '../controller/forumcontroller.js';
 import { admingetTopics, getTopics } from '../controller/quizcontroller.js';
@@ -99,6 +100,7 @@ router.get("/getallsubject", getAllSubject);
 router.get("/all-grade-subject-topics", downloadAllGradeSubjectTopics);
 router.post("/subject", getAllSubjectnew);
 router.get("/getallgrades", getAllGrade);
+router.get("/allgrades", getAllGradesWithoutPagination);
 router.post('/gettopics', getTopics);
 router.post('/admingettopics', admingetTopics);
 router.post('/uservotepoll', auth, userVoteforpoll);

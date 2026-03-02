@@ -674,22 +674,22 @@ export const getonlyForumNotes = async (req, res) => {
 
 export const createPost = async (req, res) => {
   try {
-    const { 
-      grade_level, 
-      content,  
-      subject_tag, 
-      type_of_upload, 
-      author_type, 
-      forum_title, 
-      topic_id 
+    const {
+      grade_level,
+      content,
+      subject_tag,
+      type_of_upload,
+      author_type,
+      forum_title,
+      topic_id
     } = req.body;
 
     const authorId = req.userId;
 
     if (!content || !author_type) {
-      return res.status(400).json({ 
-        ok: false, 
-        message: "Content and author_type are required" 
+      return res.status(400).json({
+        ok: false,
+        message: "Content and author_type are required"
       });
     }
 
@@ -723,7 +723,7 @@ export const createPost = async (req, res) => {
         (user_id, grade_level, content, subject_tag, type_of_upload, forum_title, topic_id, created_at, moderation_status)
         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`;
       params = [authorId, grade_level, content, subject_tag, type_of_upload, forum_title, topic_id || 0, created_at, "approved"];
-    } 
+    }
     else if (author_type === "admin") {
       query = `INSERT INTO forum_posts 
         (admin_id, grade_level, content, subject_tag, type_of_upload, forum_title, topic_id, created_at, moderation_status)
@@ -1052,7 +1052,7 @@ export const deleteForum = async (req, res) => {
 
 export const deleteForumNotefiles = async (req, res) => {
   try {
-    const { file_id  } = req.body;
+    const { file_id } = req.body;
 
     if (!file_id) {
       return res.status(400).json({ ok: false, message: "File ID is required" });
@@ -2169,6 +2169,7 @@ export const endThePoll = async (req, res) => {
   }
 };
 
+
 export const uploadNestedZipNotes = async (req, res) => {
   try {
     if (!req.file) {
@@ -2188,7 +2189,10 @@ export const uploadNestedZipNotes = async (req, res) => {
       });
     }
 
-    // 🔥 Extract grade & subject from parent zip name
+    // --------------------------------------------
+    // 🔥 Extract grade & subject from ZIP name
+    // Example: Secondary_3_Physics.zip
+    // --------------------------------------------
     const parentZipName = req.file.originalname.replace(".zip", "");
 
     if (!parentZipName.includes("_")) {
@@ -2207,24 +2211,50 @@ export const uploadNestedZipNotes = async (req, res) => {
       });
     }
 
-    const grade_level = parts[1];
-    const subjectName = parts.slice(2).join(" ");
+    const gradeName = parts.slice(0, 2).join(" ");   // Secondary 3
+    const subjectName = parts.slice(2).join(" ");    // Physics
 
-    // 🔍 Find subject ID
+    // --------------------------------------------
+    // 🔎 Find grade ID
+    // --------------------------------------------
+    const gradeRes = await pool.query(
+      `SELECT id 
+       FROM grades 
+       WHERE TRIM(LOWER(grade_level)) = TRIM(LOWER($1))
+       LIMIT 1`,
+      [gradeName]
+    );
+
+    if (!gradeRes.rows.length) {
+      return res.status(400).json({
+        ok: false,
+        message: `Grade '${gradeName}' not found`
+      });
+    }
+
+    const grade_id = gradeRes.rows[0].id;
+
+    // --------------------------------------------
+    // 🔎 Find subject ID (STRICT MATCH)
+    // --------------------------------------------
     const subjectRes = await pool.query(
-      `SELECT id FROM subjects 
-       WHERE LOWER(subject) = LOWER($1) LIMIT 1`,
-      [subjectName]
+      `SELECT id 
+       FROM subjects 
+       WHERE grade_id = $1
+       AND TRIM(LOWER(subject)) = TRIM(LOWER($2))
+       LIMIT 1`,
+      [grade_id, subjectName]
     );
 
     if (!subjectRes.rows.length) {
       return res.status(400).json({
         ok: false,
-        message: `Subject '${subjectName}' not found`
+        message: `Subject '${subjectName}' not found for grade '${gradeName}'`
       });
     }
 
-    const subject_tag = subjectRes.rows[0].id;
+    const subject_id = subjectRes.rows[0].id;
+
     const created_at = new Date().toISOString();
 
     const parentZip = new AdmZip(req.file.buffer);
@@ -2233,29 +2263,39 @@ export const uploadNestedZipNotes = async (req, res) => {
     let totalCreated = 0;
     let failedFiles = [];
 
+    const allowedExtensions = [".pdf", ".docx", ".xlsx", ".xls", ".csv"];
+
+    // --------------------------------------------
     // 🔥 Loop inner ZIP files
+    // --------------------------------------------
     for (const entry of parentEntries) {
 
-      if (!entry.entryName.endsWith(".zip")) continue;
+      if (!entry.entryName.toLowerCase().endsWith(".zip")) continue;
 
       try {
         const innerZip = new AdmZip(entry.getData());
         const innerEntries = innerZip.getEntries();
 
-        // 🔥 Loop PDFs inside inner zip
-        for (const pdfEntry of innerEntries) {
+        for (const fileEntry of innerEntries) {
 
-          if (!pdfEntry.entryName.endsWith(".pdf")) continue;
+          if (fileEntry.isDirectory) continue;
 
-          const fileName = pdfEntry.entryName.split("/").pop();
-          const pdfBuffer = pdfEntry.getData();
+          const fileName = fileEntry.entryName.split("/").pop();
+          const lowerFileName = fileName.toLowerCase();
 
-          const url = await uploadBufferforumToVercel(pdfBuffer, fileName);
+          const isAllowed = allowedExtensions.some(ext =>
+            lowerFileName.endsWith(ext)
+          );
 
-          // Optional defaults
+          if (!isAllowed) continue;
+
+          const fileBuffer = fileEntry.getData();
+
+          const url = await uploadBufferforumToVercel(fileBuffer, fileName);
+
           const finalTitle = forum_title && forum_title.trim() !== ""
             ? forum_title
-            : fileName.replace(".pdf", "");
+            : fileName.replace(/\.[^/.]+$/, "");
 
           const finalContent = content && content.trim() !== ""
             ? content
@@ -2264,38 +2304,44 @@ export const uploadNestedZipNotes = async (req, res) => {
           let query, params;
 
           if (author_type === "admin") {
+
             query = `INSERT INTO forum_posts 
-              (admin_id, grade_level, content, subject_tag, type_of_upload, forum_title, topic_id, created_at, moderation_status)
-              VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`;
+              (admin_id, grade_level, subject_id, content, type_of_upload, forum_title, topic_id, created_at, moderation_status, subject_tag)
+              VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+              RETURNING *`;
 
             params = [
               authorId,
-              grade_level,
+              grade_id,
+              subject_id,
               finalContent,
-              subject_tag,
               "notes",
               finalTitle,
               0,
               created_at,
-              "approved"
+              "approved",
+              subject_id
             ];
           }
 
           else if (author_type === "superadmin") {
+
             query = `INSERT INTO forum_posts 
-              (super_admin_id, grade_level, content, subject_tag, type_of_upload, forum_title, topic_id, created_at, moderation_status)
-              VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`;
+              (super_admin_id, grade_level, subject_id, content, type_of_upload, forum_title, topic_id, created_at, moderation_status, subject_tag)
+              VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+              RETURNING *`;
 
             params = [
               authorId,
-              grade_level,
+              grade_id,
+              subject_id,
               finalContent,
-              subject_tag,
               "notes",
               finalTitle,
               0,
               created_at,
-              "approved"
+              "approved",
+              subject_id
             ];
           }
 
@@ -2322,10 +2368,10 @@ export const uploadNestedZipNotes = async (req, res) => {
       }
     }
 
-    res.json({
+    return res.json({
       ok: true,
       message: "Nested ZIP upload completed",
-      grade_level,
+      grade: gradeName,
       subject: subjectName,
       totalNotesCreated: totalCreated,
       failedFiles
@@ -2333,7 +2379,7 @@ export const uploadNestedZipNotes = async (req, res) => {
 
   } catch (err) {
     console.error("Upload error:", err);
-    res.status(500).json({
+    return res.status(500).json({
       ok: false,
       message: "Server error"
     });

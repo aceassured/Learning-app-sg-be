@@ -2322,6 +2322,46 @@ export const getAllGrade = async (req, res) => {
   }
 };
 
+
+// get all grades without pagination.........
+
+export const getAllGradesWithoutPagination = async (req, res) => {
+  try {
+    const search = req.query.search || "";
+
+    let whereClause = "WHERE active_status != false";
+    let values = [];
+
+    if (search) {
+      whereClause += " AND grade_level ILIKE $1";
+      values = [`%${search}%`];
+    }
+
+    const query = `
+      SELECT *
+      FROM grades
+      ${whereClause}
+      ORDER BY grade_level ASC
+    `;
+
+    const { rows } = await pool.query(query, values);
+
+    return res.status(200).json({
+      success: true,
+      total: rows.length,
+      data: rows,
+    });
+
+  } catch (error) {
+    console.error("Get all grades error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error",
+    });
+  }
+  
+};
+
 // admin edit...
 
 export const adminEdit = async (req, res) => {
@@ -2784,24 +2824,56 @@ export const getAllquestionsSearch = async (req, res) => {
 
 // get particular questions...
 
+// old get particular question....
+
+// export const getParticularquestions = async (req, res) => {
+//   try {
+//     const { question_id } = req.body
+
+//     const query = `SELECT * FROM questions WHERE id = $1;`;
+//     const result = await pool.query(query, [question_id]);
+
+//     return res.status(200).json({
+//       message: "Questions fetched successfully",
+//       total: result.rows.length,
+//       questions: result.rows,
+//     });
+//   } catch (error) {
+//     console.error("Error fetching questions:", error);
+//     return res.status(500).json({ message: "Internal Server Error" });
+//   }
+// };
+
+
 export const getParticularquestions = async (req, res) => {
   try {
-    const { question_id } = req.body
+    const { question_id } = req.body;
+
+    if (!question_id) {
+      return res.status(400).json({
+        message: "Question ID is required",
+      });
+    }
 
     const query = `SELECT * FROM questions WHERE id = $1;`;
     const result = await pool.query(query, [question_id]);
 
+    if (result.rowCount === 0) {
+      return res.status(404).json({
+        message: "Question not found",
+      });
+    }
+
     return res.status(200).json({
-      message: "Questions fetched successfully",
-      total: result.rows.length,
-      questions: result.rows,
+      message: "Question fetched successfully",
+      question: result.rows[0], // return single object, not array
     });
+
   } catch (error) {
-    console.error("Error fetching questions:", error);
+    console.error("Error fetching question:", error);
     return res.status(500).json({ message: "Internal Server Error" });
   }
 };
-
 // delete questions.....
 
 export const deleteQuestions = async (req, res) => {
