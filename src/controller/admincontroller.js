@@ -3553,90 +3553,99 @@ export const createGrammarCloze = async (req, res) => {
     const {
       title,
       passage,
-      grade,
-      subject,
-      topic,
+      grade_id,
+      subject_id,
+      topic_id,
+      difficulty_level,
       options,
-      correctAnswers
+      correctAnswers,
     } = req.body;
 
-    if (!title || !passage || !grade || !subject || !options || !correctAnswers) {
-      return res.status(400).json({
-        success: false,
-        message: "Required fields missing",
-      });
-    }
-
-    const blankMatches = passage.match(/\((\d+)\)/g);
-
-    if (!blankMatches) {
-      return res.status(400).json({
-        success: false,
-        message: "No blanks found in passage",
-      });
-    }
-
-    const totalBlanks = blankMatches.length;
-
-    if (Object.keys(correctAnswers).length !== totalBlanks) {
-      return res.status(400).json({
-        success: false,
-        message: "Correct answers count must match blank count",
-      });
-    }
+    // we only do minimal safety checks here.
 
     await client.query("BEGIN");
 
-    // Insert quiz
-    const quizResult = await client.query(
-      `INSERT INTO grammar_pronouns
-       (title, passage, grade, subject, topic)
-       VALUES ($1, $2, $3, $4, $5)
-       RETURNING id`,
-      [title, passage, grade, subject, topic]
+    const duplicateCheck = await client.query(
+      `
+      SELECT id FROM questions
+      WHERE LOWER(question_text) = LOWER($1)
+      AND question_type = 'comprehension_grammer'
+      AND grade_id = $2
+      AND subject_id = $3
+      AND (
+            (topic_id IS NULL AND $4::int IS NULL)
+            OR topic_id = $4
+          )
+      `,
+      [
+        passage.trim(),
+        grade_id,
+        subject_id,
+        topic_id ?? null
+      ]
     );
 
-    const quizId = quizResult.rows[0].id;
-
-    // Insert options (A, B, C...)
-    for (const option of options) {
-      await client.query(
-        `INSERT INTO grammar_pronoun_options
-         (grammar_id, option_label, option_text)
-         VALUES ($1, $2, $3)`,
-        [
-          quizId,
-          option.label,
-          option.text.trim()
-        ]
-      );
+    if (duplicateCheck.rowCount > 0) {
+      await client.query("ROLLBACK");
+      return res.status(400).json({
+        success: false,
+        message: "This comprehension passage already exists",
+      });
     }
 
-    // Insert correct answers per blank
-    for (const [blankNumber, correctLabel] of Object.entries(correctAnswers)) {
-      await client.query(
-        `INSERT INTO grammar_pronoun_answers
-         (grammar_id, blank_number, correct_option_label)
-         VALUES ($1, $2, $3)`,
-        [
-          quizId,
-          parseInt(blankNumber),
-          correctLabel
-        ]
-      );
-    }
+    const extraData = {
+      title: title.trim(),
+      passage: passage.trim(),
+      options,
+      correctAnswers,
+    };
+
+    const result = await client.query(
+      `
+      INSERT INTO questions (
+        question_text,
+        question_type,
+        subject_id,
+        topic_id,
+        grade_id,
+        difficulty_level,
+        extra_data,
+        created_at
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
+      RETURNING id
+      `,
+      [
+        passage.trim(),
+        "comprehension_grammer",
+        subject_id,
+        topic_id ?? null,
+        grade_id,
+        difficulty_level ?? null,
+        extraData,
+      ]
+    );
 
     await client.query("COMMIT");
 
     return res.status(201).json({
       success: true,
-      message: "Grammar Cloze quiz created successfully",
-      quizId,
+      message: "Comprehension grammar question created successfully",
+      question_id: result.rows[0].id,
     });
 
   } catch (error) {
     await client.query("ROLLBACK");
-    console.error("Error creating grammar cloze:", error);
+
+    // Unique index safety (if you created DB unique index)
+    if (error.code === "23505") {
+      return res.status(400).json({
+        success: false,
+        message: "Duplicate comprehension question detected",
+      });
+    }
+
+    console.error("Error creating comprehension grammar:", error);
 
     return res.status(500).json({
       success: false,
@@ -3656,9 +3665,10 @@ export const getAllGrammarPronouns = async (req, res) => {
   try {
     let {
       search = "",
-      subject,
-      grade,
-      topic,           
+      grade_id,
+      subject_id,
+      topic_id,
+      difficulty_level,
       start_date,
       end_date,
       page = 1,
@@ -3669,82 +3679,83 @@ export const getAllGrammarPronouns = async (req, res) => {
     limit = Math.min(parseInt(limit, 10) || 10, 50);
     const offset = (page - 1) * limit;
 
-    const whereClauses = [];
+    const whereClauses = [`q.question_type = 'comprehension_grammer'`];
     const values = [];
     let idx = 1;
 
-    // ✅ Subject filter
-    if (subject) {
-      whereClauses.push(`LOWER(gp.subject) = LOWER($${idx++})`);
-      values.push(subject);
+    // Grade filter
+    if (grade_id) {
+      whereClauses.push(`q.grade_id = $${idx++}`);
+      values.push(grade_id);
     }
 
-    // ✅ Grade filter
-    if (grade) {
-      whereClauses.push(`LOWER(gp.grade) = LOWER($${idx++})`);
-      values.push(grade);
+    // Subject filter
+    if (subject_id) {
+      whereClauses.push(`q.subject_id = $${idx++}`);
+      values.push(subject_id);
     }
 
-    // ✅ Topic filter (NEW)
-    if (topic) {
-      whereClauses.push(`LOWER(gp.topic) = LOWER($${idx++})`);
-      values.push(topic);
+    // Topic filter
+    if (topic_id) {
+      whereClauses.push(`q.topic_id = $${idx++}`);
+      values.push(topic_id);
     }
 
-    // ✅ Date filter
+    // Difficulty filter
+    if (difficulty_level) {
+      whereClauses.push(`q.difficulty_level = $${idx++}`);
+      values.push(difficulty_level);
+    }
+
+    // Date filters
     if (start_date) {
-      whereClauses.push(`gp.created_at >= $${idx++}`);
+      whereClauses.push(`q.created_at >= $${idx++}`);
       values.push(`${start_date} 00:00:00`);
     }
 
     if (end_date) {
-      whereClauses.push(`gp.created_at <= $${idx++}`);
+      whereClauses.push(`q.created_at <= $${idx++}`);
       values.push(`${end_date} 23:59:59`);
     }
 
-    // ✅ Search filter (Updated to include topic)
+    // Search (title + passage inside extra_data)
     if (search) {
       whereClauses.push(`
         (
-          LOWER(gp.title) LIKE LOWER($${idx})
-          OR LOWER(gp.passage) LIKE LOWER($${idx})
-          OR LOWER(gp.grade) LIKE LOWER($${idx})
-          OR LOWER(gp.subject) LIKE LOWER($${idx})
-          OR LOWER(gp.topic) LIKE LOWER($${idx})
+          LOWER(q.extra_data->>'title') LIKE LOWER($${idx})
+          OR LOWER(q.question_text) LIKE LOWER($${idx})
         )
       `);
       values.push(`%${search}%`);
       idx++;
     }
 
-    const whereQuery = whereClauses.length
-      ? `WHERE ${whereClauses.join(" AND ")}`
-      : "";
+    const whereQuery = `WHERE ${whereClauses.join(" AND ")}`;
 
     const query = `
-      SELECT 
-        gp.id,
-        gp.title,
-        gp.passage,
-        gp.grade,
-        gp.subject,
-        gp.topic,
-        COUNT(DISTINCT ga.blank_number) AS blanks_count,
-        gp.created_at
-      FROM grammar_pronouns gp
-      LEFT JOIN grammar_pronoun_answers ga
-        ON gp.id = ga.grammar_id
-      ${whereQuery}
-      GROUP BY gp.id
-      ORDER BY gp.created_at DESC
-      LIMIT $${idx++} OFFSET $${idx++};
-    `;
-
+    SELECT 
+      q.id,
+      q.question_text AS passage,
+      q.extra_data->>'title' AS title,
+      q.grade_id,
+      q.subject_id,
+      q.topic_id,
+      q.difficulty_level,
+      (
+        SELECT COUNT(*) 
+        FROM jsonb_each(q.extra_data->'correctAnswers')
+      ) AS blanks_count,
+      q.created_at
+    FROM questions q
+    ${whereQuery}
+    ORDER BY q.created_at DESC
+    LIMIT $${idx++} OFFSET $${idx++};
+  `;
     const mainValues = [...values, limit, offset];
 
     const countQuery = `
-      SELECT COUNT(DISTINCT gp.id) AS total
-      FROM grammar_pronouns gp
+      SELECT COUNT(*) AS total
+      FROM questions q
       ${whereQuery};
     `;
 
@@ -3756,7 +3767,7 @@ export const getAllGrammarPronouns = async (req, res) => {
     const total = parseInt(countResult.rows[0].total, 10);
     const totalPages = Math.ceil(total / limit);
 
-    res.status(200).json({
+    return res.status(200).json({
       success: true,
       total,
       totalPages,
@@ -3766,8 +3777,11 @@ export const getAllGrammarPronouns = async (req, res) => {
     });
 
   } catch (err) {
-    console.error("Error fetching grammar pronouns:", err);
-    res.status(500).json({ error: "Server error" });
+    console.error("Error fetching comprehension grammar:", err);
+    return res.status(500).json({
+      success: false,
+      message: "Server Error",
+    });
   }
 };
 
@@ -3786,80 +3800,113 @@ export const updateGrammarPronoun = async (req, res) => {
     const {
       title,
       passage,
-      grade,
-      subject,
-      topic,
+      grade_id,
+      subject_id,
+      topic_id,
+      difficulty_level,
       options,
       correctAnswers,
     } = req.body;
 
-    if (!title || !passage || !grade || !subject || !options || !correctAnswers) {
-      return res.status(400).json({
+    await client.query("BEGIN");
+
+    const existing = await client.query(
+      `SELECT id FROM questions 
+       WHERE id = $1 
+       AND question_type = 'comprehension_grammer'`,
+      [id]
+    );
+
+    if (existing.rowCount === 0) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({
         success: false,
-        message: "Required fields missing",
+        message: "Comprehension grammar question not found",
       });
     }
 
-    await client.query("BEGIN");
-
-    // 1️⃣ Update main quiz table
-    await client.query(
-      `UPDATE grammar_pronouns
-       SET title = $1,
-           passage = $2,
-           grade = $3,
-           subject = $4,
-           topic = $5
-       WHERE id = $6`,
-      [title, passage, grade, subject, topic, id]
+    const duplicateCheck = await client.query(
+      `
+      SELECT id FROM questions
+      WHERE LOWER(question_text) = LOWER($1)
+      AND question_type = 'comprehension_grammer'
+      AND grade_id = $2
+      AND subject_id = $3
+      AND (
+            (topic_id IS NULL AND $4::int IS NULL)
+            OR topic_id = $4
+          )
+      AND id != $5
+      `,
+      [
+        passage.trim(),
+        grade_id,
+        subject_id,
+        topic_id ?? null,
+        id
+      ]
     );
 
-    // 2️⃣ Delete old options
-    await client.query(
-      `DELETE FROM grammar_pronoun_options WHERE grammar_id = $1`,
-      [id]
-    );
-
-    // 3️⃣ Insert new options
-    for (const option of options) {
-      await client.query(
-        `INSERT INTO grammar_pronoun_options
-         (grammar_id, option_label, option_text)
-         VALUES ($1, $2, $3)`,
-        [id, option.label, option.text.trim()]
-      );
+    if (duplicateCheck.rowCount > 0) {
+      await client.query("ROLLBACK");
+      return res.status(400).json({
+        success: false,
+        message: "Another comprehension passage with same details already exists",
+      });
     }
 
-    // 4️⃣ Delete old correct answers
-    await client.query(
-      `DELETE FROM grammar_pronoun_answers WHERE grammar_id = $1`,
-      [id]
-    );
+    const extraData = {
+      title: title.trim(),
+      passage: passage.trim(),
+      options,
+      correctAnswers,
+    };
 
-    // 5️⃣ Insert new correct answers
-    for (const [blankNumber, correctLabel] of Object.entries(correctAnswers)) {
-      await client.query(
-        `INSERT INTO grammar_pronoun_answers
-         (grammar_id, blank_number, correct_option_label)
-         VALUES ($1, $2, $3)`,
-        [id, parseInt(blankNumber), correctLabel]
-      );
-    }
+    await client.query(
+      `
+      UPDATE questions
+      SET question_text = $1,
+          subject_id = $2,
+          topic_id = $3,
+          grade_id = $4,
+          difficulty_level = $5,
+          extra_data = $6,
+          updated_at = NOW()
+      WHERE id = $7
+      `,
+      [
+        passage.trim(),
+        subject_id,
+        topic_id ?? null,
+        grade_id,
+        difficulty_level ?? null,
+        extraData,
+        id
+      ]
+    );
 
     await client.query("COMMIT");
 
-    res.status(200).json({
+    return res.status(200).json({
       success: true,
-      message: "Grammar pronoun updated successfully",
+      message: "Comprehension grammar question updated successfully",
     });
 
   } catch (error) {
     await client.query("ROLLBACK");
-    console.error("Update error:", error);
 
-    res.status(500).json({
+    if (error.code === "23505") {
+      return res.status(400).json({
+        success: false,
+        message: "Duplicate comprehension question detected",
+      });
+    }
+
+    console.error("Update comprehension grammar error:", error);
+
+    return res.status(500).json({
       success: false,
-      message: "Server error",
+      message: "Server Error",
     });
   } finally {
     client.release();
@@ -3874,28 +3921,33 @@ export const deleteGrammarPronoun = async (req, res) => {
     const { id } = req.params;
 
     const result = await pool.query(
-      `DELETE FROM grammar_pronouns WHERE id = $1 RETURNING id`,
+      `
+      DELETE FROM questions
+      WHERE id = $1
+      AND question_type = 'comprehension_grammer'
+      RETURNING id
+      `,
       [id]
     );
 
     if (result.rowCount === 0) {
       return res.status(404).json({
         success: false,
-        message: "Quiz not found",
+        message: "Comprehension grammar question not found",
       });
     }
 
-    res.status(200).json({
+    return res.status(200).json({
       success: true,
-      message: "Grammar pronoun deleted successfully",
+      message: "Comprehension grammar question deleted successfully",
     });
 
   } catch (error) {
-    console.error("Delete error:", error);
+    console.error("Delete comprehension grammar error:", error);
 
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
-      message: "Server error",
+      message: "Server Error",
     });
   }
 };

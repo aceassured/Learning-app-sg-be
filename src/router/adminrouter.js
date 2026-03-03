@@ -11,6 +11,7 @@ import multer from "multer";
 import { deleteUpload, getQuestionsForUpload, getUploadHistory, questionFileupload } from "../utils/vercel-blob.js";
 import { extractPdfText } from "../utils/pdfExtractor.js";
 import { parseQuestionsFromText } from "../utils/questionParser.js";
+import { createGrammarClozeValidator, validateRequest } from "../validators/grammar.validator.js";
 
 
 const upload = multer();
@@ -67,7 +68,14 @@ router.put("/updateeditquestion/:id", updateEditQuiz);
 router.delete("/deleteeditquestion/:id", deleteEditQuiz);
 router.get("/geteditquestion/:id", getParticularEditableQuiz);
 router.get("/admindashboard", adminDashboardApi);
-router.post("/grammar-cloze", createGrammarCloze);
+
+router.post(
+  "/grammar-cloze",
+  createGrammarClozeValidator,
+  validateRequest,
+  createGrammarCloze
+);
+router.post("", createGrammarCloze);
 router.get("/grammar-pronouns", getAllGrammarPronouns);
 router.put("/grammar-pronouns/:id", updateGrammarPronoun);
 router.delete("/grammar-pronouns/:id", deleteGrammarPronoun);
