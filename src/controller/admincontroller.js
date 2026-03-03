@@ -3540,3 +3540,93 @@ export const prebuildDocument = async (req, res) => {
     });
   }
 };
+
+
+
+//---Grammer Pronouns-----//
+//----Create Pronouns-----//
+
+export const createGrammarCloze = async (req, res) => {
+  const client = await pool.connect();
+
+  try {
+    const { title, passage, grade, subject, topic, options } = req.body;
+
+    // Validate required fields
+    if (!title || !passage || !grade || !subject || !options) {
+      return res.status(400).json({
+        success: false,
+        message: "Required fields missing",
+      });
+    }
+
+    // Extract blank numbers from passage (like (1), (2), (3))
+    const blankMatches = passage.match(/\((\d+)\)/g);
+
+    if (!blankMatches) {
+      return res.status(400).json({
+        success: false,
+        message: "No blanks found in passage",
+      });
+    }
+
+    const totalBlanks = blankMatches.length;
+
+    // Check options count matches blank count
+    if (options.length !== totalBlanks) {
+      return res.status(400).json({
+        success: false,
+        message: "Options count must match blank count",
+      });
+    }
+
+    await client.query("BEGIN");
+
+    // Insert into grammar_pronouns table
+    const quizResult = await client.query(
+      `INSERT INTO grammar_pronouns 
+       (title, passage, grade, subject, topic)
+       VALUES ($1, $2, $3, $4, $5)
+       RETURNING id`,
+      [title, passage, grade, subject, topic]
+    );
+
+    const quizId = quizResult.rows[0].id;
+
+    // Insert options into grammar_pronoun_options
+    for (let i = 0; i < options.length; i++) {
+      const option = options[i];
+
+      await client.query(
+        `INSERT INTO grammar_pronoun_options
+         (grammar_id, option_label, blank_number, answer_text)
+         VALUES ($1, $2, $3, $4)`,
+        [
+          quizId,
+          option.label,
+          i + 1, // blank number (1,2,3...)
+          option.text.trim().toLowerCase(),
+        ]
+      );
+    }
+
+    await client.query("COMMIT");
+
+    return res.status(201).json({
+      success: true,
+      message: "Grammar Cloze quiz created successfully",
+      quizId,
+    });
+
+  } catch (error) {
+    await client.query("ROLLBACK");
+    console.error("Error creating grammar cloze:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Server Error",
+    });
+  } finally {
+    client.release();
+  }
+};

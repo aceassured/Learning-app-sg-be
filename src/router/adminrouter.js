@@ -1,5 +1,7 @@
 import express from "express"
-import { adminAnnouncementpoll, adminCreateBulkEditableQuizQuestions, adminCreateEditQuiz, admincreatePoll, adminDashboardApi, adminEditPoll, adminUpdateUserStatus, analyzePDF, createGrades, deleteEditableUpload, deleteEditQuiz, deleteGrade, deletePoll, deleteSubject, deleteTopic, getAllEditQuizzes, getAllEditQuizzesnew, getAllpoll, getAllQuestionsnew, getEditableUploadData, getEditableUploadHistory, getParticularEditableQuiz, getUserEditingQuiz, prebuildDocument, updateEditQuiz, updateGrade, updateSubject, updateTopics } from "../controller/admincontroller.js"
+import { adminAnnouncementpoll, adminCreateBulkEditableQuizQuestions, adminCreateEditQuiz, admincreatePoll, 
+  adminDashboardApi, adminEditPoll, adminUpdateUserStatus, analyzePDF, createGrades, deleteEditableUpload, deleteEditQuiz, 
+  deleteGrade, deletePoll, deleteSubject, deleteTopic, getAllEditQuizzes, getAllEditQuizzesnew, getAllpoll, getAllQuestionsnew, getEditableUploadData, getEditableUploadHistory, getParticularEditableQuiz, getUserEditingQuiz, prebuildDocument, updateEditQuiz, updateGrade, updateSubject, updateTopics,createGrammarCloze } from "../controller/admincontroller.js"
 import auth from "../middleware/auth.js"
 import { admincreateSubject, admincreateTopic, getAllTopic, getParticularquestions, updatequestion } from "../controller/usercontroller.js"
 import multer from "multer";
@@ -62,6 +64,7 @@ router.put("/updateeditquestion/:id", updateEditQuiz);
 router.delete("/deleteeditquestion/:id", deleteEditQuiz);
 router.get("/geteditquestion/:id", getParticularEditableQuiz);
 router.get("/admindashboard", adminDashboardApi);
+router.post("/grammar-cloze", createGrammarCloze);
 
 
 router.post("/upload-pdf", upload.single("pdf"), async (req, res) => {
