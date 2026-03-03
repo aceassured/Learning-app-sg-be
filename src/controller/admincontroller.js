@@ -3550,17 +3550,23 @@ export const createGrammarCloze = async (req, res) => {
   const client = await pool.connect();
 
   try {
-    const { title, passage, grade, subject, topic, options } = req.body;
+    const {
+      title,
+      passage,
+      grade,
+      subject,
+      topic,
+      options,
+      correctAnswers
+    } = req.body;
 
-    // Validate required fields
-    if (!title || !passage || !grade || !subject || !options) {
+    if (!title || !passage || !grade || !subject || !options || !correctAnswers) {
       return res.status(400).json({
         success: false,
         message: "Required fields missing",
       });
     }
 
-    // Extract blank numbers from passage (like (1), (2), (3))
     const blankMatches = passage.match(/\((\d+)\)/g);
 
     if (!blankMatches) {
@@ -3572,19 +3578,18 @@ export const createGrammarCloze = async (req, res) => {
 
     const totalBlanks = blankMatches.length;
 
-    // Check options count matches blank count
-    if (options.length !== totalBlanks) {
+    if (Object.keys(correctAnswers).length !== totalBlanks) {
       return res.status(400).json({
         success: false,
-        message: "Options count must match blank count",
+        message: "Correct answers count must match blank count",
       });
     }
 
     await client.query("BEGIN");
 
-    // Insert into grammar_pronouns table
+    // Insert quiz
     const quizResult = await client.query(
-      `INSERT INTO grammar_pronouns 
+      `INSERT INTO grammar_pronouns
        (title, passage, grade, subject, topic)
        VALUES ($1, $2, $3, $4, $5)
        RETURNING id`,
@@ -3593,19 +3598,30 @@ export const createGrammarCloze = async (req, res) => {
 
     const quizId = quizResult.rows[0].id;
 
-    // Insert options into grammar_pronoun_options
-    for (let i = 0; i < options.length; i++) {
-      const option = options[i];
-
+    // Insert options (A, B, C...)
+    for (const option of options) {
       await client.query(
         `INSERT INTO grammar_pronoun_options
-         (grammar_id, option_label, blank_number, answer_text)
-         VALUES ($1, $2, $3, $4)`,
+         (grammar_id, option_label, option_text)
+         VALUES ($1, $2, $3)`,
         [
           quizId,
           option.label,
-          i + 1, // blank number (1,2,3...)
-          option.text.trim().toLowerCase(),
+          option.text.trim()
+        ]
+      );
+    }
+
+    // Insert correct answers per blank
+    for (const [blankNumber, correctLabel] of Object.entries(correctAnswers)) {
+      await client.query(
+        `INSERT INTO grammar_pronoun_answers
+         (grammar_id, blank_number, correct_option_label)
+         VALUES ($1, $2, $3)`,
+        [
+          quizId,
+          parseInt(blankNumber),
+          correctLabel
         ]
       );
     }
