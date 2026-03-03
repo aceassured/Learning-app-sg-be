@@ -304,9 +304,9 @@ export const startQuiz = async (req, res) => {
     const userId = req.userId;
     const { subjects } = req.body;
 
-    // ============================================
-    // 1️⃣ Get user daily limit
-    // ============================================
+    // =====================================================
+    // 1️⃣ Get User Daily Question Limit
+    // =====================================================
     const userRes = await pool.query(
       "SELECT questions_per_day FROM users WHERE id = $1",
       [userId]
@@ -317,83 +317,85 @@ export const startQuiz = async (req, res) => {
     const halfNormal = Math.ceil(qpd / 2);
     const halfEditable = Math.floor(qpd / 2);
 
-    // ============================================
-    // 2️⃣ Already answered NORMAL questions
-    // ============================================
-    const answeredNormalRes = await pool.query(
-      "SELECT question_id FROM user_answered_questions WHERE user_id = $1",
+    // =====================================================
+    // 2️⃣ Get Already Answered Question IDs (ALL TYPES)
+    // =====================================================
+    const answeredRes = await pool.query(
+      `
+      SELECT DISTINCT a.question_id
+      FROM user_answers a
+      JOIN user_quiz_sessions s ON a.session_id = s.id
+      WHERE s.user_id = $1
+      `,
       [userId]
     );
 
-    const answeredNormalIds = answeredNormalRes.rows.map(r => r.question_id);
+    const answeredIds = answeredRes.rows.map(r => r.question_id);
 
-    // ============================================
-    // 3️⃣ Fetch NORMAL questions
-    // ============================================
+    // =====================================================
+    // 3️⃣ Fetch NORMAL Questions
+    // =====================================================
     let normalQuery = `
-      SELECT id, subject, topic_id, question_text, options,
-             question_url, answer_file_url, answer_explanation
+      SELECT id, subject_id, topic_id, grade_id,
+             question_text, options,
+             question_url, answer_file_url,
+             answer_explanation
       FROM questions
       WHERE question_type != 'editable'
-      AND NOT (id = ANY($1::int[]))
     `;
 
-    const normalParams = [answeredNormalIds];
+    const normalParams = [];
 
-    if (subjects?.length) {
-      normalQuery += ` AND subject_id = ANY($${normalParams.length + 1}::int[])`;
-      normalParams.push(subjects);
+    if (answeredIds.length > 0) {
+      normalParams.push(answeredIds);
+      normalQuery += ` AND NOT (id = ANY($${normalParams.length}::int[]))`;
     }
 
-    normalQuery += ` ORDER BY random() LIMIT $${normalParams.length + 1}`;
+    if (subjects?.length) {
+      normalParams.push(subjects);
+      normalQuery += ` AND subject_id = ANY($${normalParams.length}::int[])`;
+    }
+
     normalParams.push(halfNormal);
+    normalQuery += ` ORDER BY random() LIMIT $${normalParams.length}`;
 
     const normalRes = await pool.query(normalQuery, normalParams);
 
-    // ============================================
-    // 4️⃣ Already answered EDITABLE quizzes
-    // ============================================
-    const answeredEditableRes = await pool.query(
-      "SELECT question_id FROM editing_quiz_answers WHERE user_id = $1 GROUP BY question_id",
-      [userId]
-    );
-
-    const answeredEditableIds = answeredEditableRes.rows.map(r => r.question_id);
-
-    // ============================================
-    // 5️⃣ Fetch EDITABLE quizzes (from questions table)
-    // ============================================
+    // =====================================================
+    // 4️⃣ Fetch EDITABLE Questions
+    // =====================================================
     let editableQuery = `
-      SELECT id,
-             question_text,
-             grade_id,
-             subject_id,
-             topic_id,
-             extra_data
+      SELECT id, subject_id, topic_id, grade_id,
+             question_text, extra_data
       FROM questions
       WHERE question_type = 'editable'
-      AND NOT (id = ANY($1::int[]))
     `;
 
-    const editableParams = [answeredEditableIds];
+    const editableParams = [];
 
-    if (subjects?.length) {
-      editableQuery += ` AND subject_id = ANY($${editableParams.length + 1}::int[])`;
-      editableParams.push(subjects);
+    if (answeredIds.length > 0) {
+      editableParams.push(answeredIds);
+      editableQuery += ` AND NOT (id = ANY($${editableParams.length}::int[]))`;
     }
 
-    editableQuery += ` ORDER BY random() LIMIT $${editableParams.length + 1}`;
+    if (subjects?.length) {
+      editableParams.push(subjects);
+      editableQuery += ` AND subject_id = ANY($${editableParams.length}::int[])`;
+    }
+
     editableParams.push(halfEditable);
+    editableQuery += ` ORDER BY random() LIMIT $${editableParams.length}`;
 
     const editableRes = await pool.query(editableQuery, editableParams);
 
-    // ============================================
-    // 6️⃣ Format NORMAL questions
-    // ============================================
+    // =====================================================
+    // 5️⃣ Format NORMAL Questions
+    // =====================================================
     const normalQuestions = normalRes.rows.map(q => ({
       id: q.id,
-      subject: q.subject,
+      subject_id: q.subject_id,
       topic_id: q.topic_id,
+      grade_id: q.grade_id,
       question_text: q.question_text,
       options: q.options,
       question_url: q.question_url,
@@ -402,29 +404,30 @@ export const startQuiz = async (req, res) => {
       type: "normal"
     }));
 
-    // ============================================
-    // 7️⃣ Format EDITABLE quizzes
-    // ============================================
-    const editableQuizzes = editableRes.rows.map(q => ({
+    // =====================================================
+    // 6️⃣ Format EDITABLE Questions (Using extra_data JSONB)
+    // =====================================================
+    const editableQuestions = editableRes.rows.map(q => ({
       id: q.id,
-      title: q.extra_data?.title || "Untitled Quiz",
-      passage: q.question_text,
-      grade_id: q.grade_id,
       subject_id: q.subject_id,
       topic_id: q.topic_id,
+      grade_id: q.grade_id,
+      title: q.extra_data?.title || "Untitled Quiz",
+      passage: q.question_text,
       blanks: q.extra_data?.blanks || [],
+      instructions: q.extra_data?.instructions || "",
       type: "editable"
     }));
 
-    // ============================================
-    // 8️⃣ Combine & Shuffle
-    // ============================================
-    const combinedQuestions = [...normalQuestions, ...editableQuizzes]
+    // =====================================================
+    // 7️⃣ Combine & Shuffle
+    // =====================================================
+    const combinedQuestions = [...normalQuestions, ...editableQuestions]
       .sort(() => Math.random() - 0.5);
 
-    // ============================================
-    // 9️⃣ Create Session
-    // ============================================
+    // =====================================================
+    // 8️⃣ Create Quiz Session
+    // =====================================================
     const sessionRes = await pool.query(
       `
       INSERT INTO user_quiz_sessions
@@ -437,9 +440,9 @@ export const startQuiz = async (req, res) => {
 
     const session = sessionRes.rows[0];
 
-    // ============================================
-    // 🔟 Response
-    // ============================================
+    // =====================================================
+    // 9️⃣ Final Response
+    // =====================================================
     return res.status(200).json({
       ok: true,
       session,

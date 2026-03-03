@@ -3208,6 +3208,11 @@ export const getEditableUploadData = async (req, res) => {
 export const adminDashboardApi = async (req, res) => {
   try {
 
+    const calcGrowth = (current, previous) => {
+      if (previous === 0) return current > 0 ? 100 : 0;
+      return parseFloat(((current - previous) / previous * 100).toFixed(2));
+    };
+
     const [
       totalUsersRes,
       totalQuestionsRes,
@@ -3218,9 +3223,15 @@ export const adminDashboardApi = async (req, res) => {
       lastMonthQuestionsRes,
       thisMonthQuestionsRes,
       lastMonthForumRes,
-      thisMonthForumRes
+      thisMonthForumRes,
+      activityTrendsRes,
+      recentActionsRes,
+      qaBankUploadsRes,
+      forumPostsThisWeekRes,
+      pollsThisWeekRes
     ] = await Promise.all([
 
+      // ---------------- TOP STATS ----------------
       pool.query(`SELECT COUNT(*) FROM users`),
 
       pool.query(`SELECT COUNT(*) FROM questions`),
@@ -3238,6 +3249,7 @@ export const adminDashboardApi = async (req, res) => {
         WHERE DATE(created_at) = CURRENT_DATE
       `),
 
+      // ---------------- MONTHLY COMPARISON ----------------
       pool.query(`
         SELECT COUNT(*) FROM users
         WHERE DATE_TRUNC('month', created_at) =
@@ -3272,10 +3284,108 @@ export const adminDashboardApi = async (req, res) => {
         SELECT COUNT(*) FROM forum_posts
         WHERE DATE_TRUNC('month', created_at) =
               DATE_TRUNC('month', CURRENT_DATE)
+      `),
+
+      // ---------------- ACTIVITY TRENDS (7 DAYS) ----------------
+      pool.query(`
+        WITH days AS (
+          SELECT generate_series(CURRENT_DATE - 6, CURRENT_DATE, '1 day') AS day
+        )
+        SELECT 
+          to_char(days.day, 'Dy') AS label,
+          COALESCE(a.count,0) AS active_users,
+          COALESCE(q.count,0) AS questions_added
+        FROM days
+        LEFT JOIN (
+          SELECT DATE(activity_date) AS day,
+                 COUNT(DISTINCT user_id) AS count
+          FROM user_activity
+          GROUP BY DATE(activity_date)
+        ) a ON a.day = days.day
+        LEFT JOIN (
+          SELECT DATE(created_at) AS day,
+                 COUNT(*) AS count
+          FROM questions
+          GROUP BY DATE(created_at)
+        ) q ON q.day = days.day
+        ORDER BY days.day ASC
+      `),
+
+      // ---------------- RECENT ACTIONS ----------------
+      pool.query(`
+  SELECT * FROM (
+    
+    -- Latest User
+    SELECT * FROM (
+      SELECT 
+        'User Added' AS type,
+        name AS title,
+        created_at
+      FROM users
+      ORDER BY created_at DESC
+      LIMIT 1
+    ) ua
+
+    UNION ALL
+
+    -- Total Questions (Latest Timestamp)
+    SELECT 
+      'Questions Added' AS type,
+      CONCAT('Questions Count: ', COUNT(*)) AS title,
+      MAX(created_at) AS created_at
+    FROM questions
+
+    UNION ALL
+
+    -- Latest Poll
+    SELECT * FROM (
+      SELECT 
+        'Poll Created' AS type,
+        CONCAT(p.question, ' - Grade: ', g.grade_level) AS title,
+        p.created_at
+      FROM polls p
+      LEFT JOIN grades g ON p.grade_level = g.id
+      ORDER BY p.created_at DESC
+      LIMIT 1
+    ) pc
+
+    UNION ALL
+
+    -- Latest Forum Post
+    SELECT * FROM (
+      SELECT 
+        'New Forum Post' AS type,
+        CONCAT(f.forum_title, ' - Grade: ', g.grade_level) AS title,
+        f.created_at
+      FROM forum_posts f
+      LEFT JOIN grades g ON f.grade_level = g.id
+      ORDER BY f.created_at DESC
+      LIMIT 1
+    ) fp
+
+  ) actions
+  ORDER BY created_at DESC
+`),
+
+      // ---------------- PLATFORM INSIGHTS ----------------
+      pool.query(`
+        SELECT COUNT(*) FROM questions
+        WHERE created_at >= NOW() - INTERVAL '7 days'
+      `),
+
+      pool.query(`
+        SELECT COUNT(*) FROM forum_posts
+        WHERE created_at >= NOW() - INTERVAL '7 days'
+      `),
+
+      pool.query(`
+        SELECT COUNT(*) FROM polls
+        WHERE created_at >= NOW() - INTERVAL '7 days'
       `)
+
     ]);
 
-
+    // ---------------- VALUE EXTRACTION ----------------
     const totalUsers = Number(totalUsersRes.rows[0].count);
     const totalQuestions = Number(totalQuestionsRes.rows[0].count);
     const pendingApprovals = Number(pendingApprovalsRes.rows[0].count);
@@ -3290,12 +3400,6 @@ export const adminDashboardApi = async (req, res) => {
     const lastMonthForumPosts = Number(lastMonthForumRes.rows[0].count);
     const thisMonthForumPosts = Number(thisMonthForumRes.rows[0].count);
 
-
-    const calcGrowth = (current, previous) => {
-      if (previous === 0) return current > 0 ? 100 : 0;
-      return parseFloat(((current - previous) / previous * 100).toFixed(2));
-    };
-
     const usersGrowthPercentage =
       calcGrowth(thisMonthUsers, lastMonthUsers);
 
@@ -3305,9 +3409,13 @@ export const adminDashboardApi = async (req, res) => {
     const forumPostsGrowthPercentage =
       calcGrowth(thisMonthForumPosts, lastMonthForumPosts);
 
+    const labels = activityTrendsRes.rows.map(r => r.label);
+    const activeUsers = activityTrendsRes.rows.map(r => r.active_users);
+    const questionsAdded = activityTrendsRes.rows.map(r => r.questions_added);
 
     return res.json({
       ok: true,
+
       topStats: {
         totalUsers,
         totalQuestions,
@@ -3316,7 +3424,22 @@ export const adminDashboardApi = async (req, res) => {
         usersGrowthPercentage,
         questionsGrowthPercentage,
         forumPostsGrowthPercentage
+      },
+
+      activityTrends: {
+        labels,
+        activeUsers,
+        questionsAdded
+      },
+
+      recentActions: recentActionsRes.rows,
+
+      platformInsights: {
+        qaBankUploads: Number(qaBankUploadsRes.rows[0].count),
+        forumPostsThisWeek: Number(forumPostsThisWeekRes.rows[0].count),
+        pollsThisWeek: Number(pollsThisWeekRes.rows[0].count)
       }
+
     });
 
   } catch (error) {
