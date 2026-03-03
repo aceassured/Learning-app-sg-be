@@ -3683,31 +3683,27 @@ export const getAllGrammarPronouns = async (req, res) => {
     const values = [];
     let idx = 1;
 
-    // Grade filter
+    // Filters
     if (grade_id) {
       whereClauses.push(`q.grade_id = $${idx++}`);
       values.push(grade_id);
     }
 
-    // Subject filter
     if (subject_id) {
       whereClauses.push(`q.subject_id = $${idx++}`);
       values.push(subject_id);
     }
 
-    // Topic filter
     if (topic_id) {
       whereClauses.push(`q.topic_id = $${idx++}`);
       values.push(topic_id);
     }
 
-    // Difficulty filter
     if (difficulty_level) {
       whereClauses.push(`q.difficulty_level = $${idx++}`);
       values.push(difficulty_level);
     }
 
-    // Date filters
     if (start_date) {
       whereClauses.push(`q.created_at >= $${idx++}`);
       values.push(`${start_date} 00:00:00`);
@@ -3718,7 +3714,6 @@ export const getAllGrammarPronouns = async (req, res) => {
       values.push(`${end_date} 23:59:59`);
     }
 
-    // Search (title + passage inside extra_data)
     if (search) {
       whereClauses.push(`
         (
@@ -3733,24 +3728,33 @@ export const getAllGrammarPronouns = async (req, res) => {
     const whereQuery = `WHERE ${whereClauses.join(" AND ")}`;
 
     const query = `
-    SELECT 
-      q.id,
-      q.question_text AS passage,
-      q.extra_data->>'title' AS title,
-      q.grade_id,
-      q.subject_id,
-      q.topic_id,
-      q.difficulty_level,
-      (
-        SELECT COUNT(*) 
-        FROM jsonb_each(q.extra_data->'correctAnswers')
-      ) AS blanks_count,
-      q.created_at
-    FROM questions q
-    ${whereQuery}
-    ORDER BY q.created_at DESC
-    LIMIT $${idx++} OFFSET $${idx++};
-  `;
+      SELECT 
+        q.id,
+        q.question_text AS passage,
+        q.extra_data->>'title' AS title,
+        q.extra_data->'options' AS options,
+        q.extra_data->'correctAnswers' AS correct_answers,
+        q.grade_id,
+        g.grade_level AS grade_name,
+        q.subject_id,
+        s.subject AS subject_name,
+        q.topic_id,
+        t.topic AS topic_name,
+        q.difficulty_level,
+        q.created_at,
+        (
+          SELECT COUNT(*) 
+          FROM jsonb_each(q.extra_data->'correctAnswers')
+        ) AS blanks_count
+      FROM questions q
+      LEFT JOIN grades g ON q.grade_id = g.id
+      LEFT JOIN subjects s ON q.subject_id = s.id
+      LEFT JOIN topics t ON q.topic_id = t.id
+      ${whereQuery}
+      ORDER BY q.created_at DESC
+      LIMIT $${idx++} OFFSET $${idx++};
+    `;
+
     const mainValues = [...values, limit, offset];
 
     const countQuery = `
@@ -3949,5 +3953,118 @@ export const deleteGrammarPronoun = async (req, res) => {
       success: false,
       message: "Server Error",
     });
+  }
+};
+
+
+
+// ---comprehension_cloze
+
+// ----Create 
+
+
+export const createComprehensionCloze = async (req, res) => {
+  const client = await pool.connect();
+
+  try {
+    const {
+      title,
+      passage,
+      grade_id,
+      subject_id,
+      topic_id,
+      difficulty_level,
+      correctAnswers
+    } = req.body;
+
+    await client.query("BEGIN");
+
+    const duplicateCheck = await client.query(
+      `
+      SELECT id FROM questions
+      WHERE LOWER(question_text) = LOWER($1)
+      AND question_type = 'comprehension_cloze'
+      AND grade_id = $2
+      AND subject_id = $3
+      AND (
+            (topic_id IS NULL AND $4::int IS NULL)
+            OR topic_id = $4
+          )
+      `,
+      [
+        passage.trim(),
+        grade_id,
+        subject_id,
+        topic_id ?? null
+      ]
+    );
+
+    if (duplicateCheck.rowCount > 0) {
+      await client.query("ROLLBACK");
+      return res.status(400).json({
+        success: false,
+        message: "This comprehension passage already exists"
+      });
+    }
+
+    // 🧠 Prepare JSON data
+    const extraData = {
+      title: title.trim(),
+      passage: passage.trim(),
+      correctAnswers
+    };
+
+    const result = await client.query(
+      `
+      INSERT INTO questions (
+        question_text,
+        question_type,
+        subject_id,
+        topic_id,
+        grade_id,
+        difficulty_level,
+        extra_data,
+        created_at
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
+      RETURNING id
+      `,
+      [
+        passage.trim(),
+        "comprehension_cloze",
+        subject_id,
+        topic_id ?? null,
+        grade_id,
+        difficulty_level ?? null,
+        extraData
+      ]
+    );
+
+    await client.query("COMMIT");
+
+    return res.status(201).json({
+      success: true,
+      message: "Comprehension cloze created successfully",
+      question_id: result.rows[0].id
+    });
+
+  } catch (error) {
+    await client.query("ROLLBACK");
+
+    if (error.code === "23505") {
+      return res.status(400).json({
+        success: false,
+        message: "Duplicate comprehension detected"
+      });
+    }
+
+    console.error("Create comprehension cloze error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Server Error"
+    });
+  } finally {
+    client.release();
   }
 };

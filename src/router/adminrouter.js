@@ -75,7 +75,6 @@ router.post(
   validateRequest,
   createGrammarCloze
 );
-router.post("", createGrammarCloze);
 router.get("/grammar-pronouns", getAllGrammarPronouns);
 router.put("/grammar-pronouns/:id", updateGrammarPronoun);
 router.delete("/grammar-pronouns/:id", deleteGrammarPronoun);
