@@ -3658,6 +3658,7 @@ export const getAllGrammarPronouns = async (req, res) => {
       search = "",
       subject,
       grade,
+      topic,           
       start_date,
       end_date,
       page = 1,
@@ -3672,16 +3673,22 @@ export const getAllGrammarPronouns = async (req, res) => {
     const values = [];
     let idx = 1;
 
-    // ✅ Subject filter (text)
+    // ✅ Subject filter
     if (subject) {
       whereClauses.push(`LOWER(gp.subject) = LOWER($${idx++})`);
       values.push(subject);
     }
 
-    // ✅ Grade filter (text)
+    // ✅ Grade filter
     if (grade) {
       whereClauses.push(`LOWER(gp.grade) = LOWER($${idx++})`);
       values.push(grade);
+    }
+
+    // ✅ Topic filter (NEW)
+    if (topic) {
+      whereClauses.push(`LOWER(gp.topic) = LOWER($${idx++})`);
+      values.push(topic);
     }
 
     // ✅ Date filter
@@ -3695,7 +3702,7 @@ export const getAllGrammarPronouns = async (req, res) => {
       values.push(`${end_date} 23:59:59`);
     }
 
-    // ✅ Search filter
+    // ✅ Search filter (Updated to include topic)
     if (search) {
       whereClauses.push(`
         (
@@ -3703,6 +3710,7 @@ export const getAllGrammarPronouns = async (req, res) => {
           OR LOWER(gp.passage) LIKE LOWER($${idx})
           OR LOWER(gp.grade) LIKE LOWER($${idx})
           OR LOWER(gp.subject) LIKE LOWER($${idx})
+          OR LOWER(gp.topic) LIKE LOWER($${idx})
         )
       `);
       values.push(`%${search}%`);
