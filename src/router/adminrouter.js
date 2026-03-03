@@ -1,7 +1,10 @@
 import express from "express"
 import { adminAnnouncementpoll, adminCreateBulkEditableQuizQuestions, adminCreateEditQuiz, admincreatePoll, 
   adminDashboardApi, adminEditPoll, adminUpdateUserStatus, analyzePDF, createGrades, deleteEditableUpload, deleteEditQuiz, 
-  deleteGrade, deletePoll, deleteSubject, deleteTopic, getAllEditQuizzes, getAllEditQuizzesnew, getAllpoll, getAllQuestionsnew, getEditableUploadData, getEditableUploadHistory, getParticularEditableQuiz, getUserEditingQuiz, prebuildDocument, updateEditQuiz, updateGrade, updateSubject, updateTopics,createGrammarCloze } from "../controller/admincontroller.js"
+  deleteGrade, deletePoll, deleteSubject, deleteTopic, getAllEditQuizzes, getAllEditQuizzesnew, getAllpoll, getAllQuestionsnew, getEditableUploadData, getEditableUploadHistory, getParticularEditableQuiz, getUserEditingQuiz, prebuildDocument, updateEditQuiz, updateGrade, updateSubject, updateTopics,createGrammarCloze, 
+  getAllGrammarPronouns,
+  updateGrammarPronoun,
+  deleteGrammarPronoun} from "../controller/admincontroller.js"
 import auth from "../middleware/auth.js"
 import { admincreateSubject, admincreateTopic, getAllTopic, getParticularquestions, updatequestion } from "../controller/usercontroller.js"
 import multer from "multer";
@@ -65,7 +68,9 @@ router.delete("/deleteeditquestion/:id", deleteEditQuiz);
 router.get("/geteditquestion/:id", getParticularEditableQuiz);
 router.get("/admindashboard", adminDashboardApi);
 router.post("/grammar-cloze", createGrammarCloze);
-
+router.get("/grammar-pronouns", getAllGrammarPronouns);
+router.put("/grammar-pronouns/:id", updateGrammarPronoun);
+router.delete("/grammar-pronouns/:id", deleteGrammarPronoun);
 
 router.post("/upload-pdf", upload.single("pdf"), async (req, res) => {
 

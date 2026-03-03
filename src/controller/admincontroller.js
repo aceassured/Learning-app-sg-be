@@ -3646,3 +3646,248 @@ export const createGrammarCloze = async (req, res) => {
     client.release();
   }
 };
+
+
+
+
+
+
+export const getAllGrammarPronouns = async (req, res) => {
+  try {
+    let {
+      search = "",
+      subject,
+      grade,
+      start_date,
+      end_date,
+      page = 1,
+      limit = 10,
+    } = req.query;
+
+    page = parseInt(page, 10) || 1;
+    limit = Math.min(parseInt(limit, 10) || 10, 50);
+    const offset = (page - 1) * limit;
+
+    const whereClauses = [];
+    const values = [];
+    let idx = 1;
+
+    // ✅ Subject filter (text)
+    if (subject) {
+      whereClauses.push(`LOWER(gp.subject) = LOWER($${idx++})`);
+      values.push(subject);
+    }
+
+    // ✅ Grade filter (text)
+    if (grade) {
+      whereClauses.push(`LOWER(gp.grade) = LOWER($${idx++})`);
+      values.push(grade);
+    }
+
+    // ✅ Date filter
+    if (start_date) {
+      whereClauses.push(`gp.created_at >= $${idx++}`);
+      values.push(`${start_date} 00:00:00`);
+    }
+
+    if (end_date) {
+      whereClauses.push(`gp.created_at <= $${idx++}`);
+      values.push(`${end_date} 23:59:59`);
+    }
+
+    // ✅ Search filter
+    if (search) {
+      whereClauses.push(`
+        (
+          LOWER(gp.title) LIKE LOWER($${idx})
+          OR LOWER(gp.passage) LIKE LOWER($${idx})
+          OR LOWER(gp.grade) LIKE LOWER($${idx})
+          OR LOWER(gp.subject) LIKE LOWER($${idx})
+        )
+      `);
+      values.push(`%${search}%`);
+      idx++;
+    }
+
+    const whereQuery = whereClauses.length
+      ? `WHERE ${whereClauses.join(" AND ")}`
+      : "";
+
+    const query = `
+      SELECT 
+        gp.id,
+        gp.title,
+        gp.passage,
+        gp.grade,
+        gp.subject,
+        gp.topic,
+        COUNT(DISTINCT ga.blank_number) AS blanks_count,
+        gp.created_at
+      FROM grammar_pronouns gp
+      LEFT JOIN grammar_pronoun_answers ga
+        ON gp.id = ga.grammar_id
+      ${whereQuery}
+      GROUP BY gp.id
+      ORDER BY gp.created_at DESC
+      LIMIT $${idx++} OFFSET $${idx++};
+    `;
+
+    const mainValues = [...values, limit, offset];
+
+    const countQuery = `
+      SELECT COUNT(DISTINCT gp.id) AS total
+      FROM grammar_pronouns gp
+      ${whereQuery};
+    `;
+
+    const [result, countResult] = await Promise.all([
+      pool.query(query, mainValues),
+      pool.query(countQuery, values),
+    ]);
+
+    const total = parseInt(countResult.rows[0].total, 10);
+    const totalPages = Math.ceil(total / limit);
+
+    res.status(200).json({
+      success: true,
+      total,
+      totalPages,
+      currentPage: page,
+      perPage: limit,
+      quizzes: result.rows,
+    });
+
+  } catch (err) {
+    console.error("Error fetching grammar pronouns:", err);
+    res.status(500).json({ error: "Server error" });
+  }
+};
+
+
+
+
+//-----Edit Api
+
+
+export const updateGrammarPronoun = async (req, res) => {
+  const client = await pool.connect();
+
+  try {
+    const { id } = req.params;
+
+    const {
+      title,
+      passage,
+      grade,
+      subject,
+      topic,
+      options,
+      correctAnswers,
+    } = req.body;
+
+    if (!title || !passage || !grade || !subject || !options || !correctAnswers) {
+      return res.status(400).json({
+        success: false,
+        message: "Required fields missing",
+      });
+    }
+
+    await client.query("BEGIN");
+
+    // 1️⃣ Update main quiz table
+    await client.query(
+      `UPDATE grammar_pronouns
+       SET title = $1,
+           passage = $2,
+           grade = $3,
+           subject = $4,
+           topic = $5
+       WHERE id = $6`,
+      [title, passage, grade, subject, topic, id]
+    );
+
+    // 2️⃣ Delete old options
+    await client.query(
+      `DELETE FROM grammar_pronoun_options WHERE grammar_id = $1`,
+      [id]
+    );
+
+    // 3️⃣ Insert new options
+    for (const option of options) {
+      await client.query(
+        `INSERT INTO grammar_pronoun_options
+         (grammar_id, option_label, option_text)
+         VALUES ($1, $2, $3)`,
+        [id, option.label, option.text.trim()]
+      );
+    }
+
+    // 4️⃣ Delete old correct answers
+    await client.query(
+      `DELETE FROM grammar_pronoun_answers WHERE grammar_id = $1`,
+      [id]
+    );
+
+    // 5️⃣ Insert new correct answers
+    for (const [blankNumber, correctLabel] of Object.entries(correctAnswers)) {
+      await client.query(
+        `INSERT INTO grammar_pronoun_answers
+         (grammar_id, blank_number, correct_option_label)
+         VALUES ($1, $2, $3)`,
+        [id, parseInt(blankNumber), correctLabel]
+      );
+    }
+
+    await client.query("COMMIT");
+
+    res.status(200).json({
+      success: true,
+      message: "Grammar pronoun updated successfully",
+    });
+
+  } catch (error) {
+    await client.query("ROLLBACK");
+    console.error("Update error:", error);
+
+    res.status(500).json({
+      success: false,
+      message: "Server error",
+    });
+  } finally {
+    client.release();
+  }
+};
+
+
+//-----Delete api
+
+export const deleteGrammarPronoun = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const result = await pool.query(
+      `DELETE FROM grammar_pronouns WHERE id = $1 RETURNING id`,
+      [id]
+    );
+
+    if (result.rowCount === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "Quiz not found",
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      message: "Grammar pronoun deleted successfully",
+    });
+
+  } catch (error) {
+    console.error("Delete error:", error);
+
+    res.status(500).json({
+      success: false,
+      message: "Server error",
+    });
+  }
+};
