@@ -314,11 +314,11 @@ export const startQuiz = async (req, res) => {
 
     const qpd = userRes.rows[0]?.questions_per_day || 10;
 
-    const halfNormal = Math.ceil(qpd / 2);
+    const halfNormal = Math.ceil(qpd / 2) - 2; // reserve 2 slots
     const halfEditable = Math.floor(qpd / 2);
 
     // =====================================================
-    // 2️⃣ Get Already Answered Question IDs (ALL TYPES)
+    // 2️⃣ Get Already Answered Question IDs
     // =====================================================
     const answeredRes = await pool.query(
       `
@@ -333,7 +333,36 @@ export const startQuiz = async (req, res) => {
     const answeredIds = answeredRes.rows.map(r => r.question_id);
 
     // =====================================================
-    // 3️⃣ Fetch NORMAL Questions
+    // 3️⃣ Fetch TWO comprehension_grammer questions
+    // =====================================================
+    let comprehensionQuery = `
+      SELECT id, subject_id, topic_id, grade_id,
+             question_text, extra_data
+      FROM questions
+      WHERE question_type = 'comprehension_grammer'
+    `;
+
+    const comprehensionParams = [];
+
+    if (answeredIds.length > 0) {
+      comprehensionParams.push(answeredIds);
+      comprehensionQuery += ` AND NOT (id = ANY($${comprehensionParams.length}::int[]))`;
+    }
+
+    if (subjects?.length) {
+      comprehensionParams.push(subjects);
+      comprehensionQuery += ` AND subject_id = ANY($${comprehensionParams.length}::int[])`;
+    }
+
+    comprehensionQuery += ` ORDER BY random() LIMIT 2`;
+
+    const comprehensionRes = await pool.query(
+      comprehensionQuery,
+      comprehensionParams
+    );
+
+    // =====================================================
+    // 4️⃣ Fetch MCQ Questions
     // =====================================================
     let normalQuery = `
       SELECT id, subject_id, topic_id, grade_id,
@@ -341,7 +370,7 @@ export const startQuiz = async (req, res) => {
              question_url, answer_file_url,
              answer_explanation
       FROM questions
-      WHERE question_type != 'editable'
+      WHERE question_type = 'MCQ'
     `;
 
     const normalParams = [];
@@ -362,7 +391,7 @@ export const startQuiz = async (req, res) => {
     const normalRes = await pool.query(normalQuery, normalParams);
 
     // =====================================================
-    // 4️⃣ Fetch EDITABLE Questions
+    // 5️⃣ Fetch EDITABLE Questions
     // =====================================================
     let editableQuery = `
       SELECT id, subject_id, topic_id, grade_id,
@@ -389,7 +418,7 @@ export const startQuiz = async (req, res) => {
     const editableRes = await pool.query(editableQuery, editableParams);
 
     // =====================================================
-    // 5️⃣ Format NORMAL Questions
+    // 6️⃣ Format MCQ Questions
     // =====================================================
     const normalQuestions = normalRes.rows.map(q => ({
       id: q.id,
@@ -401,11 +430,11 @@ export const startQuiz = async (req, res) => {
       question_url: q.question_url,
       answer_file_url: q.answer_file_url,
       answer_explanation: q.answer_explanation,
-      type: "normal"
+      type: "mcq"
     }));
 
     // =====================================================
-    // 6️⃣ Format EDITABLE Questions (Using extra_data JSONB)
+    // 7️⃣ Format Editable Questions
     // =====================================================
     const editableQuestions = editableRes.rows.map(q => ({
       id: q.id,
@@ -420,13 +449,31 @@ export const startQuiz = async (req, res) => {
     }));
 
     // =====================================================
-    // 7️⃣ Combine & Shuffle
+    // 8️⃣ Format Comprehension Questions
     // =====================================================
-    const combinedQuestions = [...normalQuestions, ...editableQuestions]
-      .sort(() => Math.random() - 0.5);
+    const comprehensionQuestions = comprehensionRes.rows.map(q => ({
+      id: q.id,
+      subject_id: q.subject_id,
+      topic_id: q.topic_id,
+      grade_id: q.grade_id,
+      title: q.extra_data?.title || "Untitled",
+      passage: q.question_text,
+      options: q.extra_data?.options || [],
+      correctAnswers: q.extra_data?.correctAnswers || {},
+      type: "comprehension_grammer"
+    }));
 
     // =====================================================
-    // 8️⃣ Create Quiz Session
+    // 9️⃣ Combine & Shuffle
+    // =====================================================
+    const combinedQuestions = [
+      ...comprehensionQuestions,
+      ...normalQuestions,
+      ...editableQuestions
+    ].sort(() => Math.random() - 0.5);
+
+    // =====================================================
+    // 🔟 Create Quiz Session
     // =====================================================
     const sessionRes = await pool.query(
       `
@@ -438,14 +485,9 @@ export const startQuiz = async (req, res) => {
       [userId, combinedQuestions.length]
     );
 
-    const session = sessionRes.rows[0];
-
-    // =====================================================
-    // 9️⃣ Final Response
-    // =====================================================
     return res.status(200).json({
       ok: true,
-      session,
+      session: sessionRes.rows[0],
       questions: combinedQuestions
     });
 
@@ -805,8 +847,9 @@ export const startbigQuiz = async (req, res) => {
     const { subjects } = req.body;
 
     const TOTAL_QUESTIONS = 30;
-    const NORMAL_COUNT = 15;
+    const NORMAL_COUNT = 13; // reduced from 15
     const EDITABLE_COUNT = 15;
+    const COMPREHENSION_COUNT = 5;
 
     // =====================================================
     // 1️⃣ Get Already Answered Question IDs
@@ -824,7 +867,50 @@ export const startbigQuiz = async (req, res) => {
     const answeredIds = answeredRes.rows.map(r => r.question_id);
 
     // =====================================================
-    // 2️⃣ Fetch NORMAL Questions
+    // 2️⃣ Fetch COMPREHENSION_GRAMMER Questions
+    // =====================================================
+    let comprehensionSql = `
+      SELECT id, subject_id, topic_id,
+             question_text, extra_data
+      FROM questions
+      WHERE question_type = 'comprehension_grammer'
+    `;
+
+    const comprehensionParams = [];
+    let idx = 1;
+
+    if (answeredIds.length > 0) {
+      comprehensionSql += ` AND id <> ALL($${idx}::int[])`;
+      comprehensionParams.push(answeredIds);
+      idx++;
+    }
+
+    if (subjects?.length) {
+      comprehensionSql += ` AND subject_id = ANY($${idx}::int[])`;
+      comprehensionParams.push(subjects);
+      idx++;
+    }
+
+    comprehensionSql += ` ORDER BY random() LIMIT ${COMPREHENSION_COUNT}`;
+
+    const comprehensionRes = await pool.query(
+      comprehensionSql,
+      comprehensionParams
+    );
+
+    const comprehensionQuestions = comprehensionRes.rows.map(q => ({
+      id: q.id,
+      subject_id: q.subject_id,
+      topic_id: q.topic_id,
+      title: q.extra_data?.title || "Untitled",
+      passage: q.question_text,
+      options: q.extra_data?.options || [],
+      correctAnswers: q.extra_data?.correctAnswers || {},
+      type: "comprehension_grammer",
+    }));
+
+    // =====================================================
+    // 3️⃣ Fetch MCQ Questions
     // =====================================================
     let normalSql = `
       SELECT id, subject_id, topic_id,
@@ -832,11 +918,11 @@ export const startbigQuiz = async (req, res) => {
              question_url, answer_file_url,
              answer_explanation
       FROM questions
-      WHERE question_type = 'normal'
+      WHERE question_type = 'MCQ'
     `;
 
     const normalParams = [];
-    let idx = 1;
+    idx = 1;
 
     if (answeredIds.length > 0) {
       normalSql += ` AND id <> ALL($${idx}::int[])`;
@@ -855,8 +941,20 @@ export const startbigQuiz = async (req, res) => {
 
     const normalRes = await pool.query(normalSql, normalParams);
 
+    const normalQuestions = normalRes.rows.map(q => ({
+      id: q.id,
+      subject_id: q.subject_id,
+      topic_id: q.topic_id,
+      question_text: q.question_text,
+      options: q.options,
+      question_url: q.question_url,
+      answer_file_url: q.answer_file_url,
+      answer_explanation: q.answer_explanation,
+      type: "mcq",
+    }));
+
     // =====================================================
-    // 3️⃣ Fetch EDITABLE Questions
+    // 4️⃣ Fetch EDITABLE Questions
     // =====================================================
     let editableSql = `
       SELECT id, question_text,
@@ -886,21 +984,6 @@ export const startbigQuiz = async (req, res) => {
 
     const editableRes = await pool.query(editableSql, editableParams);
 
-    // =====================================================
-    // 4️⃣ Format Results
-    // =====================================================
-    const normalQuestions = normalRes.rows.map(q => ({
-      id: q.id,
-      subject_id: q.subject_id,
-      topic_id: q.topic_id,
-      question_text: q.question_text,
-      options: q.options,
-      question_url: q.question_url,
-      answer_file_url: q.answer_file_url,
-      answer_explanation: q.answer_explanation,
-      type: "normal",
-    }));
-
     const editableQuestions = editableRes.rows.map(q => ({
       id: q.id,
       title: q.extra_data?.title || "Untitled Quiz",
@@ -916,58 +999,19 @@ export const startbigQuiz = async (req, res) => {
     // =====================================================
     // 5️⃣ Combine
     // =====================================================
-    let combined = [...normalQuestions, ...editableQuestions];
+    let combined = [
+      ...comprehensionQuestions,
+      ...normalQuestions,
+      ...editableQuestions
+    ];
 
     // =====================================================
-    // 6️⃣ Fallback if Less Than 30
-    // =====================================================
-    if (combined.length < TOTAL_QUESTIONS) {
-      const remaining = TOTAL_QUESTIONS - combined.length;
-
-      const extraRes = await pool.query(
-        `
-        SELECT id, subject_id, topic_id,
-               question_text, options,
-               question_url, answer_file_url,
-               answer_explanation, question_type, extra_data
-        FROM questions
-        ORDER BY random()
-        LIMIT $1
-        `,
-        [remaining]
-      );
-
-      const extra = extraRes.rows.map(q => {
-        if (q.question_type === 'editable') {
-          return {
-            id: q.id,
-            title: q.extra_data?.title || "Untitled Quiz",
-            passage: q.question_text,
-            blanks: q.extra_data?.blanks || [],
-            type: "editable",
-          };
-        }
-
-        return {
-          id: q.id,
-          subject_id: q.subject_id,
-          topic_id: q.topic_id,
-          question_text: q.question_text,
-          options: q.options,
-          type: "normal",
-        };
-      });
-
-      combined = [...combined, ...extra];
-    }
-
-    // =====================================================
-    // 7️⃣ Shuffle
+    // 6️⃣ Shuffle
     // =====================================================
     combined.sort(() => Math.random() - 0.5);
 
     // =====================================================
-    // 8️⃣ Create Session
+    // 7️⃣ Create Session
     // =====================================================
     const sessionRes = await pool.query(
       `
@@ -1625,7 +1669,8 @@ export const startMiniQuiz = async (req, res) => {
 
     const MINI_TOTAL = 5;
     const desiredEditable = 2;
-    const desiredNormal = 3;
+    const desiredNormal = 1; // reduced to allow 2 comprehension
+    const desiredComprehension = 2;
 
     // =====================================================
     // 1️⃣ Get Already Answered Question IDs
@@ -1643,7 +1688,50 @@ export const startMiniQuiz = async (req, res) => {
     const answeredIds = answeredRes.rows.map(r => r.question_id);
 
     // =====================================================
-    // 2️⃣ Fetch EDITABLE Questions (from questions table)
+    // 2️⃣ Fetch COMPREHENSION Questions
+    // =====================================================
+    let comprehensionSql = `
+      SELECT id, subject_id, topic_id, grade_id,
+             question_text, extra_data
+      FROM questions
+      WHERE question_type = 'comprehension_grammer'
+    `;
+
+    const comprehensionParams = [];
+    let idx = 1;
+
+    if (answeredIds.length > 0) {
+      comprehensionSql += ` AND id <> ALL($${idx}::int[])`;
+      comprehensionParams.push(answeredIds);
+      idx++;
+    }
+
+    if (subjects?.length) {
+      comprehensionSql += ` AND subject_id = ANY($${idx}::int[])`;
+      comprehensionParams.push(subjects);
+      idx++;
+    }
+
+    comprehensionSql += ` ORDER BY random() LIMIT ${desiredComprehension}`;
+
+    const comprehensionRes = await pool.query(
+      comprehensionSql,
+      comprehensionParams
+    );
+
+    const comprehensionQuestions = comprehensionRes.rows.map(q => ({
+      id: q.id,
+      subject_id: q.subject_id,
+      topic_id: q.topic_id,
+      title: q.extra_data?.title || "Untitled",
+      passage: q.question_text,
+      options: q.extra_data?.options || [],
+      correctAnswers: q.extra_data?.correctAnswers || {},
+      type: "comprehension_grammer",
+    }));
+
+    // =====================================================
+    // 3️⃣ Fetch EDITABLE Questions
     // =====================================================
     let editableSql = `
       SELECT id, grade_id, subject_id, topic_id,
@@ -1653,7 +1741,7 @@ export const startMiniQuiz = async (req, res) => {
     `;
 
     const editableParams = [];
-    let idx = 1;
+    idx = 1;
 
     if (answeredIds.length > 0) {
       editableSql += ` AND id <> ALL($${idx}::int[])`;
@@ -1685,7 +1773,7 @@ export const startMiniQuiz = async (req, res) => {
     }));
 
     // =====================================================
-    // 3️⃣ Fetch NORMAL Questions
+    // 4️⃣ Fetch MCQ Questions
     // =====================================================
     let normalSql = `
       SELECT id, subject_id, topic_id,
@@ -1693,7 +1781,7 @@ export const startMiniQuiz = async (req, res) => {
              question_url, answer_file_url,
              answer_explanation
       FROM questions
-      WHERE question_type != 'editable'
+      WHERE question_type = 'MCQ'
     `;
 
     const normalParams = [];
@@ -1725,56 +1813,17 @@ export const startMiniQuiz = async (req, res) => {
       question_url: q.question_url,
       answer_file_url: q.answer_file_url,
       answer_explanation: q.answer_explanation,
-      type: "normal",
+      type: "mcq",
     }));
 
     // =====================================================
-    // 4️⃣ Combine
+    // 5️⃣ Combine
     // =====================================================
-    let combined = [...editableQuestions, ...normalQuestions];
-
-    // =====================================================
-    // 5️⃣ Top-Up Logic (If less than 5)
-    // =====================================================
-    if (combined.length < MINI_TOTAL) {
-      const remaining = MINI_TOTAL - combined.length;
-
-      const extraRes = await pool.query(
-        `
-        SELECT id, subject_id, topic_id,
-               question_text, options,
-               question_url, answer_file_url,
-               answer_explanation, question_type, extra_data
-        FROM questions
-        ORDER BY random()
-        LIMIT $1
-        `,
-        [remaining]
-      );
-
-      const extra = extraRes.rows.map(q => {
-        if (q.question_type === 'editable') {
-          return {
-            id: q.id,
-            title: q.extra_data?.title || "Untitled Quiz",
-            passage: q.question_text,
-            blanks: q.extra_data?.blanks || [],
-            type: "editable",
-          };
-        }
-
-        return {
-          id: q.id,
-          subject_id: q.subject_id,
-          topic_id: q.topic_id,
-          question_text: q.question_text,
-          options: q.options,
-          type: "normal",
-        };
-      });
-
-      combined = [...combined, ...extra];
-    }
+    let combined = [
+      ...comprehensionQuestions,
+      ...editableQuestions,
+      ...normalQuestions,
+    ];
 
     // =====================================================
     // 6️⃣ Shuffle
@@ -1808,7 +1857,6 @@ export const startMiniQuiz = async (req, res) => {
     });
   }
 };
-
 
 // revision quiz..........
 
