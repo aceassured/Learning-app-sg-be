@@ -722,19 +722,19 @@ export const createPost = async (req, res) => {
       query = `INSERT INTO forum_posts 
         (user_id, grade_level, content, subject_tag, type_of_upload, forum_title, topic_id, created_at, moderation_status)
         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`;
-      params = [authorId, grade_level, content, subject_tag, type_of_upload, forum_title, topic_id || 0, created_at, "approved"];
+      params = [authorId, grade_level, content, subject_tag, type_of_upload, forum_title || null, topic_id || 0, created_at, "approved"];
     }
     else if (author_type === "admin") {
       query = `INSERT INTO forum_posts 
         (admin_id, grade_level, content, subject_tag, type_of_upload, forum_title, topic_id, created_at, moderation_status)
         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`;
-      params = [authorId, grade_level, content, subject_tag, type_of_upload, forum_title, topic_id || 0, created_at, "approved"];
+      params = [authorId, grade_level, content, subject_tag, type_of_upload, forum_title || null, topic_id || 0, created_at, "approved"];
     }
     else if (author_type === "superadmin") {
       query = `INSERT INTO forum_posts 
         (super_admin_id, grade_level, content, subject_tag, type_of_upload, forum_title, topic_id, created_at, moderation_status)
         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`;
-      params = [authorId, grade_level, content, subject_tag, type_of_upload, forum_title, topic_id || 0, created_at, "approved"];
+      params = [authorId, grade_level, content, subject_tag, type_of_upload, forum_title || null, topic_id || 0, created_at, "approved"];
     }
     else {
       return res.status(400).json({ ok: false, message: "Invalid author_type" });
@@ -835,13 +835,13 @@ export const createNotes = async (req, res) => {
       postRes = await pool.query(
         `INSERT INTO forum_posts (user_id, grade_level, content, subject_tag, type_of_upload, forum_title, topic_id, created_at) 
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
-        [authorId, grade_level, content, subject_tag, type_of_upload, forum_title, topic_id, created_at]
+        [authorId, grade_level, content, subject_tag, type_of_upload, forum_title || null, topic_id, created_at]
       );
     } else if (author_type === "admin") {
       postRes = await pool.query(
         `INSERT INTO forum_posts (admin_id, grade_level, content, subject_tag, type_of_upload, forum_title, topic_id, created_at) 
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
-        [authorId, grade_level, content, subject_tag, type_of_upload, forum_title, topic_id, created_at]
+        [authorId, grade_level, content, subject_tag, type_of_upload, forum_title, topic_id || null , created_at]
       );
     } else {
       return res.status(400).json({ ok: false, message: "Invalid author_type" });
@@ -903,7 +903,7 @@ export const editPost = async (req, res) => {
           content,
           subject_tag,
           type_of_upload,
-          forum_title,
+          forum_title || null,
           topic_id,
           post_id,
           authorId,
@@ -925,7 +925,7 @@ export const editPost = async (req, res) => {
           content,
           subject_tag,
           type_of_upload,
-          forum_title,
+          forum_title || null,
           topic_id,
           post_id,
           authorId,
@@ -948,7 +948,7 @@ export const editPost = async (req, res) => {
           content,
           subject_tag,
           type_of_upload,
-          forum_title,
+          forum_title || null,
           topic_id,
           post_id,
           authorId,
@@ -2018,7 +2018,7 @@ export const addView = async (req, res) => {
 
 export const getNotesfromTopics = async (req, res) => {
   try {
-    const { subject_id, search } = req.body;
+    const { subject_id, search, page = 1 } = req.body;
 
     if (!subject_id) {
       return res.status(400).json({
@@ -2026,6 +2026,12 @@ export const getNotesfromTopics = async (req, res) => {
         message: "subject_id is required"
       });
     }
+
+    // -----------------------------------
+    // Pagination setup
+    // -----------------------------------
+    const limit = 16;
+    const offset = (page - 1) * limit;
 
     // -----------------------------------
     // Check subject exists
@@ -2052,7 +2058,7 @@ export const getNotesfromTopics = async (req, res) => {
     // Fetch notes by subject
     // -----------------------------------
     let notesQuery = `
-      SELECT ff.*, fp.user_id
+      SELECT ff.*, fp.user_id, fp.grade_level, fp.subject_tag
       FROM forum_posts fp
       JOIN forum_files ff ON ff.post_id = fp.id
       WHERE fp.subject_tag = $1
@@ -2061,13 +2067,24 @@ export const getNotesfromTopics = async (req, res) => {
     `;
 
     const values = [subject_id];
+    let index = 2;
 
+    // -----------------------------------
+    // Search support
+    // -----------------------------------
     if (search) {
-      notesQuery += ` AND ff.filename ILIKE $2`;
+      notesQuery += ` AND ff.filename ILIKE $${index}`;
       values.push(`%${search}%`);
+      index++;
     }
 
     notesQuery += ` ORDER BY ff.created_at DESC`;
+
+    // -----------------------------------
+    // Pagination
+    // -----------------------------------
+    notesQuery += ` LIMIT $${index} OFFSET $${index + 1}`;
+    values.push(limit, offset);
 
     const result = await pool.query(notesQuery, values);
     const rows = result.rows;
@@ -2079,10 +2096,34 @@ export const getNotesfromTopics = async (req, res) => {
       return res.status(200).json({
         success: true,
         subject_name: subjectName,
+        page,
         data: [],
         message: "No notes found for this subject"
       });
     }
+
+    // -----------------------------------
+    // Total count for pagination
+    // -----------------------------------
+    let countQuery = `
+      SELECT COUNT(*) 
+      FROM forum_posts fp
+      JOIN forum_files ff ON ff.post_id = fp.id
+      WHERE fp.subject_tag = $1
+        AND fp.type_of_upload = 'notes'
+        AND ff.url IS NOT NULL
+    `;
+
+    const countValues = [subject_id];
+    let countIndex = 2;
+
+    if (search) {
+      countQuery += ` AND ff.filename ILIKE $${countIndex}`;
+      countValues.push(`%${search}%`);
+    }
+
+    const countRes = await pool.query(countQuery, countValues);
+    const total = parseInt(countRes.rows[0].count);
 
     // -----------------------------------
     // Return notes
@@ -2091,7 +2132,10 @@ export const getNotesfromTopics = async (req, res) => {
       success: true,
       subject_name: subjectName,
       search: search || null,
-      total: rows.length,
+      page,
+      per_page: limit,
+      total,
+      total_pages: Math.ceil(total / limit),
       data: rows
     });
 
