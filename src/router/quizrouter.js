@@ -8,7 +8,7 @@ router.use(auth);
 
 router.get('/home', getHomeData);
 router.post('/start', startQuiz);
-router.post('/dailyquizstart', startDailyQuiz);
+router.get('/dailyquizstart', startDailyQuiz);
 router.post('/startnewquiz', startbigQuiz);
 router.post('/startminiquiz', auth, startMiniQuiz);
 router.post('/startrevision', auth, startRevisionQuiz);
