@@ -1051,17 +1051,17 @@ export const submitAnswers = async (req, res) => {
     if (!session_id || !Array.isArray(answers)) {
       return res.status(400).json({
         ok: false,
-        message: "Invalid payload",
+        message: "Invalid payload"
       });
     }
 
     await client.query("BEGIN");
 
-    // =====================================================
+    // =============================
     // 1️⃣ Validate Session
-    // =====================================================
+    // =============================
     const sessionRes = await client.query(
-      `SELECT id FROM user_quiz_sessions
+      `SELECT * FROM user_quiz_sessions
        WHERE id=$1 AND user_id=$2`,
       [session_id, userId]
     );
@@ -1070,22 +1070,27 @@ export const submitAnswers = async (req, res) => {
       await client.query("ROLLBACK");
       return res.status(404).json({
         ok: false,
-        message: "Session not found",
+        message: "Session not found"
       });
     }
 
-    let correctCount = 0;
-    let totalCount = 0;
+    const session = sessionRes.rows[0];
 
-    // =====================================================
-    // 2️⃣ Fetch All Questions At Once
-    // =====================================================
+    if (session.finished_at) {
+      await client.query("ROLLBACK");
+      return res.status(400).json({
+        ok: false,
+        message: "Quiz already submitted"
+      });
+    }
+
+    // =============================
+    // 2️⃣ Fetch Questions
+    // =============================
     const questionIds = answers.map(a => a.question_id);
 
     const questionRes = await client.query(
-      `SELECT id, question_type, correct_option_id, extra_data
-       FROM questions
-       WHERE id = ANY($1::int[])`,
+      `SELECT * FROM questions WHERE id = ANY($1::int[])`,
       [questionIds]
     );
 
@@ -1094,144 +1099,154 @@ export const submitAnswers = async (req, res) => {
       questionMap[q.id] = q;
     });
 
-    // =====================================================
-    // 3️⃣ Process Each Answer
-    // =====================================================
-    for (const ans of answers) {
-      const question = questionMap[ans.question_id];
-      if (!question) continue;
+    let totalScore = 0;
+    let totalPossible = 0;
 
-      totalCount++;
+    // =============================
+    // 3️⃣ TYPE HANDLERS
+    // =============================
 
-      let is_correct = false;
+    const handlers = {
 
-      // ================= NORMAL =================
-      if (question.question_type === "normal") {
-        is_correct =
-          Number(question.correct_option_id) ===
-          Number(ans.selected_option_id);
+      normal: (question, userAnswer) => {
+        const isCorrect =
+          Number(question.correct_option_id) === Number(userAnswer);
 
-        await client.query(
-          `INSERT INTO user_answers
-           (session_id, question_id, selected_option_id, is_correct, answered_at)
-           VALUES ($1,$2,$3,$4,NOW())
-           ON CONFLICT (session_id, question_id)
-           DO UPDATE SET
-             selected_option_id = EXCLUDED.selected_option_id,
-             is_correct = EXCLUDED.is_correct,
-             answered_at = NOW()`,
-          [
-            session_id,
-            ans.question_id,
-            ans.selected_option_id,
-            is_correct,
-          ]
-        );
-      }
+        return {
+          score: isCorrect ? 1 : 0,
+          total: 1,
+          isCorrect
+        };
+      },
 
-      // ================= EDITABLE =================
-      if (question.question_type === "editable") {
+      editable: (question, userAnswer) => {
         const blanks = question.extra_data?.blanks || [];
+        let score = 0;
 
-        const correctMap = {};
-        blanks.forEach(b => {
-          correctMap[b.id] = (b.correct_word || "")
-            .toString()
-            .trim()
-            .toLowerCase();
-        });
+        for (const blank of blanks) {
+          const correct = blank.correct_word
+            ?.toString()
+            .toLowerCase()
+            .trim();
 
-        let allCorrect = true;
+          const user = userAnswer?.[blank.position]
+            ?.toString()
+            .toLowerCase()
+            .trim();
 
-        const userAnswers = ans.answer_json || {};
-
-        for (const blankId in correctMap) {
-          const correctWord = correctMap[blankId];
-          const userWord = (userAnswers[blankId] || "")
-            .toString()
-            .trim()
-            .toLowerCase();
-
-          if (correctWord !== userWord) {
-            allCorrect = false;
-            break;
+          if (correct && user && correct === user) {
+            score++;
           }
         }
 
-        is_correct = allCorrect;
+        return {
+          score,
+          total: blanks.length,
+          isCorrect: score === blanks.length
+        };
+      },
 
-        await client.query(
-          `INSERT INTO user_answers
-           (session_id, question_id, answer_json, is_correct, answered_at)
-           VALUES ($1,$2,$3,$4,NOW())
-           ON CONFLICT (session_id, question_id)
-           DO UPDATE SET
-             answer_json = EXCLUDED.answer_json,
-             is_correct = EXCLUDED.is_correct,
-             answered_at = NOW()`,
-          [
-            session_id,
-            ans.question_id,
-            JSON.stringify(userAnswers),
-            is_correct,
-          ]
-        );
+      comprehension_grammer: (question, userAnswer) => {
+        const correctAnswers =
+          question.extra_data?.correctAnswers || {};
+
+        let score = 0;
+
+        for (const key in correctAnswers) {
+          if (correctAnswers[key] === userAnswer?.[key]) {
+            score++;
+          }
+        }
+
+        return {
+          score,
+          total: Object.keys(correctAnswers).length,
+          isCorrect:
+            score === Object.keys(correctAnswers).length
+        };
       }
 
-      if (is_correct) correctCount++;
+    };
+
+    // =============================
+    // 4️⃣ PROCESS ANSWERS
+    // =============================
+
+    for (const ans of answers) {
+
+      const question = questionMap[ans.question_id];
+      if (!question) continue;
+
+      const type = question.question_type
+        ?.toLowerCase()
+        .trim();
+
+      if (!handlers[type]) {
+        console.log("Unknown question type:", type);
+        continue;
+      }
+
+      // 🔥 Support ALL payload formats
+      const userAnswer =
+        ans.answer ??
+        ans.selected_option_id ??
+        ans.answer_json ??
+        null;
+
+      const result = handlers[type](question, userAnswer);
+
+      totalScore += result.score;
+      totalPossible += result.total;
+
+      await client.query(
+        `INSERT INTO user_answers
+         (session_id, question_id, answer_json, is_correct, answered_at)
+         VALUES ($1,$2,$3,$4,NOW())
+         ON CONFLICT (session_id, question_id)
+         DO UPDATE SET
+           answer_json = EXCLUDED.answer_json,
+           is_correct = EXCLUDED.is_correct,
+           answered_at = NOW()`,
+        [
+          session_id,
+          ans.question_id,
+          JSON.stringify(userAnswer),
+          result.isCorrect
+        ]
+      );
     }
 
-    // =====================================================
-    // 4️⃣ Update Session
-    // =====================================================
-    const sessionUpdate = await client.query(
+    // =============================
+    // 5️⃣ Update Session
+    // =============================
+    await client.query(
       `UPDATE user_quiz_sessions
        SET finished_at = NOW(),
            score = $1
-       WHERE id = $2
-       RETURNING *`,
-      [correctCount, session_id]
-    );
-
-    const incorrectCount = totalCount - correctCount;
-
-    // =====================================================
-    // 5️⃣ Update Activity
-    // =====================================================
-    await client.query(
-      `INSERT INTO user_activity
-       (user_id, activity_date, correct_count, incorrect_count)
-       VALUES ($1, CURRENT_DATE, $2, $3)
-       ON CONFLICT (user_id, activity_date)
-       DO UPDATE SET
-         correct_count = user_activity.correct_count + $2,
-         incorrect_count = user_activity.incorrect_count + $3`,
-      [userId, correctCount, incorrectCount]
+       WHERE id = $2`,
+      [totalScore, session_id]
     );
 
     await client.query("COMMIT");
 
-    const percentage =
-      totalCount === 0
-        ? 0
-        : Math.round((correctCount / totalCount) * 100);
-
     return res.json({
       ok: true,
-      score: correctCount,
-      total: totalCount,
-      percentage,
-      data: sessionUpdate.rows[0],
-      message: `🎯 Quiz completed! You scored ${correctCount}/${totalCount} (${percentage}%).`,
+      score: totalScore,
+      total: totalPossible,
+      percentage: totalPossible
+        ? Math.round((totalScore / totalPossible) * 100)
+        : 0
     });
 
-  } catch (err) {
+  } catch (error) {
     await client.query("ROLLBACK");
-    console.error("Submit error:", err);
+    console.error("Submit error:", error);
+
     return res.status(500).json({
       ok: false,
-      message: "Server error",
+      message: "Internal server error"
     });
+
   } finally {
     client.release();
   }
@@ -1244,9 +1259,6 @@ export const reviewSession = async (req, res) => {
     const { sessionId } = req.params;
     const userId = req.userId;
 
-    // =====================================================
-    // 1️⃣ Validate Session
-    // =====================================================
     const sessionRes = await pool.query(
       `SELECT * FROM user_quiz_sessions
        WHERE id=$1 AND user_id=$2`,
@@ -1256,106 +1268,133 @@ export const reviewSession = async (req, res) => {
     if (!sessionRes.rowCount) {
       return res.status(404).json({
         ok: false,
-        message: "Session not found",
+        message: "Session not found"
       });
     }
 
     const session = sessionRes.rows[0];
 
-    // =====================================================
-    // 2️⃣ Fetch All Answers (Normal + Editable)
-    // =====================================================
     const answerRes = await pool.query(
       `SELECT 
           ua.question_id,
-          ua.selected_option_id,
           ua.answer_json,
           ua.is_correct,
           q.question_type,
           q.question_text,
           q.options,
           q.correct_option_id,
-          q.extra_data,
-          q.question_url,
-          q.answer_file_url,
-          q.answer_explanation
+          q.extra_data
        FROM user_answers ua
        JOIN questions q ON q.id = ua.question_id
        WHERE ua.session_id = $1`,
       [sessionId]
     );
 
-    const normal = [];
-    const editable = [];
+    const review = [];
+    let totalMarks = 0;
+    let obtainedMarks = 0;
 
-    // =====================================================
-    // 3️⃣ Build Response
-    // =====================================================
     for (const row of answerRes.rows) {
 
+      const type = row.question_type?.toLowerCase().trim();
+      const userAnswer = row.answer_json;
+
       // ================= NORMAL =================
-      if (row.question_type === "normal") {
-        normal.push({
+      if (type === "normal") {
+
+        const isCorrect =
+          Number(row.correct_option_id) === Number(userAnswer);
+
+        review.push({
           type: "normal",
           question_id: row.question_id,
           question_text: row.question_text,
-          options: row.options,
-          selected_option_id: row.selected_option_id,
+          selected_option_id: userAnswer,
           correct_option_id: row.correct_option_id,
-          is_correct: row.is_correct,
-          question_url: row.question_url,
-          answer_file_url: row.answer_file_url,
-          answer_explanation: row.answer_explanation,
+          is_correct: isCorrect,
+          mark: isCorrect ? 1 : 0
         });
+
+        totalMarks += 1;
+        if (isCorrect) obtainedMarks += 1;
       }
 
       // ================= EDITABLE =================
-      if (row.question_type === "editable") {
+      if (type === "editable") {
+
         const blanks = row.extra_data?.blanks || [];
-        const userAnswers = row.answer_json || {};
 
-        const reconstructedBlanks = blanks.map(blank => ({
-          blank_id: blank.id,
-          position: blank.position,
-          correct_word: blank.correct_word,
-          user_answer: userAnswers[blank.id] || "",
-          is_correct:
-            (blank.correct_word || "")
-              .toString()
-              .trim()
-              .toLowerCase() ===
-            (userAnswers[blank.id] || "")
-              .toString()
-              .trim()
-              .toLowerCase(),
-        }));
+        for (const blank of blanks) {
 
-        editable.push({
-          type: "editable",
-          question_id: row.question_id,
-          passage: row.question_text,
-          blanks: reconstructedBlanks,
-          overall_correct: row.is_correct,
-        });
+          const userWord =
+            userAnswer?.[blank.position] || "";
+
+          const isCorrect =
+            blank.correct_word
+              ?.toLowerCase()
+              .trim() ===
+            userWord
+              ?.toLowerCase()
+              .trim();
+
+          review.push({
+            type: "editable_blank",
+            question_id: row.question_id,
+            position: blank.position,
+            correct_word: blank.correct_word,
+            user_answer: userWord,
+            is_correct: isCorrect,
+            mark: isCorrect ? 1 : 0
+          });
+
+          totalMarks += 1;
+          if (isCorrect) obtainedMarks += 1;
+        }
+      }
+
+      // ================= COMPREHENSION =================
+      if (type === "comprehension_grammer") {
+
+        const correctAnswers =
+          row.extra_data?.correctAnswers || {};
+
+        for (const key in correctAnswers) {
+
+          const isCorrect =
+            correctAnswers[key] === userAnswer?.[key];
+
+          review.push({
+            type: "comprehension_blank",
+            question_id: row.question_id,
+            blank: key,
+            correct_answer: correctAnswers[key],
+            user_answer: userAnswer?.[key],
+            is_correct: isCorrect,
+            mark: isCorrect ? 1 : 0
+          });
+
+          totalMarks += 1;
+          if (isCorrect) obtainedMarks += 1;
+        }
       }
     }
 
-    // =====================================================
-    // 4️⃣ Final Response
-    // =====================================================
     return res.json({
       ok: true,
       session,
-      totalAnswers: answerRes.rows.length,
-      normal,
-      editable,
+      totalMarks,
+      obtainedMarks,
+      percentage: totalMarks
+        ? Math.round((obtainedMarks / totalMarks) * 100)
+        : 0,
+      review
     });
 
   } catch (err) {
     console.error("reviewSession error:", err);
     return res.status(500).json({
       ok: false,
-      message: "Server error",
+      message: "Server error"
     });
   }
 };
