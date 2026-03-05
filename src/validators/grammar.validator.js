@@ -6,8 +6,8 @@ export const createGrammarClozeValidator = [
   body("title")
   .optional({ nullable: true, checkFalsy: true })
   .trim()
-  .isLength({ min: 30 })
-  .withMessage("Title must be at least 30 characters"),
+  .isLength({ min: 5 })
+  .withMessage("Title must be at least 5 characters"),
 
   // Passage
   body("passage")
@@ -179,8 +179,8 @@ export const createComprehensionClozeValidator = [
     body("title")
     .optional({ nullable: true, checkFalsy: true })
     .trim()
-    .isLength({ min: 30 })
-    .withMessage("Title must be at least 30 characters"),
+    .isLength({ min: 5 })
+    .withMessage("Title must be at least 5 characters"),
   
     // Passage
     body("passage")
