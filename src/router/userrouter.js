@@ -34,7 +34,10 @@ import {
   adminRequestActive,
   userRequestActive,
   downloadAllGradeSubjectTopics,
-  getAllGradesWithoutPagination
+  getAllGradesWithoutPagination,
+  userLogout,
+  adminLogout,
+  updateUserSetting
 } from '../controller/usercontroller.js';
 import { deleteForum, deleteUser } from '../controller/forumcontroller.js';
 import { admingetTopics, getTopics } from '../controller/quizcontroller.js';
@@ -110,7 +113,9 @@ router.post('/uservotepoll', auth, userVoteforpoll);
 // production....
 
 router.post("/commonlogin", Commonlogin)
+router.post("/userlogout",auth,userLogout)
 router.post("/admincommonlogin",commonLoginValidation, adminCommonlogin)
+router.post("/adminlogout",adminLogout)
 router.post("/userregister", userregisterApi)
 router.post("/userjustregister", userJustregisterApi)
 router.post("/userverifyotp", userverifyOtp)
@@ -143,6 +148,8 @@ router.post('/biometric-login', bioMetricLogin); // No email required
 
 // optional
 router.delete('/cleanup-biometric-records/:id', removeBiometricCrendentials);
+
+router.post("/update-setting", auth, updateUserSetting);
 
 
 

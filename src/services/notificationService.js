@@ -556,7 +556,7 @@ export const sendNotificationToUser = async (userId, notificationData) => {
 //            u.fcm_token, 
 //            s.daily_reminder_time
 //          FROM users u
-//          INNER JOIN user_settings s ON s.user_id = u.id
+//          INNER JOIN  s ON s.user_id = u.id
 //          WHERE s.reminder_enabled = true
 //          AND s.daily_reminder_time = $1::time`,
 //         [currentTimeStr]

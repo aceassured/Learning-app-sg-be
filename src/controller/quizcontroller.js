@@ -383,7 +383,7 @@ export const startQuiz = async (req, res) => {
       `
       SELECT *
       FROM questions
-      WHERE question_type = 'comprehension_grammer'
+      WHERE question_type = 'grammar_cloze'
       AND NOT (id = ANY($1::int[]))
       ${subjects?.length ? `AND subject_id = ANY($2::int[])` : ``}
       ORDER BY random()
@@ -461,14 +461,14 @@ export const startQuiz = async (req, res) => {
       }
 
       // COMPREHENSION GRAMMER
-      if (q.question_type === "comprehension_grammer") {
+      if (q.question_type === "grammar_cloze") {
         return {
           id: q.id,
           title: q.extra_data?.title || "Untitled",
           passage: q.question_text,
           options: q.extra_data?.options || [],
           correctAnswers: q.extra_data?.correctAnswers || {},
-          type: "comprehension_grammer"
+          type: "grammar_cloze"
         };
       }
 
@@ -645,7 +645,7 @@ export const startDailyQuiz = async (req, res) => {
       }
 
       // COMPREHENSION GRAMMER
-      if (q.question_type === "comprehension_grammer") {
+      if (q.question_type === "grammar_cloze") {
         return {
           id: q.id,
           subject_id: q.subject_id,
@@ -654,7 +654,7 @@ export const startDailyQuiz = async (req, res) => {
           passage: q.question_text,
           options: q.extra_data?.options || [],
           correctAnswers: q.extra_data?.correctAnswers || {},
-          type: "comprehension_grammer"
+          type: "grammar_cloze"
         };
       }
 
@@ -988,7 +988,7 @@ export const startbigQuiz = async (req, res) => {
       `
       SELECT *
       FROM questions
-      WHERE question_type = 'comprehension_grammer'
+      WHERE question_type = 'grammar_cloze'
       AND NOT (id = ANY($1::int[]))
       ${subjects?.length ? `AND subject_id = ANY($2::int[])` : ``}
       ORDER BY random()
@@ -1069,7 +1069,7 @@ export const startbigQuiz = async (req, res) => {
       }
 
       // COMPREHENSION GRAMMER
-      if (q.question_type === "comprehension_grammer") {
+      if (q.question_type === "grammar_cloze") {
         return {
           id: q.id,
           subject_id: q.subject_id,
@@ -1078,7 +1078,7 @@ export const startbigQuiz = async (req, res) => {
           passage: q.question_text,
           options: q.extra_data?.options || [],
           correctAnswers: q.extra_data?.correctAnswers || {},
-          type: "comprehension_grammer"
+          type: "grammar_cloze"
         };
       }
 
@@ -1269,7 +1269,7 @@ export const submitAnswers = async (req, res) => {
         };
       },
 
-      comprehension_grammer: (question, userAnswer) => {
+      grammar_cloze: (question, userAnswer) => {
 
         const extra =
           typeof question.extra_data === "string"

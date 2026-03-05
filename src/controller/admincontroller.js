@@ -3717,7 +3717,7 @@ export const createGrammarCloze = async (req, res) => {
     }
 
     const extraData = {
-      title: title.trim(),
+      title: title.trim() || null,
       passage: passage.trim(),
       options,
       correctAnswers,
@@ -3740,7 +3740,7 @@ export const createGrammarCloze = async (req, res) => {
       `,
       [
         passage.trim(),
-        "comprehension_grammer",
+        "grammar_cloze",
         subject_id,
         topic_id ?? null,
         grade_id,
@@ -4132,7 +4132,7 @@ export const createComprehensionCloze = async (req, res) => {
 
     // 🧠 Prepare JSON data
     const extraData = {
-      title: title.trim(),
+      title: title.trim() || null,
       passage: passage.trim(),
       correctAnswers
     };

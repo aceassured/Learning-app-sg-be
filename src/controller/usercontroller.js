@@ -255,6 +255,41 @@ export const Commonlogin = async (req, res) => {
   }
 };
 
+
+// User Logout
+
+
+export const userLogout = async (req, res) => {
+  try {
+
+    const userId = req.userId;
+
+    await pool.query(
+      `UPDATE users 
+       SET fcm_token = NULL
+       WHERE id = $1`,
+      [userId]
+    );
+
+    return res.json({
+      status: true,
+      message: "Logout successful"
+    });
+
+  } catch (error) {
+
+    console.error("Logout error:", error);
+
+    return res.status(500).json({
+      status: false,
+      message: "Server error"
+    });
+
+  }
+};
+
+
+
 // const convertCredentialForVerification = (credential) => {
 //   return {
 //     id: credential.id,
@@ -3595,6 +3630,38 @@ export const adminCommonlogin = async (req, res) => {
   }
 };
 
+
+
+// Admin Logout
+
+export const adminLogout = async (req, res) => {
+  try {
+
+    const userId = req.userId;
+    const role = req.userRole;
+
+    return res.status(200).json({
+      status: true,
+      message: `${role} logout successful`,
+      data: {
+        user_id: userId,
+        role
+      }
+    });
+
+  } catch (error) {
+
+    console.error("Admin logout error:", error);
+
+    return res.status(500).json({
+      status: false,
+      message: "Internal server error"
+    });
+
+  }
+};
+
+
 // User reset password....
 
 export const userResetPassword = async (req, res) => {
@@ -4077,5 +4144,59 @@ export const userRequestActive = async (req, res) => {
     });
   } finally {
     client.release(); // ✅ Always release client
+  }
+};
+
+
+// User Settings-
+
+export const updateUserSetting = async (req, res) => {
+  try {
+
+    const userId = req.userId;
+    const { setting, value } = req.body;
+
+    if (!setting) {
+      return res.status(400).json({
+        status: false,
+        message: "Setting name required"
+      });
+    }
+
+    const allowedSettings = [
+      "reminder_enabled",
+      "enable_biometric"
+    ];
+
+    if (!allowedSettings.includes(setting)) {
+      return res.status(400).json({
+        status: false,
+        message: "Invalid setting"
+      });
+    }
+
+    const result = await pool.query(
+      `UPDATE user_settings
+       SET ${setting} = $1
+       WHERE user_id = $2
+       RETURNING *`,
+      [value, userId]
+    );
+
+    return res.json({
+      status: true,
+      message: "Setting updated successfully",
+      data: result.rows[0]
+    });
+
+  } catch (error) {
+
+    console.error("Update setting error:", error);
+
+    return res.status(500).json({
+      status: false,
+      message: "Server error"
+    });
+
   }
 };

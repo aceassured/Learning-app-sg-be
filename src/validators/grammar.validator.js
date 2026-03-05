@@ -4,11 +4,10 @@ import pool from "../../database.js";
 export const createGrammarClozeValidator = [
   // Title
   body("title")
-    .trim()
-    .notEmpty()
-    .withMessage("Title is required")
-    .isLength({ min: 5 })
-    .withMessage("Title must be at least 5 characters"),
+  .optional({ nullable: true, checkFalsy: true })
+  .trim()
+  .isLength({ min: 30 })
+  .withMessage("Title must be at least 30 characters"),
 
   // Passage
   body("passage")
@@ -178,11 +177,10 @@ export const createComprehensionClozeValidator = [
 
     // Title
     body("title")
-      .trim()
-      .notEmpty()
-      .withMessage("Title is required")
-      .isLength({ min: 5 })
-      .withMessage("Title must be at least 5 characters"),
+    .optional({ nullable: true, checkFalsy: true })
+    .trim()
+    .isLength({ min: 30 })
+    .withMessage("Title must be at least 30 characters"),
   
     // Passage
     body("passage")
