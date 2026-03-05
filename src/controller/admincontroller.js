@@ -3802,7 +3802,7 @@ export const getAllGrammarPronouns = async (req, res) => {
     limit = Math.min(parseInt(limit, 10) || 10, 50);
     const offset = (page - 1) * limit;
 
-    const whereClauses = [`q.question_type = 'comprehension_grammer'`];
+    const whereClauses = [`q.question_type = 'grammar_cloze'`];
     const values = [];
     let idx = 1;
 
