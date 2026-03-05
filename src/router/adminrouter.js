@@ -4,14 +4,18 @@ import { adminAnnouncementpoll, adminCreateBulkEditableQuizQuestions, adminCreat
   deleteGrade, deletePoll, deleteSubject, deleteTopic, getAllEditQuizzes, getAllEditQuizzesnew, getAllpoll, getAllQuestionsnew, getEditableUploadData, getEditableUploadHistory, getParticularEditableQuiz, getUserEditingQuiz, prebuildDocument, updateEditQuiz, updateGrade, updateSubject, updateTopics,createGrammarCloze, 
   getAllGrammarPronouns,
   updateGrammarPronoun,
-  deleteGrammarPronoun} from "../controller/admincontroller.js"
+  deleteGrammarPronoun,
+  createComprehensionCloze,
+  updateComprehensionCloze,
+  getAllComprehensionCloze,
+  deleteComprehensionCloze} from "../controller/admincontroller.js"
 import auth from "../middleware/auth.js"
 import { admincreateSubject, admincreateTopic, getAllTopic, getParticularquestions, updatequestion } from "../controller/usercontroller.js"
 import multer from "multer";
 import { deleteUpload, getQuestionsForUpload, getUploadHistory, questionFileupload } from "../utils/vercel-blob.js";
 import { extractPdfText } from "../utils/pdfExtractor.js";
 import { parseQuestionsFromText } from "../utils/questionParser.js";
-import { createGrammarClozeValidator, validateRequest } from "../validators/grammar.validator.js";
+import { createComprehensionClozeValidator, createGrammarClozeValidator, validateRequest, validateRequestComprehenstion } from "../validators/grammar.validator.js";
 
 
 const upload = multer();
@@ -79,6 +83,22 @@ router.get("/grammar-pronouns", getAllGrammarPronouns);
 router.put("/grammar-pronouns/:id", updateGrammarPronoun);
 router.delete("/grammar-pronouns/:id", deleteGrammarPronoun);
 
+
+router.post("/comprehension-cloze",createComprehensionClozeValidator,validateRequestComprehenstion,createComprehensionCloze)
+router.put(
+  "/comprehension-cloze/:id",
+  createComprehensionClozeValidator,
+  validateRequest,
+  updateComprehensionCloze
+);
+
+router.get("/comprehension-cloze",getAllComprehensionCloze)
+router.delete(
+  "/comprehension-cloze/:id",
+  deleteComprehensionCloze
+);
+
+
 router.post("/upload-pdf", upload.single("pdf"), async (req, res) => {
 
   try {
@@ -108,6 +128,7 @@ router.post("/upload-pdf", upload.single("pdf"), async (req, res) => {
     res.status(500).json({ message: "Processing failed" });
   }
 });
+
 
 router.post("/analyze-pdf", upload.single("file"), analyzePDF);
 router.post("/analyze", prebuildDocument);

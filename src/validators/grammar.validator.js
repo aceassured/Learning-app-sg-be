@@ -163,3 +163,182 @@ export const validateRequest = (req, res, next) => {
 
   next();
 };
+
+
+
+
+
+
+
+
+
+
+
+export const createComprehensionClozeValidator = [
+
+    // Title
+    body("title")
+      .trim()
+      .notEmpty()
+      .withMessage("Title is required")
+      .isLength({ min: 5 })
+      .withMessage("Title must be at least 5 characters"),
+  
+    // Passage
+    body("passage")
+      .trim()
+      .notEmpty()
+      .withMessage("Passage is required")
+      .isLength({ min: 20 })
+      .withMessage("Passage must be at least 20 characters"),
+  
+    // Grade
+    body("grade_id")
+      .notEmpty()
+      .withMessage("grade_id is required")
+      .isInt()
+      .withMessage("grade_id must be integer"),
+  
+    // Subject
+    body("subject_id")
+      .notEmpty()
+      .withMessage("subject_id is required")
+      .isInt()
+      .withMessage("subject_id must be integer"),
+  
+    // Topic (Optional)
+    body("topic_id")
+      .optional({ nullable: true, checkFalsy: true })
+      .isInt()
+      .withMessage("topic_id must be integer"),
+  
+    // Difficulty level (Optional)
+    body("difficulty_level")
+      .optional({ nullable: true, checkFalsy: true })
+      .isIn(["easy", "medium", "hard"])
+      .withMessage("difficulty_level must be easy, medium or hard"),
+  
+    // Correct Answers
+    body("correctAnswers")
+      .isObject()
+      .withMessage("correctAnswers must be an object"),
+  
+    // ===============================
+    // Advanced Custom Validation
+    // ===============================
+    body().custom(async (value) => {
+  
+      const {
+        passage,
+        correctAnswers,
+        grade_id,
+        subject_id,
+        topic_id
+      } = value;
+  
+      // -------------------------------
+      // Validate blanks in passage
+      // -------------------------------
+      const blankMatches = passage.match(/\((\d+)\)/g);
+  
+      if (!blankMatches) {
+        throw new Error("No blanks found in passage");
+      }
+  
+      const blankNumbers = blankMatches.map(b =>
+        parseInt(b.replace(/[()]/g, ""))
+      );
+  
+      const uniqueBlanks = new Set(blankNumbers);
+  
+      if (uniqueBlanks.size !== blankNumbers.length) {
+        throw new Error("Duplicate blank numbers found");
+      }
+  
+      // Ensure blanks are sequential
+      for (let i = 0; i < blankNumbers.length; i++) {
+        if (!blankNumbers.includes(i + 1)) {
+          throw new Error(
+            "Blank numbers must start from 1 and be sequential"
+          );
+        }
+      }
+  
+      // -------------------------------
+      // Validate answers count
+      // -------------------------------
+      if (Object.keys(correctAnswers).length !== blankNumbers.length) {
+        throw new Error(
+          "Correct answers count must match blank count"
+        );
+      }
+  
+      // -------------------------------
+      // Validate answer values
+      // -------------------------------
+      for (const key of Object.keys(correctAnswers)) {
+  
+        const answer = correctAnswers[key];
+  
+        if (!answer || answer.trim() === "") {
+          throw new Error(`Answer missing for blank (${key})`);
+        }
+      }
+  
+      // -------------------------------
+      // Validate grade
+      // -------------------------------
+      const gradeCheck = await pool.query(
+        "SELECT id FROM grades WHERE id = $1",
+        [grade_id]
+      );
+  
+      if (gradeCheck.rowCount === 0) {
+        throw new Error("Invalid grade_id");
+      }
+  
+      // -------------------------------
+      // Validate subject
+      // -------------------------------
+      const subjectCheck = await pool.query(
+        "SELECT id FROM subjects WHERE id = $1",
+        [subject_id]
+      );
+  
+      if (subjectCheck.rowCount === 0) {
+        throw new Error("Invalid subject_id");
+      }
+  
+      // -------------------------------
+      // Validate topic if provided
+      // -------------------------------
+      if (topic_id) {
+  
+        const topicCheck = await pool.query(
+          "SELECT id FROM topics WHERE id = $1",
+          [topic_id]
+        );
+  
+        if (topicCheck.rowCount === 0) {
+          throw new Error("Invalid topic_id");
+        }
+      }
+  
+      return true;
+    }),
+  
+  ];
+  
+  export const validateRequestComprehenstion = (req, res, next) => {
+  
+    const errors = validationResult(req);
+  
+    if (!errors.isEmpty()) {
+      return res.status(400).json({
+        success: false,
+        errors: errors.array().map(err => err.msg)
+      });
+    }
+  
+    next();
+  };

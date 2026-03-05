@@ -306,7 +306,7 @@ export const startQuiz = async (req, res) => {
     const { subjects } = req.body;
 
     // =====================================================
-    // 1️⃣ Get user quiz size
+    // 1️⃣ Get quiz size
     // =====================================================
     const userRes = await pool.query(
       `SELECT questions_per_day FROM users WHERE id = $1`,
@@ -316,7 +316,7 @@ export const startQuiz = async (req, res) => {
     const TOTAL = userRes.rows[0]?.questions_per_day || 10;
 
     // =====================================================
-    // 2️⃣ Already answered questions
+    // 2️⃣ Already answered
     // =====================================================
     const answeredRes = await pool.query(
       `
@@ -333,14 +333,15 @@ export const startQuiz = async (req, res) => {
     // =====================================================
     // 3️⃣ Distribution
     // =====================================================
-    const NORMAL_COUNT = 4;
+    const NORMAL_COUNT = 3;
     const EDITABLE_COUNT = 3;
-    const COMPREHENSION_COUNT = 3;
+    const COMPREHENSION_COUNT = 2;
+    const CLOZE_COUNT = 2;
 
     let selectedQuestions = [];
 
     // =====================================================
-    // 4️⃣ NORMAL QUESTIONS
+    // 4️⃣ NORMAL
     // =====================================================
     const normalRes = await pool.query(
       `
@@ -358,7 +359,7 @@ export const startQuiz = async (req, res) => {
     selectedQuestions.push(...normalRes.rows);
 
     // =====================================================
-    // 5️⃣ EDITABLE QUESTIONS
+    // 5️⃣ EDITABLE
     // =====================================================
     const editableRes = await pool.query(
       `
@@ -376,7 +377,7 @@ export const startQuiz = async (req, res) => {
     selectedQuestions.push(...editableRes.rows);
 
     // =====================================================
-    // 6️⃣ COMPREHENSION QUESTIONS
+    // 6️⃣ COMPREHENSION GRAMMAR
     // =====================================================
     const compRes = await pool.query(
       `
@@ -394,7 +395,25 @@ export const startQuiz = async (req, res) => {
     selectedQuestions.push(...compRes.rows);
 
     // =====================================================
-    // 7️⃣ Fill remaining questions if any type is missing
+    // 7️⃣ CLOZE
+    // =====================================================
+    const clozeRes = await pool.query(
+      `
+      SELECT *
+      FROM questions
+      WHERE question_type = 'comprehension_cloze'
+      AND NOT (id = ANY($1::int[]))
+      ${subjects?.length ? `AND subject_id = ANY($2::int[])` : ``}
+      ORDER BY random()
+      LIMIT ${CLOZE_COUNT}
+      `,
+      subjects?.length ? [answeredIds, subjects] : [answeredIds]
+    );
+
+    selectedQuestions.push(...clozeRes.rows);
+
+    // =====================================================
+    // 8️⃣ Fill remaining if missing
     // =====================================================
     const remaining = TOTAL - selectedQuestions.length;
 
@@ -425,10 +444,11 @@ export const startQuiz = async (req, res) => {
     }
 
     // =====================================================
-    // 8️⃣ Format questions
+    // 9️⃣ Format
     // =====================================================
     const formatted = selectedQuestions.map(q => {
 
+      // EDITABLE
       if (q.question_type === "editable") {
         return {
           id: q.id,
@@ -440,6 +460,7 @@ export const startQuiz = async (req, res) => {
         };
       }
 
+      // COMPREHENSION GRAMMER
       if (q.question_type === "comprehension_grammer") {
         return {
           id: q.id,
@@ -451,6 +472,18 @@ export const startQuiz = async (req, res) => {
         };
       }
 
+      // CLOZE
+      if (q.question_type === "comprehension_cloze") {
+        return {
+          id: q.id,
+          title: q.extra_data?.title || "Untitled",
+          passage: q.question_text,
+          correctAnswers: q.extra_data?.correctAnswers || {},
+          type: "comprehension_cloze"
+        };
+      }
+
+      // NORMAL
       return {
         id: q.id,
         question_text: q.question_text,
@@ -464,12 +497,12 @@ export const startQuiz = async (req, res) => {
     });
 
     // =====================================================
-    // 9️⃣ Shuffle questions
+    // 🔟 Shuffle
     // =====================================================
     const shuffled = formatted.sort(() => Math.random() - 0.5);
 
     // =====================================================
-    // 🔟 Create quiz session
+    // 1️⃣1️⃣ Create session
     // =====================================================
     const sessionRes = await pool.query(
       `
@@ -597,6 +630,7 @@ export const startDailyQuiz = async (req, res) => {
 
     const formattedQuestions = collectedQuestions.map(q => {
 
+      // EDITABLE
       if (q.question_type === "editable") {
         return {
           id: q.id,
@@ -610,6 +644,7 @@ export const startDailyQuiz = async (req, res) => {
         };
       }
 
+      // COMPREHENSION GRAMMER
       if (q.question_type === "comprehension_grammer") {
         return {
           id: q.id,
@@ -623,6 +658,20 @@ export const startDailyQuiz = async (req, res) => {
         };
       }
 
+      // NEW CLOZE TYPE
+      if (q.question_type === "comprehension_cloze") {
+        return {
+          id: q.id,
+          subject_id: q.subject_id,
+          topic_id: q.topic_id,
+          title: q.extra_data?.title || "Untitled",
+          passage: q.question_text,
+          correctAnswers: q.extra_data?.correctAnswers || {},
+          type: "comprehension_cloze"
+        };
+      }
+
+      // NORMAL
       return {
         id: q.id,
         subject_id: q.subject_id,
@@ -872,7 +921,7 @@ export const startbigQuiz = async (req, res) => {
     const TOTAL = 30;
 
     // =====================================================
-    // 1️⃣ Get Already Answered Questions
+    // 1️⃣ Already answered questions
     // =====================================================
     const answeredRes = await pool.query(
       `
@@ -889,9 +938,10 @@ export const startbigQuiz = async (req, res) => {
     // =====================================================
     // 2️⃣ Distribution
     // =====================================================
-    const NORMAL_COUNT = 12;
-    const EDITABLE_COUNT = 9;
-    const COMPREHENSION_COUNT = 9;
+    const NORMAL_COUNT = 10;
+    const EDITABLE_COUNT = 8;
+    const COMPREHENSION_COUNT = 6;
+    const CLOZE_COUNT = 6;
 
     let selectedQuestions = [];
 
@@ -932,7 +982,7 @@ export const startbigQuiz = async (req, res) => {
     selectedQuestions.push(...editableRes.rows);
 
     // =====================================================
-    // 5️⃣ COMPREHENSION
+    // 5️⃣ COMPREHENSION GRAMMER
     // =====================================================
     const compRes = await pool.query(
       `
@@ -950,7 +1000,25 @@ export const startbigQuiz = async (req, res) => {
     selectedQuestions.push(...compRes.rows);
 
     // =====================================================
-    // 6️⃣ Fill Remaining If Types Are Missing
+    // 6️⃣ CLOZE
+    // =====================================================
+    const clozeRes = await pool.query(
+      `
+      SELECT *
+      FROM questions
+      WHERE question_type = 'comprehension_cloze'
+      AND NOT (id = ANY($1::int[]))
+      ${subjects?.length ? `AND subject_id = ANY($2::int[])` : ``}
+      ORDER BY random()
+      LIMIT ${CLOZE_COUNT}
+      `,
+      subjects?.length ? [answeredIds, subjects] : [answeredIds]
+    );
+
+    selectedQuestions.push(...clozeRes.rows);
+
+    // =====================================================
+    // 7️⃣ Fill remaining if needed
     // =====================================================
     const remaining = TOTAL - selectedQuestions.length;
 
@@ -981,10 +1049,11 @@ export const startbigQuiz = async (req, res) => {
     }
 
     // =====================================================
-    // 7️⃣ Format Questions
+    // 8️⃣ Format Questions
     // =====================================================
     const formatted = selectedQuestions.map(q => {
 
+      // EDITABLE
       if (q.question_type === "editable") {
         return {
           id: q.id,
@@ -999,6 +1068,7 @@ export const startbigQuiz = async (req, res) => {
         };
       }
 
+      // COMPREHENSION GRAMMER
       if (q.question_type === "comprehension_grammer") {
         return {
           id: q.id,
@@ -1012,6 +1082,20 @@ export const startbigQuiz = async (req, res) => {
         };
       }
 
+      // CLOZE
+      if (q.question_type === "comprehension_cloze") {
+        return {
+          id: q.id,
+          subject_id: q.subject_id,
+          topic_id: q.topic_id,
+          title: q.extra_data?.title || "Untitled",
+          passage: q.question_text,
+          correctAnswers: q.extra_data?.correctAnswers || {},
+          type: "comprehension_cloze"
+        };
+      }
+
+      // NORMAL
       return {
         id: q.id,
         subject_id: q.subject_id,
@@ -1027,12 +1111,12 @@ export const startbigQuiz = async (req, res) => {
     });
 
     // =====================================================
-    // 8️⃣ Shuffle
+    // 9️⃣ Shuffle
     // =====================================================
     const shuffled = formatted.sort(() => Math.random() - 0.5);
 
     // =====================================================
-    // 9️⃣ Create Quiz Session
+    // 🔟 Create Session
     // =====================================================
     const sessionRes = await pool.query(
       `
@@ -1198,6 +1282,41 @@ export const submitAnswers = async (req, res) => {
 
         for (const key in correctAnswers) {
           if (correctAnswers[key] === userAnswer?.[key]) {
+            score++;
+          }
+        }
+
+        return {
+          score,
+          total: Object.keys(correctAnswers).length,
+          isCorrect:
+            score === Object.keys(correctAnswers).length
+        };
+      },
+
+      // ✅ NEW CLOZE HANDLER
+      comprehension_cloze: (question, userAnswer) => {
+
+        const extra =
+          typeof question.extra_data === "string"
+            ? JSON.parse(question.extra_data)
+            : question.extra_data;
+
+        const correctAnswers = extra?.correctAnswers || {};
+
+        let score = 0;
+
+        for (const key in correctAnswers) {
+          if (
+            correctAnswers[key]
+              ?.toString()
+              .toLowerCase()
+              .trim() ===
+            userAnswer?.[key]
+              ?.toString()
+              .toLowerCase()
+              .trim()
+          ) {
             score++;
           }
         }
@@ -1408,7 +1527,7 @@ export const reviewSession = async (req, res) => {
         }
       }
 
-      // ================= COMPREHENSION =================
+      // ================= COMPREHENSION GRAMMER =================
       if (type === "comprehension_grammer") {
 
         const correctAnswers =
@@ -1421,6 +1540,43 @@ export const reviewSession = async (req, res) => {
 
           review.push({
             type: "comprehension_blank",
+            question_id: row.question_id,
+            blank: key,
+            correct_answer: correctAnswers[key],
+            user_answer: userAnswer?.[key],
+            is_correct: isCorrect,
+            mark: isCorrect ? 1 : 0
+          });
+
+          totalMarks += 1;
+          if (isCorrect) obtainedMarks += 1;
+        }
+      }
+
+      // ================= CLOZE =================
+      if (type === "comprehension_cloze") {
+
+        const correctAnswers =
+          row.extra_data?.correctAnswers || {};
+
+        for (const key in correctAnswers) {
+
+          const correct =
+            correctAnswers[key]
+              ?.toString()
+              .toLowerCase()
+              .trim();
+
+          const user =
+            userAnswer?.[key]
+              ?.toString()
+              .toLowerCase()
+              .trim();
+
+          const isCorrect = correct === user;
+
+          review.push({
+            type: "comprehension_cloze_blank",
             question_id: row.question_id,
             blank: key,
             correct_answer: correctAnswers[key],
@@ -1767,7 +1923,8 @@ export const startMiniQuiz = async (req, res) => {
 
     const NORMAL_COUNT = 1;
     const EDITABLE_COUNT = 2;
-    const COMPREHENSION_COUNT = 2;
+    const COMPREHENSION_COUNT = 1;
+    const CLOZE_COUNT = 1;
 
     // =====================================================
     // 1️⃣ Get Already Answered Question IDs
@@ -1787,7 +1944,7 @@ export const startMiniQuiz = async (req, res) => {
     let selectedQuestions = [];
 
     // =====================================================
-    // 2️⃣ COMPREHENSION
+    // 2️⃣ COMPREHENSION GRAMMER
     // =====================================================
     const comprehensionRes = await pool.query(
       `
@@ -1805,7 +1962,25 @@ export const startMiniQuiz = async (req, res) => {
     selectedQuestions.push(...comprehensionRes.rows);
 
     // =====================================================
-    // 3️⃣ EDITABLE
+    // 3️⃣ CLOZE
+    // =====================================================
+    const clozeRes = await pool.query(
+      `
+      SELECT *
+      FROM questions
+      WHERE question_type = 'comprehension_cloze'
+      AND NOT (id = ANY($1::int[]))
+      ${subjects?.length ? `AND subject_id = ANY($2::int[])` : ``}
+      ORDER BY random()
+      LIMIT ${CLOZE_COUNT}
+      `,
+      subjects?.length ? [answeredIds, subjects] : [answeredIds]
+    );
+
+    selectedQuestions.push(...clozeRes.rows);
+
+    // =====================================================
+    // 4️⃣ EDITABLE
     // =====================================================
     const editableRes = await pool.query(
       `
@@ -1823,7 +1998,7 @@ export const startMiniQuiz = async (req, res) => {
     selectedQuestions.push(...editableRes.rows);
 
     // =====================================================
-    // 4️⃣ NORMAL
+    // 5️⃣ NORMAL
     // =====================================================
     const normalRes = await pool.query(
       `
@@ -1841,7 +2016,7 @@ export const startMiniQuiz = async (req, res) => {
     selectedQuestions.push(...normalRes.rows);
 
     // =====================================================
-    // 5️⃣ Fill Remaining If Any Type Missing
+    // 6️⃣ Fill Remaining If Any Type Missing
     // =====================================================
     const remaining = TOTAL - selectedQuestions.length;
 
@@ -1872,7 +2047,7 @@ export const startMiniQuiz = async (req, res) => {
     }
 
     // =====================================================
-    // 6️⃣ Format Questions
+    // 7️⃣ Format Questions
     // =====================================================
     const formatted = selectedQuestions.map(q => {
 
@@ -1903,6 +2078,18 @@ export const startMiniQuiz = async (req, res) => {
         };
       }
 
+      if (q.question_type === "comprehension_cloze") {
+        return {
+          id: q.id,
+          subject_id: q.subject_id,
+          topic_id: q.topic_id,
+          title: q.extra_data?.title || "Untitled",
+          passage: q.question_text,
+          correctAnswers: q.extra_data?.correctAnswers || {},
+          type: "comprehension_cloze"
+        };
+      }
+
       return {
         id: q.id,
         subject_id: q.subject_id,
@@ -1918,12 +2105,12 @@ export const startMiniQuiz = async (req, res) => {
     });
 
     // =====================================================
-    // 7️⃣ Shuffle
+    // 8️⃣ Shuffle
     // =====================================================
     const shuffled = formatted.sort(() => Math.random() - 0.5);
 
     // =====================================================
-    // 8️⃣ Create Session
+    // 9️⃣ Create Session
     // =====================================================
     const sessionRes = await pool.query(
       `

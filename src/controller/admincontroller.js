@@ -4191,3 +4191,368 @@ export const createComprehensionCloze = async (req, res) => {
     client.release();
   }
 };
+
+
+
+// Update 
+
+export const updateComprehensionCloze = async (req, res) => {
+
+  const client = await pool.connect();
+
+  try {
+
+    const { id } = req.params;
+
+    const {
+      title,
+      passage,
+      grade_id,
+      subject_id,
+      topic_id,
+      difficulty_level,
+      correctAnswers
+    } = req.body;
+
+    await client.query("BEGIN");
+
+    // =============================
+    // 1️⃣ Check question exists
+    // =============================
+    const existing = await client.query(
+      `
+      SELECT id
+      FROM questions
+      WHERE id = $1
+      AND question_type = 'comprehension_cloze'
+      `,
+      [id]
+    );
+
+    if (existing.rowCount === 0) {
+
+      await client.query("ROLLBACK");
+
+      return res.status(404).json({
+        success: false,
+        message: "Comprehension cloze question not found"
+      });
+    }
+
+    // =============================
+    // 2️⃣ Duplicate check
+    // =============================
+    const duplicateCheck = await client.query(
+      `
+      SELECT id
+      FROM questions
+      WHERE LOWER(question_text) = LOWER($1)
+      AND question_type = 'comprehension_cloze'
+      AND grade_id = $2
+      AND subject_id = $3
+      AND (
+            (topic_id IS NULL AND $4::int IS NULL)
+            OR topic_id = $4
+          )
+      AND id <> $5
+      `,
+      [
+        passage.trim(),
+        grade_id,
+        subject_id,
+        topic_id ?? null,
+        id
+      ]
+    );
+
+    if (duplicateCheck.rowCount > 0) {
+
+      await client.query("ROLLBACK");
+
+      return res.status(400).json({
+        success: false,
+        message: "Another comprehension cloze with same passage already exists"
+      });
+    }
+
+    // =============================
+    // 3️⃣ Prepare extra_data
+    // =============================
+    const extraData = {
+      title: title.trim(),
+      correctAnswers
+    };
+
+    // =============================
+    // 4️⃣ Update question
+    // =============================
+    await client.query(
+      `
+      UPDATE questions
+      SET
+        question_text = $1,
+        subject_id = $2,
+        topic_id = $3,
+        grade_id = $4,
+        difficulty_level = $5,
+        extra_data = $6,
+        updated_at = NOW()
+      WHERE id = $7
+      `,
+      [
+        passage.trim(),
+        subject_id,
+        topic_id ?? null,
+        grade_id,
+        difficulty_level ?? null,
+        extraData,
+        id
+      ]
+    );
+
+    await client.query("COMMIT");
+
+    return res.status(200).json({
+      success: true,
+      message: "Comprehension cloze updated successfully"
+    });
+
+  } catch (error) {
+
+    await client.query("ROLLBACK");
+
+    console.error("Update comprehension cloze error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Server error"
+    });
+
+  } finally {
+
+    client.release();
+
+  }
+
+};
+
+
+// GetAll
+
+
+export const getAllComprehensionCloze = async (req, res) => {
+  try {
+
+    let {
+      search = "",
+      grade_id,
+      subject_id,
+      topic_id,
+      difficulty_level,
+      start_date,
+      end_date,
+      page = 1,
+      limit = 10
+    } = req.query;
+
+    page = parseInt(page, 10) || 1;
+    limit = Math.min(parseInt(limit, 10) || 10, 50);
+    const offset = (page - 1) * limit;
+
+    const whereClauses = [`q.question_type = 'comprehension_cloze'`];
+    const values = [];
+    let idx = 1;
+
+    // ================================
+    // Filters
+    // ================================
+
+    if (grade_id) {
+      whereClauses.push(`q.grade_id = $${idx++}`);
+      values.push(grade_id);
+    }
+
+    if (subject_id) {
+      whereClauses.push(`q.subject_id = $${idx++}`);
+      values.push(subject_id);
+    }
+
+    if (topic_id) {
+      whereClauses.push(`q.topic_id = $${idx++}`);
+      values.push(topic_id);
+    }
+
+    if (difficulty_level) {
+      whereClauses.push(`q.difficulty_level = $${idx++}`);
+      values.push(difficulty_level);
+    }
+
+    if (start_date) {
+      whereClauses.push(`q.created_at >= $${idx++}`);
+      values.push(`${start_date} 00:00:00`);
+    }
+
+    if (end_date) {
+      whereClauses.push(`q.created_at <= $${idx++}`);
+      values.push(`${end_date} 23:59:59`);
+    }
+
+    if (search) {
+      whereClauses.push(`
+        (
+          LOWER(q.extra_data->>'title') LIKE LOWER($${idx})
+          OR LOWER(q.question_text) LIKE LOWER($${idx})
+        )
+      `);
+      values.push(`%${search}%`);
+      idx++;
+    }
+
+    const whereQuery = `WHERE ${whereClauses.join(" AND ")}`;
+
+    // ================================
+    // Main Query
+    // ================================
+    const query = `
+      SELECT
+        q.id,
+        q.question_text AS passage,
+        q.extra_data->>'title' AS title,
+        q.extra_data->'correctAnswers' AS correct_answers,
+        q.grade_id,
+        g.grade_level AS grade_name,
+        q.subject_id,
+        s.subject AS subject_name,
+        q.topic_id,
+        t.topic AS topic_name,
+        q.difficulty_level,
+        q.created_at,
+        (
+          SELECT COUNT(*)
+          FROM jsonb_each(q.extra_data->'correctAnswers')
+        ) AS blanks_count
+      FROM questions q
+      LEFT JOIN grades g ON q.grade_id = g.id
+      LEFT JOIN subjects s ON q.subject_id = s.id
+      LEFT JOIN topics t ON q.topic_id = t.id
+      ${whereQuery}
+      ORDER BY q.created_at DESC
+      LIMIT $${idx++} OFFSET $${idx++};
+    `;
+
+    const mainValues = [...values, limit, offset];
+
+    // ================================
+    // Count Query
+    // ================================
+    const countQuery = `
+      SELECT COUNT(*) AS total
+      FROM questions q
+      ${whereQuery};
+    `;
+
+    const [result, countResult] = await Promise.all([
+      pool.query(query, mainValues),
+      pool.query(countQuery, values),
+    ]);
+
+    const total = parseInt(countResult.rows[0].total, 10);
+    const totalPages = Math.ceil(total / limit);
+
+    return res.status(200).json({
+      success: true,
+      total,
+      totalPages,
+      currentPage: page,
+      perPage: limit,
+      quizzes: result.rows
+    });
+
+  } catch (err) {
+
+    console.error("Error fetching comprehension cloze:", err);
+
+    return res.status(500).json({
+      success: false,
+      message: "Server Error"
+    });
+
+  }
+};
+
+
+// Delete
+
+export const deleteComprehensionCloze = async (req, res) => {
+  const client = await pool.connect();
+
+  try {
+
+    const { id } = req.params;
+
+    if (!id) {
+      return res.status(400).json({
+        success: false,
+        message: "Question id is required"
+      });
+    }
+
+    await client.query("BEGIN");
+
+    // =============================
+    // Check question exists
+    // =============================
+    const check = await client.query(
+      `
+      SELECT id
+      FROM questions
+      WHERE id = $1
+      AND question_type = 'comprehension_cloze'
+      `,
+      [id]
+    );
+
+    if (!check.rowCount) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({
+        success: false,
+        message: "Comprehension cloze question not found"
+      });
+    }
+
+    // =============================
+    // Delete Question
+    // =============================
+    await client.query(
+      `
+      DELETE FROM questions
+      WHERE id = $1
+      AND question_type = 'comprehension_cloze'
+      `,
+      [id]
+    );
+
+    await client.query("COMMIT");
+
+    return res.status(200).json({
+      success: true,
+      message: "Comprehension cloze question deleted successfully"
+    });
+
+  } catch (error) {
+
+    await client.query("ROLLBACK");
+
+    console.error("Delete comprehension cloze error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Server Error"
+    });
+
+  } finally {
+
+    client.release();
+
+  }
+};
