@@ -1528,7 +1528,7 @@ export const reviewSession = async (req, res) => {
       }
 
       // ================= COMPREHENSION GRAMMER =================
-      if (type === "comprehension_grammer") {
+      if (type === "grammar_cloze") {
 
         const correctAnswers =
           row.extra_data?.correctAnswers || {};
@@ -1950,7 +1950,7 @@ export const startMiniQuiz = async (req, res) => {
       `
       SELECT *
       FROM questions
-      WHERE question_type = 'comprehension_grammer'
+      WHERE question_type = 'grammar_cloze'
       AND NOT (id = ANY($1::int[]))
       ${subjects?.length ? `AND subject_id = ANY($2::int[])` : ``}
       ORDER BY random()
@@ -2065,7 +2065,7 @@ export const startMiniQuiz = async (req, res) => {
         };
       }
 
-      if (q.question_type === "comprehension_grammer") {
+      if (q.question_type === "grammar_cloze") {
         return {
           id: q.id,
           subject_id: q.subject_id,
@@ -2074,7 +2074,7 @@ export const startMiniQuiz = async (req, res) => {
           passage: q.question_text,
           options: q.extra_data?.options || [],
           correctAnswers: q.extra_data?.correctAnswers || {},
-          type: "comprehension_grammer"
+          type: "grammar_cloze"
         };
       }
 

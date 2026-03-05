@@ -3692,7 +3692,7 @@ export const createGrammarCloze = async (req, res) => {
       `
       SELECT id FROM questions
       WHERE LOWER(question_text) = LOWER($1)
-      AND question_type = 'comprehension_grammer'
+      AND question_type = 'grammar_cloze'
       AND grade_id = $2
       AND subject_id = $3
       AND (
