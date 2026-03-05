@@ -50,6 +50,8 @@ export const createGrammarClozeValidator = [
 
   // Correct Answers
   body("correctAnswers")
+  .notEmpty()
+  .withMessage("correctAnswers is required")
     .isObject()
     .withMessage("correctAnswers must be an object"),
 
@@ -218,6 +220,8 @@ export const createComprehensionClozeValidator = [
   
     // Correct Answers
     body("correctAnswers")
+    .notEmpty()
+    .withMessage("correctAnswers is required")
       .isObject()
       .withMessage("correctAnswers must be an object"),
   
