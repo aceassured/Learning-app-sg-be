@@ -4558,3 +4558,156 @@ export const deleteComprehensionCloze = async (req, res) => {
 
   }
 };
+
+
+
+// Get All Questions In One API
+
+
+export const getQuestionsByType = async (req, res) => {
+  try {
+    let {
+      type,
+      search = "",
+      grade_id,
+      subject_id,
+      topic_id,
+      difficulty_level,
+      start_date,
+      end_date,
+      page = 1,
+      limit = 10
+    } = req.query;
+
+    page = parseInt(page, 10) || 1;
+    limit = Math.min(parseInt(limit, 10) || 10, 50);
+    const offset = (page - 1) * limit;
+
+    // =============================
+    // Map frontend type → DB type
+    // =============================
+    const typeMap = {
+      mcq: "normal",
+      editable: "editable",
+      grammar_cloze: "grammar_cloze",
+      comprehension_cloze: "comprehension_cloze"
+    };
+
+    const questionType = typeMap[type];
+
+    if (!questionType) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid question type"
+      });
+    }
+
+    const whereClauses = [`q.question_type = $1`];
+    const values = [questionType];
+    let idx = 2;
+
+    if (grade_id) {
+      whereClauses.push(`q.grade_id = $${idx++}`);
+      values.push(grade_id);
+    }
+
+    if (subject_id) {
+      whereClauses.push(`q.subject_id = $${idx++}`);
+      values.push(subject_id);
+    }
+
+    if (topic_id) {
+      whereClauses.push(`q.topic_id = $${idx++}`);
+      values.push(topic_id);
+    }
+
+    if (difficulty_level) {
+      whereClauses.push(`q.difficulty_level = $${idx++}`);
+      values.push(difficulty_level);
+    }
+
+    if (start_date) {
+      whereClauses.push(`q.created_at >= $${idx++}`);
+      values.push(`${start_date} 00:00:00`);
+    }
+
+    if (end_date) {
+      whereClauses.push(`q.created_at <= $${idx++}`);
+      values.push(`${end_date} 23:59:59`);
+    }
+
+    if (search) {
+      whereClauses.push(`
+        (
+          LOWER(q.question_text) LIKE LOWER($${idx})
+          OR LOWER(q.extra_data->>'title') LIKE LOWER($${idx})
+        )
+      `);
+      values.push(`%${search}%`);
+      idx++;
+    }
+
+    const whereQuery = `WHERE ${whereClauses.join(" AND ")}`;
+
+    // =============================
+    // Main Query
+    // =============================
+    const query = `
+      SELECT 
+        q.id,
+        q.question_text,
+        q.question_type,
+        q.options,
+        q.correct_option_id,
+        q.extra_data,
+        q.subject_id,
+        s.subject AS subject_name,
+        q.grade_id,
+        g.grade_level AS grade_name,
+        q.topic_id,
+        t.topic AS topic_name,
+        q.created_at
+      FROM questions q
+      LEFT JOIN grades g ON q.grade_id = g.id
+      LEFT JOIN subjects s ON q.subject_id = s.id
+      LEFT JOIN topics t ON q.topic_id = t.id
+      ${whereQuery}
+      ORDER BY q.created_at DESC
+      LIMIT $${idx++} OFFSET $${idx++};
+    `;
+
+    const mainValues = [...values, limit, offset];
+
+    const countQuery = `
+      SELECT COUNT(*) AS total
+      FROM questions q
+      ${whereQuery};
+    `;
+
+    const [result, countResult] = await Promise.all([
+      pool.query(query, mainValues),
+      pool.query(countQuery, values),
+    ]);
+
+    const total = parseInt(countResult.rows[0].total, 10);
+    const totalPages = Math.ceil(total / limit);
+
+    return res.status(200).json({
+      success: true,
+      type,
+      total,
+      totalPages,
+      currentPage: page,
+      perPage: limit,
+      questions: result.rows
+    });
+
+  } catch (err) {
+    console.error("Error fetching questions:", err);
+
+    return res.status(500).json({
+      success: false,
+      message: "Server Error"
+    });
+  }
+};

@@ -8,7 +8,8 @@ import { adminAnnouncementpoll, adminCreateBulkEditableQuizQuestions, adminCreat
   createComprehensionCloze,
   updateComprehensionCloze,
   getAllComprehensionCloze,
-  deleteComprehensionCloze} from "../controller/admincontroller.js"
+  deleteComprehensionCloze,
+  getQuestionsByType} from "../controller/admincontroller.js"
 import auth from "../middleware/auth.js"
 import { admincreateSubject, admincreateTopic, getAllTopic, getParticularquestions, updatequestion } from "../controller/usercontroller.js"
 import multer from "multer";
@@ -97,6 +98,9 @@ router.delete(
   "/comprehension-cloze/:id",
   deleteComprehensionCloze
 );
+
+
+router.get("/getallquestionswithone",getQuestionsByType)
 
 
 router.post("/upload-pdf", upload.single("pdf"), async (req, res) => {
