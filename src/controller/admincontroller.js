@@ -3851,32 +3851,34 @@ export const getAllGrammarPronouns = async (req, res) => {
     const whereQuery = `WHERE ${whereClauses.join(" AND ")}`;
 
     const query = `
-      SELECT 
-        q.id,
-        q.question_text AS passage,
-        q.extra_data->>'title' AS title,
-        q.extra_data->'options' AS options,
-        q.extra_data->'correctAnswers' AS correct_answers,
-        q.grade_id,
-        g.grade_level AS grade_name,
-        q.subject_id,
-        s.subject AS subject_name,
-        q.topic_id,
-        t.topic AS topic_name,
-        q.difficulty_level,
-        q.created_at,
-        (
-          SELECT COUNT(*) 
-          FROM jsonb_each(q.extra_data->'correctAnswers')
-        ) AS blanks_count
-      FROM questions q
-      LEFT JOIN grades g ON q.grade_id = g.id
-      LEFT JOIN subjects s ON q.subject_id = s.id
-      LEFT JOIN topics t ON q.topic_id = t.id
-      ${whereQuery}
-      ORDER BY q.created_at DESC
-      LIMIT $${idx++} OFFSET $${idx++};
-    `;
+    SELECT 
+      q.id,
+      q.question_text AS passage,
+      q.extra_data->>'title' AS title,
+      COALESCE(q.extra_data->'options','[]'::jsonb) AS options,
+      q.extra_data->'correctAnswers' AS correct_answers,
+      q.grade_id,
+      g.grade_level AS grade_name,
+      q.subject_id,
+      s.subject AS subject_name,
+      q.topic_id,
+      t.topic AS topic_name,
+      q.difficulty_level,
+      q.created_at,
+      (
+        SELECT COUNT(*) 
+        FROM jsonb_each(
+          COALESCE(q.extra_data->'correctAnswers','{}'::jsonb)
+        )
+      ) AS blanks_count
+    FROM questions q
+    LEFT JOIN grades g ON q.grade_id = g.id
+    LEFT JOIN subjects s ON q.subject_id = s.id
+    LEFT JOIN topics t ON q.topic_id = t.id
+    ${whereQuery}
+    ORDER BY q.created_at DESC
+    LIMIT $${idx++} OFFSET $${idx++};
+  `;
 
     const mainValues = [...values, limit, offset];
 
@@ -3940,7 +3942,7 @@ export const updateGrammarPronoun = async (req, res) => {
     const existing = await client.query(
       `SELECT id FROM questions 
        WHERE id = $1 
-       AND question_type = 'comprehension_grammer'`,
+       AND question_type = 'grammar_cloze'`,
       [id]
     );
 
@@ -3948,7 +3950,7 @@ export const updateGrammarPronoun = async (req, res) => {
       await client.query("ROLLBACK");
       return res.status(404).json({
         success: false,
-        message: "Comprehension grammar question not found",
+        message: "Grammer cloze  question not found",
       });
     }
 
@@ -3956,7 +3958,7 @@ export const updateGrammarPronoun = async (req, res) => {
       `
       SELECT id FROM questions
       WHERE LOWER(question_text) = LOWER($1)
-      AND question_type = 'comprehension_grammer'
+      AND question_type = 'grammar_cloze'
       AND grade_id = $2
       AND subject_id = $3
       AND (
@@ -4016,7 +4018,7 @@ export const updateGrammarPronoun = async (req, res) => {
 
     return res.status(200).json({
       success: true,
-      message: "Comprehension grammar question updated successfully",
+      message: "Grammar cloze question updated successfully",
     });
 
   } catch (error) {
@@ -4051,7 +4053,7 @@ export const deleteGrammarPronoun = async (req, res) => {
       `
       DELETE FROM questions
       WHERE id = $1
-      AND question_type = 'comprehension_grammer'
+      AND question_type = 'grammar_cloze'
       RETURNING id
       `,
       [id]
@@ -4060,13 +4062,13 @@ export const deleteGrammarPronoun = async (req, res) => {
     if (result.rowCount === 0) {
       return res.status(404).json({
         success: false,
-        message: "Comprehension grammar question not found",
+        message: "Grammar cloze  question not found",
       });
     }
 
     return res.status(200).json({
       success: true,
-      message: "Comprehension grammar question deleted successfully",
+      message: "Grammar cloze grammar question deleted successfully",
     });
 
   } catch (error) {
