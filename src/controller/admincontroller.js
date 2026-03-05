@@ -3985,7 +3985,7 @@ export const updateGrammarPronoun = async (req, res) => {
     }
 
     const extraData = {
-      title: title.trim(),
+      title: title?.trim() || null,
       passage: passage.trim(),
       options,
       correctAnswers,
@@ -4281,7 +4281,7 @@ export const updateComprehensionCloze = async (req, res) => {
     // 3️⃣ Prepare extra_data
     // =============================
     const extraData = {
-      title: title.trim(),
+      title: title?.trim() || null,
       correctAnswers
     };
 
