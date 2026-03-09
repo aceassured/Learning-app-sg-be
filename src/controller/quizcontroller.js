@@ -1252,7 +1252,7 @@ export const submitAnswers = async (req, res) => {
             .toLowerCase()
             .trim();
 
-          const user = userAnswer?.[blank.position]
+          const user = userAnswer?.[String(blank.position)]
             ?.toString()
             .toLowerCase()
             .trim();
@@ -1281,7 +1281,10 @@ export const submitAnswers = async (req, res) => {
         let score = 0;
 
         for (const key in correctAnswers) {
-          if (correctAnswers[key] === userAnswer?.[key]) {
+
+          const user = userAnswer?.[String(key)];
+
+          if (correctAnswers[key] === user) {
             score++;
           }
         }
@@ -1294,7 +1297,6 @@ export const submitAnswers = async (req, res) => {
         };
       },
 
-      // ✅ NEW CLOZE HANDLER
       comprehension_cloze: (question, userAnswer) => {
 
         const extra =
@@ -1307,16 +1309,20 @@ export const submitAnswers = async (req, res) => {
         let score = 0;
 
         for (const key in correctAnswers) {
-          if (
+
+          const correct =
             correctAnswers[key]
               ?.toString()
               .toLowerCase()
-              .trim() ===
-            userAnswer?.[key]
+              .trim();
+
+          const user =
+            userAnswer?.[String(key)]
               ?.toString()
               .toLowerCase()
-              .trim()
-          ) {
+              .trim();
+
+          if (correct === user) {
             score++;
           }
         }
@@ -1350,12 +1356,12 @@ export const submitAnswers = async (req, res) => {
       }
 
       const userAnswer =
+        ans.answer_json ??
         ans.answer ??
         ans.selected_option_id ??
-        ans.answer_json ??
         null;
 
-      const result = handlers[type](question, userAnswer);
+      const result = handlers[type](userAnswer !== null ? question : null, userAnswer);
 
       totalScore += result.score;
       totalPossible += result.total;
@@ -1539,7 +1545,7 @@ export const reviewSession = async (req, res) => {
             correctAnswers[key] === userAnswer?.[key];
 
           review.push({
-            type: "comprehension_blank",
+            type: "grammar_cloze",
             question_id: row.question_id,
             blank: key,
             correct_answer: correctAnswers[key],
