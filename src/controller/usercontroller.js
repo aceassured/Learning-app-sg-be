@@ -1352,6 +1352,7 @@ export const userEdit = async (req, res) => {
       reminder_enabled,
       dark_mode,
       sound_enabled,
+      enable_biometric
     } = req.body;
 
     let profilePhotoUrl;
@@ -1374,38 +1375,47 @@ export const userEdit = async (req, res) => {
       userFields.push(`name = $${paramIndex++}`);
       userValues.push(name);
     }
+
     if (email !== undefined) {
       userFields.push(`email = $${paramIndex++}`);
       userValues.push(email);
     }
+
     if (phone !== undefined) {
       userFields.push(`phone = $${paramIndex++}`);
       userValues.push(phone);
     }
+
     if (grade_level !== undefined) {
       userFields.push(`grade_level = $${paramIndex++}`);
       userValues.push(grade_level);
     }
+
     if (grade_level !== undefined) {
       userFields.push(`grade_id = $${paramIndex++}`);
       userValues.push(grade_level);
     }
+
     if (questions_per_day !== undefined) {
       userFields.push(`questions_per_day = $${paramIndex++}`);
       userValues.push(questions_per_day);
     }
+
     if (daily_reminder_time !== undefined) {
       userFields.push(`daily_reminder_time = $${paramIndex++}`);
       userValues.push(daily_reminder_time);
     }
+
     if (selected_subjects !== undefined) {
       userFields.push(`selected_subjects = $${paramIndex++}`);
       userValues.push(selected_subjects);
     }
+
     if (role !== undefined) {
       userFields.push(`role = $${paramIndex++}`);
       userValues.push(role);
     }
+
     if (profilePhotoUrl !== undefined) {
       userFields.push(`profile_photo_url = $${paramIndex++}`);
       userValues.push(profilePhotoUrl);
@@ -1418,6 +1428,7 @@ export const userEdit = async (req, res) => {
         WHERE id = $${paramIndex}
         RETURNING *;
       `;
+
       userValues.push(userId);
 
       await pool.query(userUpdateQuery, userValues);
@@ -1428,8 +1439,8 @@ export const userEdit = async (req, res) => {
     // -------------------
     const settingsUpdateQuery = `
       INSERT INTO user_settings 
-        (user_id, quiz_time_seconds, daily_reminder_time, reminder_enabled, dark_mode, sound_enabled, updated_at)
-      VALUES ($1,$2,$3,$4,$5,$6, NOW())
+        (user_id, quiz_time_seconds, daily_reminder_time, reminder_enabled, dark_mode, sound_enabled, enable_biometric, updated_at)
+      VALUES ($1,$2,$3,$4,$5,$6,$7, NOW())
       ON CONFLICT (user_id) 
       DO UPDATE SET 
         quiz_time_seconds = COALESCE(EXCLUDED.quiz_time_seconds, user_settings.quiz_time_seconds),
@@ -1437,6 +1448,7 @@ export const userEdit = async (req, res) => {
         reminder_enabled = COALESCE(EXCLUDED.reminder_enabled, user_settings.reminder_enabled),
         dark_mode = COALESCE(EXCLUDED.dark_mode, user_settings.dark_mode),
         sound_enabled = COALESCE(EXCLUDED.sound_enabled, user_settings.sound_enabled),
+        enable_biometric = COALESCE(EXCLUDED.enable_biometric, user_settings.enable_biometric),
         updated_at = NOW()
       RETURNING *;
     `;
@@ -1445,9 +1457,10 @@ export const userEdit = async (req, res) => {
       userId,
       quiz_time_seconds !== undefined ? quiz_time_seconds : null,
       daily_reminder_time !== undefined ? daily_reminder_time : null,
-      reminder_enabled !== undefined ? reminder_enabled : null,
+      reminder_enabled !== undefined ? reminder_enabled : true, // default true
       dark_mode !== undefined ? dark_mode : null,
       sound_enabled !== undefined ? sound_enabled : null,
+      enable_biometric !== undefined ? enable_biometric : false // default false
     ]);
 
     await pool.query("COMMIT");
@@ -1457,9 +1470,13 @@ export const userEdit = async (req, res) => {
       message: "User details updated successfully",
       settings: settingsResult.rows[0],
     });
+
   } catch (error) {
+
     await pool.query("ROLLBACK");
+
     console.error("userEdit error:", error);
+
     return res.status(500).json({
       ok: false,
       message: "Internal server error",
