@@ -1361,18 +1361,28 @@ export const submitAnswers = async (req, res) => {
         ans.selected_option_id ??
         null;
 
-      const result = handlers[type](userAnswer !== null ? question : null, userAnswer);
+      const result = handlers[type](question, userAnswer);
 
       totalScore += result.score;
       totalPossible += result.total;
 
+      let selectedOption = null;
+      let answerJson = null;
+
+      if (type === "normal") {
+        selectedOption = Number(userAnswer);
+      } else {
+        answerJson = JSON.stringify(userAnswer);
+      }
+
       await client.query(
         `
         INSERT INTO user_answers
-        (session_id, question_id, answer_json, is_correct, answered_at)
-        VALUES ($1,$2,$3,$4,NOW())
+        (session_id, question_id, selected_option_id, answer_json, is_correct, answered_at)
+        VALUES ($1,$2,$3,$4,$5,NOW())
         ON CONFLICT (session_id, question_id)
         DO UPDATE SET
+          selected_option_id = EXCLUDED.selected_option_id,
           answer_json = EXCLUDED.answer_json,
           is_correct = EXCLUDED.is_correct,
           answered_at = NOW()
@@ -1380,7 +1390,8 @@ export const submitAnswers = async (req, res) => {
         [
           session_id,
           ans.question_id,
-          JSON.stringify(userAnswer),
+          selectedOption,
+          answerJson,
           result.isCorrect
         ]
       );
