@@ -1365,7 +1365,7 @@ export const userEdit = async (req, res) => {
     await pool.query("BEGIN");
 
     // -------------------
-    // Build dynamic user update query
+    // Update users table
     // -------------------
     const userFields = [];
     const userValues = [];
@@ -1426,23 +1426,20 @@ export const userEdit = async (req, res) => {
         UPDATE users
         SET ${userFields.join(", ")}, updated_at = NOW()
         WHERE id = $${paramIndex}
-        RETURNING *;
       `;
-
       userValues.push(userId);
-
       await pool.query(userUpdateQuery, userValues);
     }
 
     // -------------------
-    // Update user settings
+    // Update user_settings
     // -------------------
     const settingsUpdateQuery = `
-      INSERT INTO user_settings 
-        (user_id, quiz_time_seconds, daily_reminder_time, reminder_enabled, dark_mode, sound_enabled, enable_biometric, updated_at)
-      VALUES ($1,$2,$3,$4,$5,$6,$7, NOW())
-      ON CONFLICT (user_id) 
-      DO UPDATE SET 
+      INSERT INTO user_settings
+      (user_id, quiz_time_seconds, daily_reminder_time, reminder_enabled, dark_mode, sound_enabled, enable_biometric, updated_at)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,NOW())
+      ON CONFLICT (user_id)
+      DO UPDATE SET
         quiz_time_seconds = COALESCE(EXCLUDED.quiz_time_seconds, user_settings.quiz_time_seconds),
         daily_reminder_time = COALESCE(EXCLUDED.daily_reminder_time, user_settings.daily_reminder_time),
         reminder_enabled = COALESCE(EXCLUDED.reminder_enabled, user_settings.reminder_enabled),
@@ -1450,24 +1447,35 @@ export const userEdit = async (req, res) => {
         sound_enabled = COALESCE(EXCLUDED.sound_enabled, user_settings.sound_enabled),
         enable_biometric = COALESCE(EXCLUDED.enable_biometric, user_settings.enable_biometric),
         updated_at = NOW()
-      RETURNING *;
     `;
 
-    const settingsResult = await pool.query(settingsUpdateQuery, [
+    await pool.query(settingsUpdateQuery, [
       userId,
-      quiz_time_seconds !== undefined ? quiz_time_seconds : null,
-      daily_reminder_time !== undefined ? daily_reminder_time : null,
-      reminder_enabled !== undefined ? reminder_enabled : true,
-      dark_mode !== undefined ? dark_mode : null,
-      sound_enabled !== undefined ? sound_enabled : null,
-      enable_biometric !== undefined ? enable_biometric : false
+      quiz_time_seconds ?? null,
+      daily_reminder_time ?? null,
+      reminder_enabled ?? true,
+      dark_mode ?? null,
+      sound_enabled ?? null,
+      enable_biometric ?? false
     ]);
 
     // -------------------
-    // Fetch updated user
+    // Fetch full merged user
     // -------------------
-    const userResult = await pool.query(
-      `SELECT * FROM users WHERE id = $1`,
+    const result = await pool.query(
+      `
+      SELECT
+        u.*,
+        us.quiz_time_seconds,
+        us.reminder_enabled,
+        us.dark_mode,
+        us.sound_enabled,
+        us.enable_biometric
+      FROM users u
+      LEFT JOIN user_settings us
+      ON us.user_id = u.id
+      WHERE u.id = $1
+      `,
       [userId]
     );
 
@@ -1476,12 +1484,10 @@ export const userEdit = async (req, res) => {
     return res.status(200).json({
       ok: true,
       message: "User details updated successfully",
-      user: userResult.rows[0],
-      settings: settingsResult.rows[0],
+      user: result.rows[0]
     });
 
   } catch (error) {
-
     await pool.query("ROLLBACK");
 
     console.error("userEdit error:", error);
@@ -1489,7 +1495,7 @@ export const userEdit = async (req, res) => {
     return res.status(500).json({
       ok: false,
       message: "Internal server error",
-      error: error.message,
+      error: error.message
     });
   }
 };
