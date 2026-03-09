@@ -7,7 +7,9 @@ import { sendNotification } from "../utils/sendNotification.js";
 
 export const getHomeData = async (req, res) => {
   const userId = req.userId;
+
   try {
+
     // ✅ Fetch today’s session (only daily type + finished)
     const todayRes = await pool.query(
       `SELECT s.*, COUNT(a.*) AS answered_count
@@ -25,6 +27,28 @@ export const getHomeData = async (req, res) => {
 
     const todaySession = todayRes.rows[0] || null;
 
+
+    // ✅ FIX: ensure today's activity exists for streak calculation
+    if (todaySession) {
+
+      const correct = todaySession.score || 0;
+
+      const incorrect =
+        (todaySession.answered_count || 0) - correct;
+
+      await pool.query(
+        `INSERT INTO user_activity
+         (user_id, activity_date, correct_count, incorrect_count)
+         VALUES ($1, CURRENT_DATE, $2, $3)
+         ON CONFLICT (user_id, activity_date)
+         DO UPDATE SET
+           correct_count = EXCLUDED.correct_count,
+           incorrect_count = EXCLUDED.incorrect_count`,
+        [userId, correct, incorrect]
+      );
+    }
+
+
     // ✅ Weekly activity data
     const weekDatesRes = await pool.query(
       `SELECT activity_date, correct_count, incorrect_count 
@@ -36,26 +60,39 @@ export const getHomeData = async (req, res) => {
     );
 
     const weekMap = {};
+
     weekDatesRes.rows.forEach(r => {
       weekMap[r.activity_date.toISOString().slice(0, 10)] = r;
     });
 
+
     // ✅ Calculate consecutive days of activity
     let consecutive = 0;
+
     for (let i = 6; i >= 0; i--) {
+
       const date = new Date();
       date.setDate(date.getDate() - i);
+
       const dayKey = date.toISOString().slice(0, 10);
+
       const entry = weekMap[dayKey];
+
       if (entry && (entry.correct_count + entry.incorrect_count) > 0) {
         consecutive++;
       } else {
         consecutive = 0;
       }
+
     }
 
-    const all7 = Object.keys(weekMap).length === 7 &&
-      Object.values(weekMap).every(e => e.correct_count + e.incorrect_count > 0);
+
+    const all7 =
+      Object.keys(weekMap).length === 7 &&
+      Object.values(weekMap).every(
+        e => e.correct_count + e.incorrect_count > 0
+      );
+
 
     // ✅ Monthly stats
     const monthRes = await pool.query(
@@ -66,8 +103,12 @@ export const getHomeData = async (req, res) => {
       [userId]
     );
 
-    const month = monthRes.rows[0] || { correct: 0, incorrect: 0 };
-    const completedThisMonth = +(month.correct || 0) + +(month.incorrect || 0);
+    const month =
+      monthRes.rows[0] || { correct: 0, incorrect: 0 };
+
+    const completedThisMonth =
+      +(month.correct || 0) + +(month.incorrect || 0);
+
 
     // ✅ Full streak count
     const streakRes = await pool.query(
@@ -80,27 +121,40 @@ export const getHomeData = async (req, res) => {
     );
 
     let streakCount = 0;
+
     if (streakRes.rows.length > 0) {
+
       const today = new Date();
       today.setHours(0, 0, 0, 0);
 
       let currentDate = new Date(today);
 
       for (let r of streakRes.rows) {
+
         const activityDate = new Date(r.activity_date);
         activityDate.setHours(0, 0, 0, 0);
 
         if (activityDate.getTime() === currentDate.getTime()) {
+
           streakCount++;
           currentDate.setDate(currentDate.getDate() - 1);
-        } else if (activityDate.getTime() === currentDate.getTime() - 24 * 60 * 60 * 1000) {
+
+        } else if (
+          activityDate.getTime() ===
+          currentDate.getTime() - 24 * 60 * 60 * 1000
+        ) {
+
           streakCount++;
           currentDate.setDate(currentDate.getDate() - 1);
+
         } else {
+
           break; // gap → streak ends
+
         }
       }
     }
+
 
     res.json({
       ok: true,
@@ -108,12 +162,22 @@ export const getHomeData = async (req, res) => {
       week: weekDatesRes.rows,
       all7: all7 ? 7 : 0,
       consecutive,
-      monthly: { completed: completedThisMonth, target: 25 },
+      monthly: {
+        completed: completedThisMonth,
+        target: 25
+      },
       streakCount
     });
+
   } catch (err) {
+
     console.error(err);
-    res.status(500).json({ ok: false, message: 'Server error' });
+
+    res.status(500).json({
+      ok: false,
+      message: 'Server error'
+    });
+
   }
 };
 
