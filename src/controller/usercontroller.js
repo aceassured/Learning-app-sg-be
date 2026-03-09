@@ -1457,17 +1457,26 @@ export const userEdit = async (req, res) => {
       userId,
       quiz_time_seconds !== undefined ? quiz_time_seconds : null,
       daily_reminder_time !== undefined ? daily_reminder_time : null,
-      reminder_enabled !== undefined ? reminder_enabled : true, // default true
+      reminder_enabled !== undefined ? reminder_enabled : true,
       dark_mode !== undefined ? dark_mode : null,
       sound_enabled !== undefined ? sound_enabled : null,
-      enable_biometric !== undefined ? enable_biometric : false // default false
+      enable_biometric !== undefined ? enable_biometric : false
     ]);
+
+    // -------------------
+    // Fetch updated user
+    // -------------------
+    const userResult = await pool.query(
+      `SELECT * FROM users WHERE id = $1`,
+      [userId]
+    );
 
     await pool.query("COMMIT");
 
     return res.status(200).json({
       ok: true,
       message: "User details updated successfully",
+      user: userResult.rows[0],
       settings: settingsResult.rows[0],
     });
 
