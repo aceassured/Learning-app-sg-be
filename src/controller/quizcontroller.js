@@ -1594,7 +1594,7 @@ export const reviewSession = async (req, res) => {
               .trim();
 
           review.push({
-            type: "editable_blank",
+            type: "editable",
             question_id: row.question_id,
             position: blank.position,
             correct_word: blank.correct_word,
@@ -1657,7 +1657,7 @@ export const reviewSession = async (req, res) => {
           const isCorrect = correct === user;
 
           review.push({
-            type: "comprehension_cloze_blank",
+            type: "comprehension_cloze",
             question_id: row.question_id,
             blank: key,
             correct_answer: correctAnswers[key],
