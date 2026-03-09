@@ -1534,6 +1534,7 @@ export const reviewSession = async (req, res) => {
       `SELECT 
           ua.question_id,
           ua.answer_json,
+          ua.selected_option_id,
           ua.is_correct,
           q.question_type,
           q.question_text,
@@ -1552,20 +1553,26 @@ export const reviewSession = async (req, res) => {
 
     for (const row of answerRes.rows) {
 
-      const type = row.question_type?.toLowerCase().trim();
+      const type = (row.question_type || "normal")
+        .toLowerCase()
+        .trim();
+
+      // userAnswer for non-MCQ
       const userAnswer = row.answer_json;
 
-      // ================= NORMAL =================
+      // ================= NORMAL (MCQ) =================
       if (type === "normal") {
 
+        const selectedOption = row.selected_option_id;
+
         const isCorrect =
-          Number(row.correct_option_id) === Number(userAnswer);
+          Number(row.correct_option_id) === Number(selectedOption);
 
         review.push({
           type: "normal",
           question_id: row.question_id,
           question_text: row.question_text,
-          selected_option_id: userAnswer,
+          selected_option_id: selectedOption,
           correct_option_id: row.correct_option_id,
           is_correct: isCorrect,
           mark: isCorrect ? 1 : 0
@@ -1583,7 +1590,7 @@ export const reviewSession = async (req, res) => {
         for (const blank of blanks) {
 
           const userWord =
-            userAnswer?.[blank.position] || "";
+            userAnswer?.[String(blank.position)] || "";
 
           const isCorrect =
             blank.correct_word
@@ -1608,7 +1615,7 @@ export const reviewSession = async (req, res) => {
         }
       }
 
-      // ================= COMPREHENSION GRAMMER =================
+      // ================= GRAMMAR CLOZE =================
       if (type === "grammar_cloze") {
 
         const correctAnswers =
@@ -1634,7 +1641,7 @@ export const reviewSession = async (req, res) => {
         }
       }
 
-      // ================= CLOZE =================
+      // ================= COMPREHENSION CLOZE =================
       if (type === "comprehension_cloze") {
 
         const correctAnswers =
@@ -1685,6 +1692,7 @@ export const reviewSession = async (req, res) => {
 
   } catch (err) {
     console.error("reviewSession error:", err);
+
     return res.status(500).json({
       ok: false,
       message: "Server error"

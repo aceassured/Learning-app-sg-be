@@ -61,6 +61,7 @@ router.delete("/deletetopic", deleteTopic);
 
 // Bulk upload editable quiz questions
 router.post("/quiz/bulk-upload", upload.single("file"), adminCreateBulkEditableQuizQuestions)
+
 router.get('/quiz-questions/:uploadBatchId', getEditableUploadData);
 router.get('/quiz-upload-history', getEditableUploadHistory);
 router.delete('/quiz-delete-upload/:uploadId', deleteEditableUpload);
