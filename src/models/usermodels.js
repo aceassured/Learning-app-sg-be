@@ -116,49 +116,70 @@ export const updateUserSettings = async (id, fields) => {
 };
 
 
-export const getUserById = async (id) => {
-  console.log("id", id);
+export const getUserById = async (userId) => {
+  const result = await pool.query(
+    `
+    SELECT
+      u.id,
+      u.email,
+      u.phone,
+      u.name,
+      u.school_name,
+      u.grade_level,
+      u.questions_per_day,
+      u.daily_reminder_time,
+      u.selected_subjects,
+      u.profile_photo_url,
+      u.created_at,
+      u.grade_id,
+      u.updated_at,
+      u.biometric_enabled,
+      u.role,
 
-  const res = await pool.query(
-    `SELECT ud.*, us.*
-     FROM users ud
-     INNER JOIN user_settings us ON us.user_id = ud.id
-     WHERE ud.id = $1`,
-    [id]
+      us.quiz_time_seconds,
+      us.reminder_enabled,
+      us.dark_mode,
+      us.sound_enabled,
+      us.study_reminder,
+      us.forum_update,
+      us.enable_biometric,
+
+      g.grade_level AS grade_value
+
+    FROM users u
+    LEFT JOIN user_settings us
+      ON us.user_id = u.id
+    LEFT JOIN grades g
+      ON g.id = u.grade_id
+
+    WHERE u.id = $1
+    `,
+    [userId]
   );
 
-  if (!res.rows[0]) return null;
-
-  const user = res.rows[0];
-
-  // ---- Get grade_value ----
-  let gradeValue = null;
-  if (user.grade_id) {
-    const gradeRes = await pool.query(
-      `SELECT grade_level
-       FROM grades 
-       WHERE id = $1`,
-      [user.grade_id]
-    );
-    if (gradeRes.rows[0]) {
-      gradeValue = gradeRes.rows[0].grade_level;
-    }
+  if (!result.rows.length) {
+    return null;
   }
 
-  // ---- Get selected subjects ----
-  let selectedSubjects = [];
-  if (user.selected_subjects && user.selected_subjects.length > 0) {
-    const { rows } = await pool.query(
-      `SELECT id, subject FROM subjects WHERE id = ANY($1::int[])`,
-      [user.selected_subjects.map(Number)]
+  const user = result.rows[0];
+
+  // Convert subject IDs to subject objects
+  if (user.selected_subjects && user.selected_subjects.length) {
+
+    const subjects = await pool.query(
+      `
+      SELECT id, subject
+      FROM subjects
+      WHERE id = ANY($1::int[])
+      `,
+      [user.selected_subjects]
     );
-    selectedSubjects = rows.map((r) => ({ id: r.id, subject: r.subject }));
+
+    user.selected_subjects = subjects.rows;
+  } else {
+    user.selected_subjects = [];
   }
 
-  return {
-    ...user,
-    selected_subjects: selectedSubjects,
-    grade_value: gradeValue, // ✅ Added grade_value here
-  };
+  return user;
 };
 

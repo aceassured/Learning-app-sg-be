@@ -987,10 +987,29 @@ export const userverifyOtp = async (req, res) => {
 
 export const getProfile = async (req, res) => {
   try {
+
     const user = await getUserById(req.userId);
-    res.json({ ok: true, user });
+
+    if (!user) {
+      return res.status(404).json({
+        ok: false,
+        message: "User not found"
+      });
+    }
+
+    return res.json({
+      ok: true,
+      user
+    });
+
   } catch (err) {
-    res.status(500).json({ ok: false, message: 'Server error' });
+
+    console.error("getProfile error:", err);
+
+    return res.status(500).json({
+      ok: false,
+      message: "Server error"
+    });
   }
 };
 
