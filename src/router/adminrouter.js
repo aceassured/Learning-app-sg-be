@@ -9,7 +9,8 @@ import { adminAnnouncementpoll, adminCreateBulkEditableQuizQuestions, adminCreat
   updateComprehensionCloze,
   getAllComprehensionCloze,
   deleteComprehensionCloze,
-  getQuestionsByType} from "../controller/admincontroller.js"
+  getQuestionsByType,
+  adminCreateBulkGrammarClozeQuestions} from "../controller/admincontroller.js"
 import auth from "../middleware/auth.js"
 import { admincreateSubject, admincreateTopic, getAllTopic, getParticularquestions, updatequestion } from "../controller/usercontroller.js"
 import multer from "multer";
@@ -61,6 +62,8 @@ router.delete("/deletetopic", deleteTopic);
 
 // Bulk upload editable quiz questions
 router.post("/quiz/bulk-upload", upload.single("file"), adminCreateBulkEditableQuizQuestions)
+
+router.post("/grammar-cloze/bulk-upload-grammar-cloze",upload.single("file"),adminCreateBulkGrammarClozeQuestions);
 
 router.get('/quiz-questions/:uploadBatchId', getEditableUploadData);
 router.get('/quiz-upload-history', getEditableUploadHistory);

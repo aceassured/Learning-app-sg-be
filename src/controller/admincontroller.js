@@ -4711,3 +4711,274 @@ export const getQuestionsByType = async (req, res) => {
     });
   }
 };
+
+
+
+// Grammar Cloze Bulk Upload
+
+export const adminCreateBulkGrammarClozeQuestions = async (req, res) => {
+
+  if (!req.file) {
+    return res.status(400).json({
+      error: "No file uploaded; field name must be 'file'."
+    });
+  }
+
+  let workbook;
+
+  try {
+    workbook = xlsx.read(req.file.buffer, { type: "buffer" });
+  } catch (err) {
+    return res.status(400).json({
+      error: "Invalid Excel file.",
+      detail: err.message
+    });
+  }
+
+  const sheetName = workbook.SheetNames[0];
+
+  const rawRows = xlsx.utils.sheet_to_json(
+    workbook.Sheets[sheetName],
+    { defval: "" }
+  );
+
+  if (!rawRows || rawRows.length === 0) {
+    return res.status(400).json({
+      error: "Excel is empty"
+    });
+  }
+
+  const uploadBatchId = uuidv4();
+
+  const fileHash = crypto
+    .createHash("sha256")
+    .update(req.file.buffer)
+    .digest("hex");
+
+  try {
+
+    // 🔹 preload grade + subject
+    const [gradesRes, subjectsRes] = await Promise.all([
+      pool.query("SELECT id, grade_level FROM grades"),
+      pool.query("SELECT id, subject FROM subjects")
+    ]);
+
+    const gradeMap = new Map();
+    gradesRes.rows.forEach(g =>
+      gradeMap.set(g.grade_level.toLowerCase().trim(), g.id)
+    );
+
+    const subjectMap = new Map();
+    subjectsRes.rows.forEach(s =>
+      subjectMap.set(s.subject.toLowerCase().trim(), s.id)
+    );
+
+    const questions = [];
+    const errors = [];
+    let rowIndex = 2;
+
+    for (const raw of rawRows) {
+
+      // ✅ READ question_type FROM EXCEL
+      const questionType = (raw.question_type ?? "")
+        .toString()
+        .trim()
+        .toLowerCase();
+
+      const passage = (raw.passage ?? "").toString().trim();
+      const grade = (raw.grade ?? "").toString().trim();
+      const subject = (raw.subject ?? "").toString().trim();
+
+      if (!questionType || !passage || !grade || !subject) {
+        errors.push({
+          row: rowIndex,
+          message: "Missing question_type, passage, grade or subject"
+        });
+        rowIndex++;
+        continue;
+      }
+
+      // ✅ validate question_type
+      if (questionType !== "grammar_cloze") {
+        errors.push({
+          row: rowIndex,
+          message: `Invalid question_type '${questionType}', must be grammar_cloze`
+        });
+        rowIndex++;
+        continue;
+      }
+
+      const grade_id = gradeMap.get(grade.toLowerCase());
+      const subject_id = subjectMap.get(subject.toLowerCase());
+
+      if (!grade_id || !subject_id) {
+        errors.push({
+          row: rowIndex,
+          message: `Invalid grade '${grade}' or subject '${subject}'`
+        });
+        rowIndex++;
+        continue;
+      }
+
+      // 🔹 options
+      const options = [
+        { label: "A", text: raw.option_A },
+        { label: "B", text: raw.option_B },
+        { label: "C", text: raw.option_C },
+        { label: "D", text: raw.option_D },
+        { label: "E", text: raw.option_E },
+        { label: "F", text: raw.option_F }
+      ].filter(o => o.text);
+
+      // 🔹 answers
+      const correctAnswers = {};
+
+      for (let i = 1; i <= 10; i++) {
+
+        const key = `answer_${i}`;
+
+        if (raw[key]) {
+          correctAnswers[i] = raw[key].toString().trim();
+        }
+
+      }
+
+      if (Object.keys(correctAnswers).length === 0) {
+        errors.push({
+          row: rowIndex,
+          message: "No answers provided"
+        });
+        rowIndex++;
+        continue;
+      }
+
+      const extraData = {
+        title: "Grammar Cloze",
+        passage,
+        options,
+        correctAnswers
+      };
+
+      questions.push({
+        question_text: passage,
+        question_type: questionType,
+        grade_id,
+        subject_id,
+        extra_data: extraData
+      });
+
+      rowIndex++;
+
+    }
+
+    if (errors.length > 0) {
+      return res.status(400).json({
+        error: "Validation failed",
+        details: errors
+      });
+    }
+
+    if (questions.length === 0) {
+      return res.status(400).json({
+        error: "No valid questions found"
+      });
+    }
+
+    const questionsHash = crypto
+      .createHash("sha256")
+      .update(JSON.stringify(questions))
+      .digest("hex");
+
+    const dupCheck = await pool.query(
+      `SELECT id FROM upload_history
+       WHERE file_hash = $1 OR questions_hash = $2
+       LIMIT 1`,
+      [fileHash, questionsHash]
+    );
+
+    if (dupCheck.rowCount > 0) {
+      return res.status(400).json({
+        error: "Duplicate upload detected"
+      });
+    }
+
+    const client = await pool.connect();
+
+    try {
+
+      await client.query("BEGIN");
+
+      const values = [];
+      const params = [];
+      let p = 1;
+
+      for (const q of questions) {
+
+        params.push(
+          q.question_text,
+          q.question_type,
+          q.grade_id,
+          q.subject_id,
+          JSON.stringify(q.extra_data),
+          uploadBatchId
+        );
+
+        values.push(
+          `($${p++}, $${p++}, $${p++}, $${p++}, $${p++}::jsonb, $${p++})`
+        );
+
+      }
+
+      await client.query(
+        `INSERT INTO questions
+        (question_text, question_type, grade_id, subject_id, extra_data, upload_batch_id)
+        VALUES ${values.join(", ")}`,
+        params
+      );
+
+      await client.query(
+        `INSERT INTO upload_history
+        (filename, questions_count, upload_batch_id, status, file_hash, questions_hash, type)
+        VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+        [
+          req.file.originalname,
+          questions.length,
+          uploadBatchId,
+          "success",
+          fileHash,
+          questionsHash,
+          "grammar_cloze"
+        ]
+      );
+
+      await client.query("COMMIT");
+
+      return res.status(201).json({
+        success: true,
+        message: "Grammar Cloze questions imported successfully",
+        totalInserted: questions.length
+      });
+
+    } catch (err) {
+
+      await client.query("ROLLBACK");
+      throw err;
+
+    } finally {
+
+      client.release();
+
+    }
+
+  } catch (err) {
+
+    console.error("Bulk Grammar Cloze Upload Error:", err);
+
+    return res.status(500).json({
+      error: "Server error",
+      detail: err.message
+    });
+
+  }
+
+};
