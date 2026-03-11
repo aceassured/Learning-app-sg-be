@@ -4092,6 +4092,7 @@ export const createComprehensionCloze = async (req, res) => {
   const client = await pool.connect();
 
   try {
+
     const {
       title,
       passage,
@@ -4132,11 +4133,38 @@ export const createComprehensionCloze = async (req, res) => {
       });
     }
 
-    // 🧠 Prepare JSON data
+    // 🔹 Normalize answers (support multiple answers)
+    const normalizedAnswers = {};
+
+    for (const key in correctAnswers) {
+
+      const value = correctAnswers[key];
+
+      if (Array.isArray(value)) {
+
+        normalizedAnswers[key] = value.map(v =>
+          v.toString().toLowerCase().trim()
+        );
+
+      } else if (typeof value === "string" && value.includes(",")) {
+
+        normalizedAnswers[key] = value
+          .split(",")
+          .map(v => v.toLowerCase().trim());
+
+      } else {
+
+        normalizedAnswers[key] =
+          value.toString().toLowerCase().trim();
+
+      }
+
+    }
+
     const extraData = {
       title: title?.trim() || null,
       passage: passage.trim(),
-      correctAnswers
+      correctAnswers: normalizedAnswers
     };
 
     const result = await client.query(
@@ -4151,7 +4179,7 @@ export const createComprehensionCloze = async (req, res) => {
         extra_data,
         created_at
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
+      VALUES ($1,$2,$3,$4,$5,$6,$7,NOW())
       RETURNING id
       `,
       [
@@ -4174,6 +4202,7 @@ export const createComprehensionCloze = async (req, res) => {
     });
 
   } catch (error) {
+
     await client.query("ROLLBACK");
 
     if (error.code === "23505") {
@@ -4189,8 +4218,11 @@ export const createComprehensionCloze = async (req, res) => {
       success: false,
       message: "Server Error"
     });
+
   } finally {
+
     client.release();
+
   }
 };
 
@@ -4973,6 +5005,254 @@ export const adminCreateBulkGrammarClozeQuestions = async (req, res) => {
   } catch (err) {
 
     console.error("Bulk Grammar Cloze Upload Error:", err);
+
+    return res.status(500).json({
+      error: "Server error",
+      detail: err.message
+    });
+
+  }
+
+};
+
+
+
+// Comprehension-Cloze Bulk Upload
+
+
+export const adminCreateBulkComprehensionClozeQuestions = async (req, res) => {
+
+  if (!req.file) {
+    return res.status(400).json({
+      error: "No file uploaded; field name must be 'file'."
+    });
+  }
+
+  let workbook;
+
+  try {
+    workbook = xlsx.read(req.file.buffer, { type: "buffer" });
+  } catch (err) {
+    return res.status(400).json({
+      error: "Invalid Excel file.",
+      detail: err.message
+    });
+  }
+
+  const sheetName = workbook.SheetNames[0];
+
+  const rawRows = xlsx.utils.sheet_to_json(
+    workbook.Sheets[sheetName],
+    { defval: "" }
+  );
+
+  if (!rawRows.length) {
+    return res.status(400).json({
+      error: "Excel is empty"
+    });
+  }
+
+  const uploadBatchId = uuidv4();
+
+  const fileHash = crypto
+    .createHash("sha256")
+    .update(req.file.buffer)
+    .digest("hex");
+
+  try {
+
+    // preload grade + subject
+    const [gradesRes, subjectsRes] = await Promise.all([
+      pool.query("SELECT id, grade_level FROM grades"),
+      pool.query("SELECT id, subject FROM subjects")
+    ]);
+
+    const gradeMap = new Map();
+    gradesRes.rows.forEach(g =>
+      gradeMap.set(g.grade_level.toLowerCase().trim(), g.id)
+    );
+
+    const subjectMap = new Map();
+    subjectsRes.rows.forEach(s =>
+      subjectMap.set(s.subject.toLowerCase().trim(), s.id)
+    );
+
+    const questions = [];
+    const errors = [];
+    let rowIndex = 2;
+
+    for (const raw of rawRows) {
+
+      const passage = raw.passage?.toString().trim();
+      const grade = raw.grade?.toString().trim();
+      const subject = raw.subject?.toString().trim();
+
+      if (!passage || !grade || !subject) {
+        errors.push({
+          row: rowIndex,
+          message: "Missing passage / grade / subject"
+        });
+        rowIndex++;
+        continue;
+      }
+
+      const grade_id = gradeMap.get(grade.toLowerCase());
+      const subject_id = subjectMap.get(subject.toLowerCase());
+
+      if (!grade_id || !subject_id) {
+        errors.push({
+          row: rowIndex,
+          message: `Invalid grade '${grade}' or subject '${subject}'`
+        });
+        rowIndex++;
+        continue;
+      }
+
+      // build correctAnswers
+      const correctAnswers = {};
+
+      for (let i = 1; i <= 10; i++) {
+
+        const key = `answer_${i}`;
+        const value = raw[key];
+
+        if (!value) continue;
+
+        const cleaned = value.toString().trim();
+
+        if (cleaned.includes(",")) {
+
+          correctAnswers[i] = cleaned
+            .split(",")
+            .map(v => v.trim());
+
+        } else {
+
+          correctAnswers[i] = cleaned;
+
+        }
+
+      }
+
+      if (Object.keys(correctAnswers).length === 0) {
+        errors.push({
+          row: rowIndex,
+          message: "No answers provided"
+        });
+        rowIndex++;
+        continue;
+      }
+
+      const extraData = {
+        title: null,
+        passage,
+        correctAnswers
+      };
+
+      questions.push({
+        question_text: passage,
+        question_type: "comprehension_cloze",
+        grade_id,
+        subject_id,
+        extra_data: extraData
+      });
+
+      rowIndex++;
+    }
+
+    if (errors.length) {
+      return res.status(400).json({
+        error: "Validation failed",
+        details: errors
+      });
+    }
+
+    const questionsHash = crypto
+      .createHash("sha256")
+      .update(JSON.stringify(questions))
+      .digest("hex");
+
+    const dupCheck = await pool.query(
+      `SELECT id FROM upload_history
+       WHERE file_hash=$1 OR questions_hash=$2`,
+      [fileHash, questionsHash]
+    );
+
+    if (dupCheck.rowCount > 0) {
+      return res.status(400).json({
+        error: "Duplicate upload detected"
+      });
+    }
+
+    const client = await pool.connect();
+
+    try {
+
+      await client.query("BEGIN");
+
+      const params = [];
+      const values = [];
+
+      let p = 1;
+
+      for (const q of questions) {
+
+        params.push(
+          q.question_text,
+          q.question_type,
+          q.grade_id,
+          q.subject_id,
+          JSON.stringify(q.extra_data),
+          uploadBatchId
+        );
+
+        values.push(
+          `($${p++},$${p++},$${p++},$${p++},$${p++}::jsonb,$${p++})`
+        );
+      }
+
+      await client.query(
+        `INSERT INTO questions
+        (question_text, question_type, grade_id, subject_id, extra_data, upload_batch_id)
+        VALUES ${values.join(",")}`,
+        params
+      );
+
+      await client.query(
+        `INSERT INTO upload_history
+        (filename, questions_count, upload_batch_id, status, file_hash, questions_hash, type)
+        VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+        [
+          req.file.originalname,
+          questions.length,
+          uploadBatchId,
+          "success",
+          fileHash,
+          questionsHash,
+          "comprehension_cloze"
+        ]
+      );
+
+      await client.query("COMMIT");
+
+      return res.status(201).json({
+        success: true,
+        message: "Comprehension Cloze questions imported successfully",
+        totalInserted: questions.length
+      });
+
+    } catch (err) {
+
+      await client.query("ROLLBACK");
+      throw err;
+
+    } finally {
+      client.release();
+    }
+
+  } catch (err) {
+
+    console.error("Bulk Upload Error:", err);
 
     return res.status(500).json({
       error: "Server error",

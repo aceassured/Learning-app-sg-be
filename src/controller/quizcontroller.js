@@ -1361,6 +1361,7 @@ export const submitAnswers = async (req, res) => {
         };
       },
 
+      // ✅ UPDATED comprehension_cloze
       comprehension_cloze: (question, userAnswer) => {
 
         const extra =
@@ -1374,11 +1375,7 @@ export const submitAnswers = async (req, res) => {
 
         for (const key in correctAnswers) {
 
-          const correct =
-            correctAnswers[key]
-              ?.toString()
-              .toLowerCase()
-              .trim();
+          const correct = correctAnswers[key];
 
           const user =
             userAnswer?.[String(key)]
@@ -1386,9 +1383,28 @@ export const submitAnswers = async (req, res) => {
               .toLowerCase()
               .trim();
 
-          if (correct === user) {
-            score++;
+          let isCorrect = false;
+
+          // Multiple answers
+          if (Array.isArray(correct)) {
+
+            const normalized = correct.map(v =>
+              v.toString().toLowerCase().trim()
+            );
+
+            isCorrect = normalized.includes(user);
+
+          } else {
+
+            const normalized =
+              correct?.toString().toLowerCase().trim();
+
+            isCorrect = normalized === user;
+
           }
+
+          if (isCorrect) score++;
+
         }
 
         return {
@@ -1557,10 +1573,9 @@ export const reviewSession = async (req, res) => {
         .toLowerCase()
         .trim();
 
-      // userAnswer for non-MCQ
       const userAnswer = row.answer_json;
 
-      // ================= NORMAL (MCQ) =================
+      // ================= NORMAL =================
       if (type === "normal") {
 
         const selectedOption = row.selected_option_id;
@@ -1649,11 +1664,7 @@ export const reviewSession = async (req, res) => {
 
         for (const key in correctAnswers) {
 
-          const correct =
-            correctAnswers[key]
-              ?.toString()
-              .toLowerCase()
-              .trim();
+          const correct = correctAnswers[key];
 
           const user =
             userAnswer?.[key]
@@ -1661,13 +1672,31 @@ export const reviewSession = async (req, res) => {
               .toLowerCase()
               .trim();
 
-          const isCorrect = correct === user;
+          let isCorrect = false;
+
+          // multiple answers
+          if (Array.isArray(correct)) {
+
+            const normalized = correct.map(v =>
+              v.toString().toLowerCase().trim()
+            );
+
+            isCorrect = normalized.includes(user);
+
+          } else {
+
+            const normalized =
+              correct?.toString().toLowerCase().trim();
+
+            isCorrect = normalized === user;
+
+          }
 
           review.push({
             type: "comprehension_cloze",
             question_id: row.question_id,
             blank: key,
-            correct_answer: correctAnswers[key],
+            correct_answer: correct,
             user_answer: userAnswer?.[key],
             is_correct: isCorrect,
             mark: isCorrect ? 1 : 0
@@ -1691,6 +1720,7 @@ export const reviewSession = async (req, res) => {
     });
 
   } catch (err) {
+
     console.error("reviewSession error:", err);
 
     return res.status(500).json({

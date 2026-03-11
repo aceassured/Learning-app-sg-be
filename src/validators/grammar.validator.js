@@ -279,12 +279,23 @@ export const createComprehensionClozeValidator = [
       // Validate answer values
       // -------------------------------
       for (const key of Object.keys(correctAnswers)) {
-  
+
         const answer = correctAnswers[key];
-  
-        if (!answer || answer.trim() === "") {
-          throw new Error(`Answer missing for blank (${key})`);
+      
+        if (Array.isArray(answer)) {
+      
+          if (answer.length === 0) {
+            throw new Error(`Answer array empty for blank (${key})`);
+          }
+      
+        } else {
+      
+          if (!answer || answer.toString().trim() === "") {
+            throw new Error(`Answer missing for blank (${key})`);
+          }
+      
         }
+      
       }
   
       // -------------------------------
