@@ -173,27 +173,27 @@ export const getProgressPageDatanew = async (req, res) => {
       [userId]
     );
 
-    // Daily Streak (consecutive daily quiz days)
+    // Daily Streak
     const streakRes = await pool.query(
       `WITH user_days AS (
-   SELECT DISTINCT DATE_TRUNC('day', finished_at)::date AS day
-   FROM user_quiz_sessions
-   WHERE user_id = $1 AND type='daily'
-     AND finished_at >= current_date - interval '30 days'
-)
-SELECT COUNT(*) AS streak
-FROM (
-   SELECT day,
-          ROW_NUMBER() OVER (ORDER BY day DESC) AS rn
-   FROM user_days
-   WHERE day <= current_date
-) t
-WHERE day = current_date - ((rn-1) * interval '1 day');
-`,
+       SELECT DISTINCT DATE_TRUNC('day', finished_at)::date AS day
+       FROM user_quiz_sessions
+       WHERE user_id = $1 AND type='daily'
+         AND finished_at >= current_date - interval '30 days'
+      )
+      SELECT COUNT(*) AS streak
+      FROM (
+         SELECT day,
+                ROW_NUMBER() OVER (ORDER BY day DESC) AS rn
+         FROM user_days
+         WHERE day <= current_date
+      ) t
+      WHERE day = current_date - ((rn-1) * interval '1 day');`,
       [userId]
     );
 
-    // 5. Topic Breakdown (per subject, optional filter)
+    // ❌ Topic Breakdown (Disabled / Commented)
+    /*
     const topicBreakdownRes = await pool.query(
       `SELECT t.id AS topic_id,
               t.topic AS topic,
@@ -211,8 +211,9 @@ WHERE day = current_date - ((rn-1) * interval '1 day');
        ORDER BY accuracy DESC`,
       subject_id ? [userId, subject_id] : [userId]
     );
+    */
 
-    // 6. Weekly Points (Achievements)
+    // 6. Weekly Points
     const weeklyPointsRes = await pool.query(
       `SELECT COALESCE(
           COUNT(DISTINCT s.id) * 10 + SUM(CASE WHEN a.is_correct THEN 1 ELSE 0 END),
@@ -252,14 +253,10 @@ WHERE day = current_date - ((rn-1) * interval '1 day');
           score: r.score
         }))
       },
-      topicBreakdown: topicBreakdownRes.rows.map(r => ({
-        topicId: r.topic_id,
-        topic: r.topic,
-        subject: r.subject,
-        answered: r.questions_answered,
-        accuracy: r.accuracy,
-        lastAttempt: r.last_attempt
-      })),
+
+      // ❌ Topic breakdown removed
+      // topicBreakdown: [],
+
       achievements: {
         weeklyGoal: {
           points: weeklyPointsRes.rows[0]?.points || 0,
@@ -306,7 +303,7 @@ export const getProgressPageDatawithMonthly = async (req, res) => {
       quizzesTakenRes,
       miniQuizRes,
       monthlyAnalyticsRes,
-      topicBreakdownRes,
+      // topicBreakdownRes,
       weeklyStatsRes,
       streakRes
     ] = await Promise.all([
@@ -384,6 +381,7 @@ export const getProgressPageDatawithMonthly = async (req, res) => {
         [userId]
       ),
 
+      /*
       // ---------------- TOPIC BREAKDOWN ----------------
       (() => {
         const { clause, params } = buildDateClause("s.finished_at");
@@ -433,8 +431,9 @@ export const getProgressPageDatawithMonthly = async (req, res) => {
           [userId, ...params, ...subjectParam]
         );
       })(),
+      */
 
-      // ---------------- WEEKLY POINTS (COMBINED QUERY) ----------------
+      // ---------------- WEEKLY POINTS ----------------
       pool.query(
         `SELECT 
             COUNT(DISTINCT s.id)::int AS sessions,
@@ -499,7 +498,7 @@ export const getProgressPageDatawithMonthly = async (req, res) => {
         chart: monthlyAnalyticsRes.rows
       },
 
-      topicBreakdown: topicBreakdownRes.rows,
+      // topicBreakdown: topicBreakdownRes.rows,
 
       achievements: {
         weeklyGoal: { points: weeklyPoints, total: 100 },
