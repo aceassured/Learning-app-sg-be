@@ -1231,3 +1231,146 @@ export const getComprehensionQuestionsForUpload = async (req, res) => {
 
   }
 };
+
+
+// Grammar-Cloze Questions get,delete
+
+export const getGrammarClozeUploadHistory = async (req, res) => {
+  try {
+
+    const result = await pool.query(
+      `SELECT 
+          id,
+          filename,
+          uploaded_at,
+          questions_count,
+          status,
+          upload_batch_id
+       FROM upload_history
+       WHERE status = 'success'
+       AND type = 'grammar_cloze'
+       ORDER BY uploaded_at DESC
+       LIMIT 50`
+    );
+
+    res.json({
+      success: true,
+      data: result.rows
+    });
+
+  } catch (err) {
+
+    console.error(err);
+
+    res.status(500).json({
+      success: false,
+      message: "Error fetching upload history"
+    });
+
+  }
+};
+
+
+export const deleteGrammarClozeUpload = async (req, res) => {
+
+  const { uploadId } = req.params;
+
+  try {
+
+    const uploadResult = await pool.query(
+      `SELECT upload_batch_id, filename, type
+       FROM upload_history
+       WHERE id = $1`,
+      [uploadId]
+    );
+
+    if (uploadResult.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "Upload not found"
+      });
+    }
+
+    const { upload_batch_id, filename, type } = uploadResult.rows[0];
+
+    if (type !== "grammar_cloze") {
+      return res.status(400).json({
+        success: false,
+        message: "This upload is not grammar_cloze type"
+      });
+    }
+
+    const deleteQuestions = await pool.query(
+      `DELETE FROM questions
+       WHERE upload_batch_id = $1`,
+      [upload_batch_id]
+    );
+
+    await pool.query(
+      `DELETE FROM upload_history
+       WHERE id = $1`,
+      [uploadId]
+    );
+
+    res.json({
+      success: true,
+      message: `Successfully deleted upload "${filename}" and ${deleteQuestions.rowCount} associated questions.`,
+      deletedQuestions: deleteQuestions.rowCount
+    });
+
+  } catch (err) {
+
+    console.error(err);
+
+    res.status(500).json({
+      success: false,
+      message: "Error deleting upload",
+      error: err.message
+    });
+
+  }
+};
+
+
+export const getGrammarClozeQuestionsForUpload = async (req, res) => {
+
+  const { uploadBatchId } = req.params;
+
+  try {
+
+    const result = await pool.query(
+      `SELECT 
+        id,
+        subject,
+        question_text,
+        grade_id,
+        subject_id,
+        topic_id,
+        difficulty_level,
+        question_type,
+        extra_data,
+        created_at
+      FROM questions
+      WHERE upload_batch_id = $1
+      AND question_type = 'grammar_cloze'
+      ORDER BY created_at DESC`,
+      [uploadBatchId]
+    );
+
+    res.json({
+      success: true,
+      data: result.rows,
+      count: result.rows.length
+    });
+
+  } catch (err) {
+
+    console.error(err);
+
+    res.status(500).json({
+      success: false,
+      message: "Error fetching questions for this upload"
+    });
+
+  }
+};

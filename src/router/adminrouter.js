@@ -15,7 +15,7 @@ import { adminAnnouncementpoll, adminCreateBulkEditableQuizQuestions, adminCreat
 import auth from "../middleware/auth.js"
 import { admincreateSubject, admincreateTopic, getAllTopic, getParticularquestions, updatequestion } from "../controller/usercontroller.js"
 import multer from "multer";
-import { deleteComprehensionClozeUpload, deleteUpload, getComprehensionClozeUploadHistory, getComprehensionQuestionsForUpload, getQuestionsForUpload, getUploadHistory, questionFileupload } from "../utils/vercel-blob.js";
+import { deleteComprehensionClozeUpload, deleteGrammarClozeUpload, deleteUpload, getComprehensionClozeUploadHistory, getComprehensionQuestionsForUpload, getGrammarClozeQuestionsForUpload, getGrammarClozeUploadHistory, getQuestionsForUpload, getUploadHistory, questionFileupload } from "../utils/vercel-blob.js";
 import { extractPdfText } from "../utils/pdfExtractor.js";
 import { parseQuestionsFromText } from "../utils/questionParser.js";
 import { createComprehensionClozeValidator, createGrammarClozeValidator, validateRequest, validateRequestComprehenstion } from "../validators/grammar.validator.js";
@@ -47,6 +47,17 @@ router.get('/upload-questions/:uploadBatchId', getQuestionsForUpload);
 
 router.get('/upload-history', getUploadHistory);
 router.delete('/delete-upload/:uploadId', deleteUpload);
+
+
+// Grammar-Cloze get,delete
+
+router.get("/grammar-cloze-upload-history",getGrammarClozeUploadHistory);
+router.delete("/delete-grammar-cloze-upload/:uploadId",deleteGrammarClozeUpload)
+router.get("/upload-grammar-cloze-questions/:uploadBatchId",getGrammarClozeQuestionsForUpload);
+
+
+
+
 
 // Comprehension-bluk get,delete
 router.get("/comprehension-upload-history",getComprehensionClozeUploadHistory);
