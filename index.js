@@ -212,6 +212,7 @@ const corsOptions = {
     "https://ace-hive-production-fe.vercel.app",
     "http://localhost:5173",
     "http://localhost:8000",
+    "http://localhost:8001",
     "https://learning-app-admin-fe.vercel.app"
   ], // allow multiple frontends
   methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
