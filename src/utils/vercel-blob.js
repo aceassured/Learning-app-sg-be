@@ -1083,3 +1083,151 @@ export const getQuestionsForUpload = async (req, res) => {
     });
   }
 };
+
+
+
+// Comprehenstion_Cloze Bulk upload get, delete
+
+export const getComprehensionClozeUploadHistory = async (req, res) => {
+  try {
+
+    const result = await pool.query(
+      `SELECT 
+          id,
+          filename,
+          uploaded_at,
+          questions_count,
+          status,
+          upload_batch_id
+       FROM upload_history
+       WHERE status = 'success'
+       AND type = 'comprehension_cloze'
+       ORDER BY uploaded_at DESC
+       LIMIT 50`
+    );
+
+    return res.json({
+      success: true,
+      data: result.rows
+    });
+
+  } catch (err) {
+
+    console.error("Error fetching comprehension_cloze upload history:", err);
+
+    return res.status(500).json({
+      success: false,
+      message: "Error fetching upload history"
+    });
+
+  }
+};
+
+
+
+export const deleteComprehensionClozeUpload = async (req, res) => {
+  const { uploadId } = req.params;
+
+  try {
+
+    // Get upload record
+    const uploadResult = await pool.query(
+      `SELECT upload_batch_id, filename, type 
+       FROM upload_history 
+       WHERE id = $1`,
+      [uploadId]
+    );
+
+    if (uploadResult.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "Upload not found"
+      });
+    }
+
+    const { upload_batch_id, filename, type } = uploadResult.rows[0];
+
+    // Ensure this upload belongs to comprehension_cloze
+    if (type !== "comprehension_cloze") {
+      return res.status(400).json({
+        success: false,
+        message: "This upload is not a comprehension_cloze upload"
+      });
+    }
+
+    // Delete questions from this upload batch
+    const deleteQuestions = await pool.query(
+      `DELETE FROM questions 
+       WHERE upload_batch_id = $1`,
+      [upload_batch_id]
+    );
+
+    // Delete upload history
+    await pool.query(
+      `DELETE FROM upload_history 
+       WHERE id = $1`,
+      [uploadId]
+    );
+
+    return res.json({
+      success: true,
+      message: `Successfully deleted comprehension upload "${filename}" and ${deleteQuestions.rowCount} associated questions.`,
+      deletedQuestions: deleteQuestions.rowCount
+    });
+
+  } catch (err) {
+
+    console.error("Delete comprehension upload error:", err);
+
+    return res.status(500).json({
+      success: false,
+      message: "Error deleting upload",
+      error: err.message
+    });
+
+  }
+};
+
+
+
+export const getComprehensionQuestionsForUpload = async (req, res) => {
+  const { uploadBatchId } = req.params;
+
+  try {
+
+    const result = await pool.query(
+      `SELECT 
+        id,
+        subject,
+        question_text,
+        grade_id,
+        subject_id,
+        topic_id,
+        difficulty_level,
+        question_type,
+        extra_data,
+        created_at
+      FROM questions
+      WHERE upload_batch_id = $1
+      AND question_type = 'comprehension_cloze'
+      ORDER BY created_at DESC`,
+      [uploadBatchId]
+    );
+
+    return res.json({
+      success: true,
+      data: result.rows,
+      count: result.rows.length
+    });
+
+  } catch (err) {
+
+    console.error("Error fetching comprehension questions:", err);
+
+    return res.status(500).json({
+      success: false,
+      message: "Error fetching questions for this upload"
+    });
+
+  }
+};
