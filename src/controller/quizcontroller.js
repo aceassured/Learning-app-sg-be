@@ -516,7 +516,7 @@ export const startQuiz = async (req, res) => {
       if (q.question_type === "editable") {
         return {
           id: q.id,
-          title: q.extra_data?.title || "Untitled Quiz",
+          title: q.extra_data?.title || "",
           passage: q.question_text,
           blanks: q.extra_data?.blanks || [],
           instructions: q.extra_data?.instructions || "",
@@ -528,7 +528,7 @@ export const startQuiz = async (req, res) => {
       if (q.question_type === "grammar_cloze") {
         return {
           id: q.id,
-          title: q.extra_data?.title || "Untitled",
+          title: q.extra_data?.title || "",
           passage: q.question_text,
           options: q.extra_data?.options || [],
           correctAnswers: q.extra_data?.correctAnswers || {},
@@ -540,7 +540,7 @@ export const startQuiz = async (req, res) => {
       if (q.question_type === "comprehension_cloze") {
         return {
           id: q.id,
-          title: q.extra_data?.title || "Untitled",
+          title: q.extra_data?.title || "",
           passage: q.question_text,
           correctAnswers: q.extra_data?.correctAnswers || {},
           type: "comprehension_cloze"
@@ -698,7 +698,7 @@ export const startDailyQuiz = async (req, res) => {
       if (q.question_type === "editable") {
         return {
           id: q.id,
-          title: q.extra_data?.title || "Untitled Quiz",
+          title: q.extra_data?.title || "",
           passage: q.question_text,
           grade_id: q.grade_id,
           subject_id: q.subject_id,
@@ -714,7 +714,7 @@ export const startDailyQuiz = async (req, res) => {
           id: q.id,
           subject_id: q.subject_id,
           topic_id: q.topic_id,
-          title: q.extra_data?.title || "Untitled",
+          title: q.extra_data?.title || "",
           passage: q.question_text,
           options: q.extra_data?.options || [],
           correctAnswers: q.extra_data?.correctAnswers || {},
@@ -728,7 +728,7 @@ export const startDailyQuiz = async (req, res) => {
           id: q.id,
           subject_id: q.subject_id,
           topic_id: q.topic_id,
-          title: q.extra_data?.title || "Untitled",
+          title: q.extra_data?.title || "",
           passage: q.question_text,
           correctAnswers: q.extra_data?.correctAnswers || {},
           type: "comprehension_cloze"
@@ -1121,7 +1121,7 @@ export const startbigQuiz = async (req, res) => {
       if (q.question_type === "editable") {
         return {
           id: q.id,
-          title: q.extra_data?.title || "Untitled Quiz",
+          title: q.extra_data?.title || "",
           passage: q.question_text,
           grade_id: q.grade_id,
           subject_id: q.subject_id,
@@ -1138,7 +1138,7 @@ export const startbigQuiz = async (req, res) => {
           id: q.id,
           subject_id: q.subject_id,
           topic_id: q.topic_id,
-          title: q.extra_data?.title || "Untitled",
+          title: q.extra_data?.title || "",
           passage: q.question_text,
           options: q.extra_data?.options || [],
           correctAnswers: q.extra_data?.correctAnswers || {},
@@ -1152,7 +1152,7 @@ export const startbigQuiz = async (req, res) => {
           id: q.id,
           subject_id: q.subject_id,
           topic_id: q.topic_id,
-          title: q.extra_data?.title || "Untitled",
+          title: q.extra_data?.title || "",
           passage: q.question_text,
           correctAnswers: q.extra_data?.correctAnswers || {},
           type: "comprehension_cloze"
@@ -2173,7 +2173,7 @@ export const startMiniQuiz = async (req, res) => {
       if (q.question_type === "editable") {
         return {
           id: q.id,
-          title: q.extra_data?.title || "Untitled Quiz",
+          title: q.extra_data?.title || "",
           passage: q.question_text,
           grade_id: q.grade_id,
           subject_id: q.subject_id,
@@ -2189,7 +2189,7 @@ export const startMiniQuiz = async (req, res) => {
           id: q.id,
           subject_id: q.subject_id,
           topic_id: q.topic_id,
-          title: q.extra_data?.title || "Untitled",
+          title: q.extra_data?.title || "",
           passage: q.question_text,
           options: q.extra_data?.options || [],
           correctAnswers: q.extra_data?.correctAnswers || {},
@@ -2202,7 +2202,7 @@ export const startMiniQuiz = async (req, res) => {
           id: q.id,
           subject_id: q.subject_id,
           topic_id: q.topic_id,
-          title: q.extra_data?.title || "Untitled",
+          title: q.extra_data?.title || "",
           passage: q.question_text,
           correctAnswers: q.extra_data?.correctAnswers || {},
           type: "comprehension_cloze"
