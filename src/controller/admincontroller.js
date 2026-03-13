@@ -632,9 +632,9 @@ export const adminCreateEditQuiz = async (req, res) => {
     const { title, passage, grade_id, subject_id, topic_id, questions } = req.body;
 
     // 🔹 Basic Validation
-    if (!title || !passage || !grade_id || !subject_id) {
+    if ( !passage || !grade_id || !subject_id) {
       return res.status(400).json({
-        error: "title, passage, grade_id and subject_id are required"
+        error: "passage, grade_id and subject_id are required"
       });
     }
 
