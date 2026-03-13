@@ -110,7 +110,7 @@ export const getHomeData = async (req, res) => {
       +(month.correct || 0) + +(month.incorrect || 0);
 
 
-    // ✅ Full streak count
+    // ✅ Full streak count (reset if any day missed)
     const streakRes = await pool.query(
       `SELECT DISTINCT activity_date
        FROM user_activity
@@ -127,30 +127,33 @@ export const getHomeData = async (req, res) => {
       const today = new Date();
       today.setHours(0, 0, 0, 0);
 
-      let currentDate = new Date(today);
+      const latestActivity = new Date(streakRes.rows[0].activity_date);
+      latestActivity.setHours(0, 0, 0, 0);
 
-      for (let r of streakRes.rows) {
+      // ❗ If user didn't play today → streak = 0
+      if (latestActivity.getTime() !== today.getTime()) {
 
-        const activityDate = new Date(r.activity_date);
-        activityDate.setHours(0, 0, 0, 0);
+        streakCount = 0;
 
-        if (activityDate.getTime() === currentDate.getTime()) {
+      } else {
 
-          streakCount++;
-          currentDate.setDate(currentDate.getDate() - 1);
+        let currentDate = new Date(today);
 
-        } else if (
-          activityDate.getTime() ===
-          currentDate.getTime() - 24 * 60 * 60 * 1000
-        ) {
+        for (let r of streakRes.rows) {
 
-          streakCount++;
-          currentDate.setDate(currentDate.getDate() - 1);
+          const activityDate = new Date(r.activity_date);
+          activityDate.setHours(0, 0, 0, 0);
 
-        } else {
+          if (activityDate.getTime() === currentDate.getTime()) {
 
-          break; // gap → streak ends
+            streakCount++;
+            currentDate.setDate(currentDate.getDate() - 1);
 
+          } else {
+
+            break; // gap → streak resets
+
+          }
         }
       }
     }
@@ -413,11 +416,14 @@ export const startQuiz = async (req, res) => {
       FROM questions
       WHERE question_type = 'normal'
       AND NOT (id = ANY($1::int[]))
-      ${subjects?.length ? `AND subject_id = ANY($2::int[])` : ``}
+      AND NOT (id = ANY($2::int[]))
+      ${subjects?.length ? `AND subject_id = ANY($3::int[])` : ``}
       ORDER BY random()
       LIMIT ${NORMAL_COUNT}
       `,
-      subjects?.length ? [answeredIds, subjects] : [answeredIds]
+      subjects?.length
+        ? [answeredIds, selectedQuestions.map(q => q.id), subjects]
+        : [answeredIds, selectedQuestions.map(q => q.id)]
     );
 
     selectedQuestions.push(...normalRes.rows);
@@ -431,11 +437,14 @@ export const startQuiz = async (req, res) => {
       FROM questions
       WHERE question_type = 'editable'
       AND NOT (id = ANY($1::int[]))
-      ${subjects?.length ? `AND subject_id = ANY($2::int[])` : ``}
+      AND NOT (id = ANY($2::int[]))
+      ${subjects?.length ? `AND subject_id = ANY($3::int[])` : ``}
       ORDER BY random()
       LIMIT ${EDITABLE_COUNT}
       `,
-      subjects?.length ? [answeredIds, subjects] : [answeredIds]
+      subjects?.length
+        ? [answeredIds, selectedQuestions.map(q => q.id), subjects]
+        : [answeredIds, selectedQuestions.map(q => q.id)]
     );
 
     selectedQuestions.push(...editableRes.rows);
@@ -449,11 +458,14 @@ export const startQuiz = async (req, res) => {
       FROM questions
       WHERE question_type = 'grammar_cloze'
       AND NOT (id = ANY($1::int[]))
-      ${subjects?.length ? `AND subject_id = ANY($2::int[])` : ``}
+      AND NOT (id = ANY($2::int[]))
+      ${subjects?.length ? `AND subject_id = ANY($3::int[])` : ``}
       ORDER BY random()
       LIMIT ${COMPREHENSION_COUNT}
       `,
-      subjects?.length ? [answeredIds, subjects] : [answeredIds]
+      subjects?.length
+        ? [answeredIds, selectedQuestions.map(q => q.id), subjects]
+        : [answeredIds, selectedQuestions.map(q => q.id)]
     );
 
     selectedQuestions.push(...compRes.rows);
@@ -467,11 +479,14 @@ export const startQuiz = async (req, res) => {
       FROM questions
       WHERE question_type = 'comprehension_cloze'
       AND NOT (id = ANY($1::int[]))
-      ${subjects?.length ? `AND subject_id = ANY($2::int[])` : ``}
+      AND NOT (id = ANY($2::int[]))
+      ${subjects?.length ? `AND subject_id = ANY($3::int[])` : ``}
       ORDER BY random()
       LIMIT ${CLOZE_COUNT}
       `,
-      subjects?.length ? [answeredIds, subjects] : [answeredIds]
+      subjects?.length
+        ? [answeredIds, selectedQuestions.map(q => q.id), subjects]
+        : [answeredIds, selectedQuestions.map(q => q.id)]
     );
 
     selectedQuestions.push(...clozeRes.rows);
@@ -512,7 +527,6 @@ export const startQuiz = async (req, res) => {
     // =====================================================
     const formatted = selectedQuestions.map(q => {
 
-      // EDITABLE
       if (q.question_type === "editable") {
         return {
           id: q.id,
@@ -524,7 +538,6 @@ export const startQuiz = async (req, res) => {
         };
       }
 
-      // COMPREHENSION GRAMMER
       if (q.question_type === "grammar_cloze") {
         return {
           id: q.id,
@@ -536,7 +549,6 @@ export const startQuiz = async (req, res) => {
         };
       }
 
-      // CLOZE
       if (q.question_type === "comprehension_cloze") {
         return {
           id: q.id,
@@ -547,7 +559,6 @@ export const startQuiz = async (req, res) => {
         };
       }
 
-      // NORMAL
       return {
         id: q.id,
         question_text: q.question_text,
@@ -663,12 +674,16 @@ export const startDailyQuiz = async (req, res) => {
     }
 
     // ============================================
-    // 4️⃣ Fill remaining randomly
+    // 4️⃣ Fill remaining randomly (NO DUPLICATES)
     // ============================================
 
     const remaining = qpd - collectedQuestions.length;
 
     if (remaining > 0) {
+
+      const existingIds = collectedQuestions.length
+        ? collectedQuestions.map(q => q.id)
+        : [0];
 
       const extraRes = await pool.query(
         `
@@ -676,10 +691,11 @@ export const startDailyQuiz = async (req, res) => {
         FROM questions
         WHERE grade_id = $1
         AND subject_id = ANY($2::int[])
+        AND id != ALL($4::int[])
         ORDER BY random()
         LIMIT $3
         `,
-        [gradeId, subjects, remaining]
+        [gradeId, subjects, remaining, existingIds]
       );
 
       collectedQuestions = [
@@ -708,7 +724,7 @@ export const startDailyQuiz = async (req, res) => {
         };
       }
 
-      // COMPREHENSION GRAMMER
+      // GRAMMAR CLOZE
       if (q.question_type === "grammar_cloze") {
         return {
           id: q.id,
@@ -722,7 +738,7 @@ export const startDailyQuiz = async (req, res) => {
         };
       }
 
-      // NEW CLOZE TYPE
+      // COMPREHENSION CLOZE
       if (q.question_type === "comprehension_cloze") {
         return {
           id: q.id,
@@ -1018,11 +1034,14 @@ export const startbigQuiz = async (req, res) => {
       FROM questions
       WHERE question_type = 'normal'
       AND NOT (id = ANY($1::int[]))
-      ${subjects?.length ? `AND subject_id = ANY($2::int[])` : ``}
+      AND NOT (id = ANY($2::int[]))
+      ${subjects?.length ? `AND subject_id = ANY($3::int[])` : ``}
       ORDER BY random()
       LIMIT ${NORMAL_COUNT}
       `,
-      subjects?.length ? [answeredIds, subjects] : [answeredIds]
+      subjects?.length
+        ? [answeredIds, selectedQuestions.map(q => q.id), subjects]
+        : [answeredIds, selectedQuestions.map(q => q.id)]
     );
 
     selectedQuestions.push(...normalRes.rows);
@@ -1036,11 +1055,14 @@ export const startbigQuiz = async (req, res) => {
       FROM questions
       WHERE question_type = 'editable'
       AND NOT (id = ANY($1::int[]))
-      ${subjects?.length ? `AND subject_id = ANY($2::int[])` : ``}
+      AND NOT (id = ANY($2::int[]))
+      ${subjects?.length ? `AND subject_id = ANY($3::int[])` : ``}
       ORDER BY random()
       LIMIT ${EDITABLE_COUNT}
       `,
-      subjects?.length ? [answeredIds, subjects] : [answeredIds]
+      subjects?.length
+        ? [answeredIds, selectedQuestions.map(q => q.id), subjects]
+        : [answeredIds, selectedQuestions.map(q => q.id)]
     );
 
     selectedQuestions.push(...editableRes.rows);
@@ -1054,11 +1076,14 @@ export const startbigQuiz = async (req, res) => {
       FROM questions
       WHERE question_type = 'grammar_cloze'
       AND NOT (id = ANY($1::int[]))
-      ${subjects?.length ? `AND subject_id = ANY($2::int[])` : ``}
+      AND NOT (id = ANY($2::int[]))
+      ${subjects?.length ? `AND subject_id = ANY($3::int[])` : ``}
       ORDER BY random()
       LIMIT ${COMPREHENSION_COUNT}
       `,
-      subjects?.length ? [answeredIds, subjects] : [answeredIds]
+      subjects?.length
+        ? [answeredIds, selectedQuestions.map(q => q.id), subjects]
+        : [answeredIds, selectedQuestions.map(q => q.id)]
     );
 
     selectedQuestions.push(...compRes.rows);
@@ -1072,11 +1097,14 @@ export const startbigQuiz = async (req, res) => {
       FROM questions
       WHERE question_type = 'comprehension_cloze'
       AND NOT (id = ANY($1::int[]))
-      ${subjects?.length ? `AND subject_id = ANY($2::int[])` : ``}
+      AND NOT (id = ANY($2::int[]))
+      ${subjects?.length ? `AND subject_id = ANY($3::int[])` : ``}
       ORDER BY random()
       LIMIT ${CLOZE_COUNT}
       `,
-      subjects?.length ? [answeredIds, subjects] : [answeredIds]
+      subjects?.length
+        ? [answeredIds, selectedQuestions.map(q => q.id), subjects]
+        : [answeredIds, selectedQuestions.map(q => q.id)]
     );
 
     selectedQuestions.push(...clozeRes.rows);
@@ -1117,7 +1145,6 @@ export const startbigQuiz = async (req, res) => {
     // =====================================================
     const formatted = selectedQuestions.map(q => {
 
-      // EDITABLE
       if (q.question_type === "editable") {
         return {
           id: q.id,
@@ -1132,7 +1159,6 @@ export const startbigQuiz = async (req, res) => {
         };
       }
 
-      // COMPREHENSION GRAMMER
       if (q.question_type === "grammar_cloze") {
         return {
           id: q.id,
@@ -1146,7 +1172,6 @@ export const startbigQuiz = async (req, res) => {
         };
       }
 
-      // CLOZE
       if (q.question_type === "comprehension_cloze") {
         return {
           id: q.id,
@@ -1159,7 +1184,6 @@ export const startbigQuiz = async (req, res) => {
         };
       }
 
-      // NORMAL
       return {
         id: q.id,
         subject_id: q.subject_id,
@@ -2071,11 +2095,14 @@ export const startMiniQuiz = async (req, res) => {
       FROM questions
       WHERE question_type = 'grammar_cloze'
       AND NOT (id = ANY($1::int[]))
-      ${subjects?.length ? `AND subject_id = ANY($2::int[])` : ``}
+      AND NOT (id = ANY($2::int[]))
+      ${subjects?.length ? `AND subject_id = ANY($3::int[])` : ``}
       ORDER BY random()
       LIMIT ${COMPREHENSION_COUNT}
       `,
-      subjects?.length ? [answeredIds, subjects] : [answeredIds]
+      subjects?.length
+        ? [answeredIds, selectedQuestions.map(q => q.id), subjects]
+        : [answeredIds, selectedQuestions.map(q => q.id)]
     );
 
     selectedQuestions.push(...comprehensionRes.rows);
@@ -2089,11 +2116,14 @@ export const startMiniQuiz = async (req, res) => {
       FROM questions
       WHERE question_type = 'comprehension_cloze'
       AND NOT (id = ANY($1::int[]))
-      ${subjects?.length ? `AND subject_id = ANY($2::int[])` : ``}
+      AND NOT (id = ANY($2::int[]))
+      ${subjects?.length ? `AND subject_id = ANY($3::int[])` : ``}
       ORDER BY random()
       LIMIT ${CLOZE_COUNT}
       `,
-      subjects?.length ? [answeredIds, subjects] : [answeredIds]
+      subjects?.length
+        ? [answeredIds, selectedQuestions.map(q => q.id), subjects]
+        : [answeredIds, selectedQuestions.map(q => q.id)]
     );
 
     selectedQuestions.push(...clozeRes.rows);
@@ -2107,11 +2137,14 @@ export const startMiniQuiz = async (req, res) => {
       FROM questions
       WHERE question_type = 'editable'
       AND NOT (id = ANY($1::int[]))
-      ${subjects?.length ? `AND subject_id = ANY($2::int[])` : ``}
+      AND NOT (id = ANY($2::int[]))
+      ${subjects?.length ? `AND subject_id = ANY($3::int[])` : ``}
       ORDER BY random()
       LIMIT ${EDITABLE_COUNT}
       `,
-      subjects?.length ? [answeredIds, subjects] : [answeredIds]
+      subjects?.length
+        ? [answeredIds, selectedQuestions.map(q => q.id), subjects]
+        : [answeredIds, selectedQuestions.map(q => q.id)]
     );
 
     selectedQuestions.push(...editableRes.rows);
@@ -2125,11 +2158,14 @@ export const startMiniQuiz = async (req, res) => {
       FROM questions
       WHERE question_type = 'normal'
       AND NOT (id = ANY($1::int[]))
-      ${subjects?.length ? `AND subject_id = ANY($2::int[])` : ``}
+      AND NOT (id = ANY($2::int[]))
+      ${subjects?.length ? `AND subject_id = ANY($3::int[])` : ``}
       ORDER BY random()
       LIMIT ${NORMAL_COUNT}
       `,
-      subjects?.length ? [answeredIds, subjects] : [answeredIds]
+      subjects?.length
+        ? [answeredIds, selectedQuestions.map(q => q.id), subjects]
+        : [answeredIds, selectedQuestions.map(q => q.id)]
     );
 
     selectedQuestions.push(...normalRes.rows);
