@@ -406,16 +406,24 @@ export const sendNotificationToUser = async (userId, notificationData) => {
 // utc time.....
 export const startReminderCron = () => {
 
+  console.log("🚀 Starting reminder cron service...");
+
   // Run every minute
   cron.schedule('* * * * *', async () => {
 
     try {
 
+      console.log("--------------------------------------------------");
+      console.log("⏳ Cron triggered");
+
       const currentTime = new Date();
+      console.log("🕒 UTC Time:", currentTime.toISOString());
 
       // Convert UTC → IST
       const istOffsetMinutes = 5 * 60 + 30;
       const istTime = new Date(currentTime.getTime() + istOffsetMinutes * 60000);
+
+      console.log("🇮🇳 IST Time:", istTime.toISOString());
 
       const hours = istTime.getHours().toString().padStart(2, '0');
       const minutes = istTime.getMinutes().toString().padStart(2, '0');
@@ -423,6 +431,8 @@ export const startReminderCron = () => {
       const currentTimeStr = `${hours}:${minutes}:00`;
 
       console.log(`⏰ Checking reminders for IST ${currentTimeStr}`);
+
+      console.log("🔎 Running DB query...");
 
       const result = await pool.query(
         `SELECT 
@@ -437,10 +447,12 @@ export const startReminderCron = () => {
         [`${hours}:${minutes}`]
       );
 
+      console.log("📊 DB Result Rows:", result.rows.length);
+
       const users = result.rows;
 
       if (users.length === 0) {
-        console.log("No users for this time");
+        console.log("⚠️ No users found for this reminder time");
         return;
       }
 
@@ -448,9 +460,18 @@ export const startReminderCron = () => {
 
       for (const user of users) {
 
-        if (!user.fcm_token) continue;
+        console.log(`👤 Processing user ID: ${user.id}`);
+        console.log(`👤 User Name: ${user.name}`);
+        console.log(`📱 FCM Token: ${user.fcm_token}`);
 
-        await sendNotificationToUser(user.id, {
+        if (!user.fcm_token) {
+          console.log(`⚠️ User ${user.id} has no FCM token. Skipping.`);
+          continue;
+        }
+
+        console.log(`📤 Sending notification to user ${user.id}`);
+
+        const notificationResult = await sendNotificationToUser(user.id, {
           title: '📚 Daily Quiz Reminder',
           message: `Hi ${user.name}! Time for your daily learning session. Let's keep your streak going! 🔥`,
           type: 'reminder',
@@ -458,9 +479,11 @@ export const startReminderCron = () => {
           url: '/quiz',
         });
 
+        console.log("📬 Notification result:", notificationResult);
+
       }
 
-      console.log(`✅ Sent ${users.length} reminder notifications`);
+      console.log(`✅ Finished sending notifications`);
 
     } catch (error) {
 
