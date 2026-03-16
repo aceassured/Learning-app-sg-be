@@ -1643,6 +1643,7 @@ export const reviewSession = async (req, res) => {
             type: "editable",
             question_id: row.question_id,
             position: blank.position,
+            incorrect_word: blank.incorrect_word,
             correct_word: blank.correct_word,
             user_answer: userWord,
             is_correct: isCorrect,
