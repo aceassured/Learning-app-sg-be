@@ -2557,39 +2557,51 @@ export const adminResetPassword = async (req, res) => {
       [otp, expiryTime, admin.id]
     );
 
-    // const transporter = nodemailer.createTransport({
-    //   service: "gmail",
-    //   auth: {
-    //     user: process.env.EMAIL_USER,
-    //     pass: process.env.EMAIL_PASS,
-    //   },
-    // });
+    // ================= MAIL PART FIXED =================
 
-    const resend = new Resend(process.env.RESEND_API_KEY);
+    const url = "https://api.zeptomail.in/v1.1/email";
 
-    const mailOptions = {
-      from: `Ace Hive Admin Panel <no-reply@kumbuckalpepper.com>`,
-      to: email,
+    const client = new SendMailClient({
+      url,
+      token: process.env.ZEPTO_MAIL_TOKEN
+    });
+
+    await client.sendMail({
+      from: {
+        address: process.env.ZEPTO_FROM_EMAIL,
+        name: "Ace Hive Admin Panel"
+      },
+      to: [
+        {
+          email_address: {
+            address: email
+          }
+        }
+      ],
       subject: "Admin Password Reset OTP",
-      html: `
+      htmlbody: `
         <h2>Password Reset Request</h2>
         <p>Your OTP for password reset is: <b>${otp}</b></p>
         <p>This OTP will expire in <b>2 minutes</b>.</p>
       `,
-    };
+    });
 
-    await resend.emails.send(mailOptions);
+    // ===================================================
 
     return res.status(200).json({
       success: true,
       message: "OTP sent successfully to your email",
     });
+
   } catch (error) {
+
     console.error("❌ Admin reset password error:", error);
+
     return res.status(500).json({
       success: false,
       message: "Internal server error",
     });
+
   }
 };
 
