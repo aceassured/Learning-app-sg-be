@@ -3756,22 +3756,34 @@ export const userResetPassword = async (req, res) => {
     //   },
     // });
 
-    const resend = new Resend(process.env.RESEND_API_KEY);
+    const url = "https://api.zeptomail.in/v1.1/email";
 
-    const mailOptions = {
-      from: `Ace Hive <no-reply@kumbuckalpepper.com>`,
-      to: email,
+    const client = new SendMailClient({
+      url,
+      token: process.env.ZEPTO_MAIL_TOKEN
+    });
+    
+    console.log("Sending OTP email to:", email);
+    
+    await client.sendMail({
+      from: {
+        address: process.env.ZEPTO_FROM_EMAIL,
+        name: "AceHive"
+      },
+      to: [
+        {
+          email_address: {
+            address: email
+          }
+        }
+      ],
       subject: "User Password Reset OTP",
-      html: `
+      htmlbody: `
         <h2>Password Reset Request</h2>
         <p>Your OTP for password reset is: <b>${otp}</b></p>
         <p>This OTP will expire in <b>2 minutes</b>.</p>
-      `,
-    };
-
-    console.log("Sending OTP email to:", email, "resend:", process.env.RESEND_API_KEY);
-
-    await resend.emails.send(mailOptions);
+      `
+    });
 
     return res.status(200).json({
       success: true,
