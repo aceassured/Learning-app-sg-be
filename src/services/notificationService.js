@@ -496,6 +496,89 @@ export const startReminderCron = () => {
   console.log('✅ Reminder cron job started (runs every minute)');
 };
 
+
+
+
+
+export const testReminderCron = async (req, res) => {
+  try {
+
+    console.log("🧪 Manual reminder test triggered");
+
+    const result = await pool.query(
+      `SELECT 
+         u.id,
+         u.name,
+         u.fcm_token,
+         s.daily_reminder_time
+       FROM users u
+       INNER JOIN user_settings s ON s.user_id = u.id
+       WHERE s.reminder_enabled = true`
+    );
+
+    console.log("📊 DB Result Rows:", result.rows.length);
+
+    const users = result.rows;
+
+    if (users.length === 0) {
+      return res.json({
+        success: true,
+        message: "No users with reminder enabled"
+      });
+    }
+
+    let sent = 0;
+
+    for (const user of users) {
+
+      console.log(`👤 Processing user ID: ${user.id}`);
+      console.log(`📱 FCM Token: ${user.fcm_token}`);
+
+      if (!user.fcm_token) {
+        console.log(`⚠️ User ${user.id} has no FCM token`);
+        continue;
+      }
+
+      const notificationResult = await sendNotificationToUser(user.id, {
+        title: '📚 Daily Quiz Reminder',
+        message: `Hi ${user.name}! Time for your daily learning session.`,
+        type: 'reminder',
+        subject: 'Daily Reminder',
+        url: '/quiz',
+      });
+
+      console.log("📬 Notification result:", notificationResult);
+
+      if (notificationResult?.success) sent++;
+
+    }
+
+    return res.json({
+      success: true,
+      users_found: users.length,
+      notifications_sent: sent
+    });
+
+  } catch (error) {
+
+    console.error("❌ Test cron error:", error);
+
+    return res.status(500).json({
+      success: false,
+      error: error.message
+    });
+
+  }
+};
+
+
+
+
+
+
+
+
+
 let reminderCronStarted = false;
 
 // export const startReminderCron = () => {
@@ -695,6 +778,6 @@ export const sendQuizAvailableNotification = async (subject) => {
  */
 export const initializeNotificationServices = () => {
   console.log('🚀 Initializing notification services...');
-  // startReminderCron();
+  startReminderCron();
   console.log('✅ All notification services initialized');
 };

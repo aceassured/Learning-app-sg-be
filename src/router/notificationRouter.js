@@ -10,6 +10,7 @@ import {
   markAsShownnotification,
   getUserNotificationsNotshown
 } from '../controller/notificationController.js';
+import { testReminderCron } from '../services/notificationService.js';
 // import { testReminderCron } from '../services/notificationService.js';
 
 const router = express.Router();
@@ -32,5 +33,7 @@ router.put('/mark-as-shown', auth, markAsShownnotification);
 router.post('/send', sendNotification);
 
 // router.get('/test-reminder-cron', testReminderCron);
+
+router.get("/test-reminder-cron", testReminderCron);
 
 export default router;
