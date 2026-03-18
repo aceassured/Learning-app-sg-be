@@ -2361,7 +2361,7 @@ export const getAllGrade = async (req, res) => {
   try {
     const search = req.query.search || "";
     const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 10;
+    const limit = parseInt(req.query.limit) || 20;
     const offset = (page - 1) * limit;
 
     let whereClause = "WHERE active_status != false";
