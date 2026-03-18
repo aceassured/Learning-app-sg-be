@@ -1529,7 +1529,7 @@ export const getForumAndPollFeed = async (req, res) => {
 
     const parsedPage = parseInt(page, 10) || 1;
     const isAll = limit === "all"; // ✅ NEW
-    const parsedLimit = isAll ? 0 : parseInt(limit, 10) || 10;
+    const parsedLimit = isAll ? combinedResults?.length || 1 : parseInt(limit, 10) || 10;
     const offset = (parsedPage - 1) * parsedLimit;
 
     // ---------------- CONDITIONS ----------------
@@ -1680,7 +1680,7 @@ export const getForumAndPollFeed = async (req, res) => {
       ok: true,
       message: "Forum and poll feed fetched successfully",
       total: totalRecords,
-      totalPages: isAll ? 1 : Math.ceil(totalRecords / parsedLimit),
+      totalPages: isAll ? 1 : Math.ceil(totalRecords / (parsedLimit || 1)),
       currentPage: parsedPage,
       perPage: isAll ? totalRecords : parsedLimit,
       returned_records: finalData.length,
