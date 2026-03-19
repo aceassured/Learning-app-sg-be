@@ -325,7 +325,7 @@ WHERE q.topic_id = $2
  */
 export const sendNotificationToUser = async (userId, notificationData) => {
   try {
-    // 1. ✅ Prevent duplicate notifications (VERY IMPORTANT)
+    // ✅ Prevent duplicate (same day)
     const exists = await pool.query(
       `SELECT id FROM notifications 
        WHERE user_id = $1 
@@ -344,64 +344,44 @@ export const sendNotificationToUser = async (userId, notificationData) => {
       return { success: true, skipped: true };
     }
 
-    // 2. Save notification to DB
-    const query = `
-      INSERT INTO notifications (user_id, message, type, subject, is_read, is_viewed) 
-      VALUES ($1, $2, $3, $4, false, false) 
-      RETURNING *
-    `;
-    const values = [
-      userId,
-      notificationData.message,
-      notificationData.type || 'general',
-      notificationData.subject || null,
-    ];
+    // ✅ Save notification
+    const result = await pool.query(
+      `INSERT INTO notifications (user_id, message, type, subject, is_read, is_viewed) 
+       VALUES ($1, $2, $3, $4, false, false) 
+       RETURNING *`,
+      [
+        userId,
+        notificationData.message,
+        notificationData.type || 'general',
+        notificationData.subject || null,
+      ]
+    );
 
-    const result = await pool.query(query, values);
+    const notification = result.rows[0];
 
-    const notification = {
-      ...result.rows[0],
-      read: false,
-      viewed: false,
-      time_section: 'today',
-    };
-
-    console.log(`📝 Notification saved for user ${userId}`);
-
-    // ❌ REMOVED WebSocket completely (as you requested)
-    // io.emit removed
-
-    // 3. Get FCM token
-    const userResult = await pool.query(
+    // ✅ Get FCM token
+    const userRes = await pool.query(
       'SELECT fcm_token FROM users WHERE id = $1',
       [userId]
     );
 
-    const fcmToken = userResult.rows[0]?.fcm_token;
+    const fcmToken = userRes.rows[0]?.fcm_token;
 
-    // 4. Send push notification (ONLY ONE SOURCE NOW)
-    if (fcmToken) {
-      const pushResult = await sendPushNotification(fcmToken, {
-        title: notificationData.title || 'Acehive',
-        message: notificationData.message,
-        type: notificationData.type,
-        subject: notificationData.subject,
-        url: notificationData.url || '/',
-      });
-
-      // Remove invalid token
-      if (pushResult?.shouldDelete) {
-        await pool.query(
-          'UPDATE users SET fcm_token = NULL WHERE id = $1',
-          [userId]
-        );
-        console.log(`🗑️ Removed invalid FCM token for user ${userId}`);
-      }
-
-      console.log(`📲 Push notification sent to user ${userId}`);
-    } else {
+    if (!fcmToken) {
       console.log(`⚠️ No FCM token for user ${userId}`);
+      return { success: true, notification };
     }
+
+    // ✅ SEND ONLY DATA (NO notification field)
+    await sendPushNotification(fcmToken, {
+      title: notificationData.title || 'Acehive',
+      message: notificationData.message,
+      type: notificationData.type,
+      subject: notificationData.subject,
+      url: notificationData.url || '/',
+    });
+
+    console.log(`📲 Push sent to user ${userId}`);
 
     return { success: true, notification };
 
