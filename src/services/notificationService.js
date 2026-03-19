@@ -435,9 +435,10 @@ export const startReminderCron = () => {
       const currentTimeStr = `${hours}:${minutes}:00`;
 
       console.log(`⏰ Checking reminders for IST ${currentTimeStr}`);
-
       console.log("🔎 Running DB query...");
+      console.log("📌 Query param:", currentTimeStr);
 
+      // ✅ FIXED QUERY (TIME RANGE instead of exact match)
       const result = await pool.query(
         `SELECT 
            u.id,
@@ -447,8 +448,9 @@ export const startReminderCron = () => {
          FROM users u
          INNER JOIN user_settings s ON s.user_id = u.id
          WHERE s.reminder_enabled = true
-         AND TO_CHAR(s.daily_reminder_time, 'HH24:MI') = $1`,
-        [`${hours}:${minutes}`]
+         AND s.daily_reminder_time >= $1::time
+         AND s.daily_reminder_time < ($1::time + INTERVAL '1 minute')`,
+        [currentTimeStr]
       );
 
       console.log("📊 DB Result Rows:", result.rows.length);
@@ -484,15 +486,12 @@ export const startReminderCron = () => {
         });
 
         console.log("📬 Notification result:", notificationResult);
-
       }
 
       console.log(`✅ Finished sending notifications`);
 
     } catch (error) {
-
       console.error('❌ Error in reminder cron job:', error);
-
     }
 
   });
