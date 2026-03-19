@@ -345,14 +345,14 @@ export const sendNotificationToUser = async (userId, notificationData) => {
       time_section: 'today',
     };
 
-    // // 2. Check if user is online (WebSocket)
-    // const isOnline = global.onlineUsers && global.onlineUsers[userId];
+    // 2. Check if user is online (WebSocket)
+    const isOnline = global.onlineUsers && global.onlineUsers[userId];
 
-    // if (isOnline) {
-    //   // Send via WebSocket (real-time)
-    //   io.to(global.onlineUsers[userId]).emit('notification', notification);
-    //   console.log(`📨 Real-time notification sent to user ${userId}`);
-    // }
+    if (isOnline) {
+      // Send via WebSocket (real-time)
+      io.to(global.onlineUsers[userId]).emit('notification', notification);
+      console.log(`📨 Real-time notification sent to user ${userId}`);
+    }
 
     if (isOnline) {
       io.to(global.onlineUsers[userId]).emit('notification', notification);
