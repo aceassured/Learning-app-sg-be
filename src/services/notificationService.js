@@ -325,7 +325,26 @@ WHERE q.topic_id = $2
  */
 export const sendNotificationToUser = async (userId, notificationData) => {
   try {
-    // 1. Save notification to database
+    // 1. ✅ Prevent duplicate notifications (VERY IMPORTANT)
+    const exists = await pool.query(
+      `SELECT id FROM notifications 
+       WHERE user_id = $1 
+       AND type = $2 
+       AND subject = $3 
+       AND DATE(created_at) = CURRENT_DATE`,
+      [
+        userId,
+        notificationData.type || 'general',
+        notificationData.subject || null,
+      ]
+    );
+
+    if (exists.rows.length > 0) {
+      console.log(`⚠️ Notification already sent to user ${userId}`);
+      return { success: true, skipped: true };
+    }
+
+    // 2. Save notification to DB
     const query = `
       INSERT INTO notifications (user_id, message, type, subject, is_read, is_viewed) 
       VALUES ($1, $2, $3, $4, false, false) 
@@ -337,7 +356,9 @@ export const sendNotificationToUser = async (userId, notificationData) => {
       notificationData.type || 'general',
       notificationData.subject || null,
     ];
+
     const result = await pool.query(query, values);
+
     const notification = {
       ...result.rows[0],
       read: false,
@@ -345,20 +366,12 @@ export const sendNotificationToUser = async (userId, notificationData) => {
       time_section: 'today',
     };
 
-    // 2. Check if user is online (WebSocket)
-    const isOnline = global.onlineUsers && global.onlineUsers[userId];
+    console.log(`📝 Notification saved for user ${userId}`);
 
-    if (isOnline) {
-      // Send via WebSocket (real-time)
-      io.to(global.onlineUsers[userId]).emit('notification', notification);
-      console.log(`📨 Real-time notification sent to user ${userId}`);
-    }
+    // ❌ REMOVED WebSocket completely (as you requested)
+    // io.emit removed
 
-    if (isOnline) {
-      io.to(global.onlineUsers[userId]).emit('notification', notification);
-    }
-
-    // 3. Get user's FCM token
+    // 3. Get FCM token
     const userResult = await pool.query(
       'SELECT fcm_token FROM users WHERE id = $1',
       [userId]
@@ -366,7 +379,7 @@ export const sendNotificationToUser = async (userId, notificationData) => {
 
     const fcmToken = userResult.rows[0]?.fcm_token;
 
-    // 4. Send push notification (works even if offline)
+    // 4. Send push notification (ONLY ONE SOURCE NOW)
     if (fcmToken) {
       const pushResult = await sendPushNotification(fcmToken, {
         title: notificationData.title || 'Acehive',
@@ -376,26 +389,22 @@ export const sendNotificationToUser = async (userId, notificationData) => {
         url: notificationData.url || '/',
       });
 
-      // If token is invalid, remove it
-      if (pushResult.shouldDelete) {
-        await pool.query('UPDATE users SET fcm_token = NULL WHERE id = $1', [userId]);
+      // Remove invalid token
+      if (pushResult?.shouldDelete) {
+        await pool.query(
+          'UPDATE users SET fcm_token = NULL WHERE id = $1',
+          [userId]
+        );
         console.log(`🗑️ Removed invalid FCM token for user ${userId}`);
       }
 
-      console.log(
-        isOnline
-          ? `✅ Notification sent via WebSocket + Push to user ${userId}`
-          : `✅ Push notification sent to offline user ${userId}`
-      );
+      console.log(`📲 Push notification sent to user ${userId}`);
     } else {
-      console.log(
-        isOnline
-          ? `✅ Real-time notification sent (no FCM token)`
-          : `⚠️ User ${userId} is offline and has no FCM token`
-      );
+      console.log(`⚠️ No FCM token for user ${userId}`);
     }
 
     return { success: true, notification };
+
   } catch (error) {
     console.error('❌ Error sending notification:', error);
     return { success: false, error: error.message };
